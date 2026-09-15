@@ -3,8 +3,9 @@
 ## Group Members
 
 - Matt Morris [@mmattbtw](https://github.com/mmattbtw)
-- Jack Stefl
+- Jack Stefl 
 - Cameron Sapienza
+- Jesse Tomlin [@ChaosSnakey](https://github.com/ChaosSnakey)
 
 > [!TIP]
 > Add your name to the above list if you are not already included.
