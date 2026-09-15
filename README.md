@@ -1,3 +1,7 @@
 # disquisition
 
-#Jack Stefl
+
+## Group Members
+- Matt Morris [@mmattbtw](https://github.com/mmattbtw)
+- Jack Stefl
+
