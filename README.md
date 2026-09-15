@@ -1,3 +1,4 @@
 # disquisition
 
-#Jack Stefl
+#Jack Stefli
+#Cameron Sapienza
