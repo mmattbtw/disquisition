@@ -1,4 +1,6 @@
 # disquisition
 
-#Jack Stefli
-#Cameron Sapienza
+## Group Members
+- Matt Morris [@mmattbtw](https://github.com/mmattbtw)
+- Jack Stefl
+- Cameron Sapienza
