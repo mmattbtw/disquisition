@@ -13,6 +13,7 @@ struct StoredMessage {
     std::int64_t timestamp = 0;
     std::string sender;
     std::string body;
+    std::string colour;
 };
 
 // Thin wrapper around the handful of SQLite calls the server needs. The
@@ -25,22 +26,16 @@ public:
     Database& operator=(const Database&) = delete;
     ~Database();
 
-    void add(std::int64_t timestamp, const std::string& sender, const std::string& body);
+    void add(std::int64_t timestamp, const std::string& sender, const std::string& body,
+             const std::string& colour);
 
     // Most recent `limit` messages, oldest first (ready to replay to a client).
     std::vector<StoredMessage> recent(std::size_t limit);
-
-    // Records a user's chosen display colour; returns true if one is now on
-    // file (false when `colour` is empty, which clears it).
-    void setColor(const std::string& name, const std::string& colour);
-    std::string colorOf(const std::string& name) const;
 
 private:
     sqlite3* db_ = nullptr;
     sqlite3_stmt* insert_ = nullptr;
     sqlite3_stmt* select_ = nullptr;
-    sqlite3_stmt* colorInsert_ = nullptr;
-    sqlite3_stmt* colorSelect_ = nullptr;
 };
 
 }  // namespace chat

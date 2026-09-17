@@ -53,7 +53,6 @@ private:
 
     void handleLogin(Connection& connection, const Message& message);
     void handleStore(Connection& connection, const Message& message);
-    void handleSetColor(Connection& connection, const Message& message);
     void handleFetchHistory(Connection& connection);
     void sendHistory(Connection& connection);
     void reject(Connection& connection, const std::string& reason);

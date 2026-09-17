@@ -54,7 +54,6 @@ private:
     std::size_t maxScroll() const;
     const char* prompt() const;
     int pairFor(const std::string& colour) const;
-    int colourFor(const std::string& sender) const;
 
     void drainIncoming();
     void drainPeers();
@@ -93,9 +92,10 @@ private:
     std::string name_;
     std::vector<std::string> users_;
     std::vector<std::string> pending_;
-    // Overridden display colours keyed by user name. Users without an entry
-    // fall back to a colour derived from a stable hash of their name.
-    std::map<std::string, std::string> colours_;
+    std::string colour_ = "pink";
+    // Numeric xterm-256 choices get a colour pair only when someone uses one.
+    mutable std::map<std::string, int> customColourPairs_;
+    mutable int nextCustomColourPair_ = 27;
 
     // (sender, timestamp, body) triples already shown, so a message arriving
     // both through history and over the mesh is only displayed once.

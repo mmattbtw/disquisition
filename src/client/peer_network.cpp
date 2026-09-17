@@ -249,18 +249,9 @@ bool PeerNetwork::settled() const {
     return true;
 }
 
-void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body) {
-    const Message message {MsgType::PeerChat, {myName_, std::to_string(timestamp), body}};
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : peers_) {
-        if (entry.second.connection != nullptr) {
-            entry.second.connection->send(message);
-        }
-    }
-}
-
-void PeerNetwork::sendColor(const std::string& colour) {
-    const Message message {MsgType::PeerColor, {myName_, colour}};
+void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body,
+                           const std::string& colour) {
+    const Message message {MsgType::PeerChat, {myName_, std::to_string(timestamp), body, colour}};
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : peers_) {
         if (entry.second.connection != nullptr) {
@@ -429,14 +420,14 @@ void PeerNetwork::drainPending() {
                 pushEvent(Event::Kind::Join, remote, "", 0);
                 continue;
             }
-            if (message.type == MsgType::PeerChat && message.fields.size() >= 3) {
+            if (message.type == MsgType::PeerChat && message.fields.size() >= 4) {
                 std::int64_t timestamp = 0;
                 const std::string body = sanitizeBody(message.fields[2]);
-                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty()) {
-                    pushEvent(Event::Kind::Chat, remote, body, timestamp);
+                const std::string colour = sanitizeBody(message.fields[3]);
+                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty() &&
+                    isValidColor(colour)) {
+                    pushEvent(Event::Kind::Chat, remote, body, timestamp, colour);
                 }
-            } else if (message.type == MsgType::PeerColor && message.fields.size() >= 2) {
-                pushEvent(Event::Kind::Color, remote, sanitizeBody(message.fields[1]), 0);
             }
         }
 
@@ -457,14 +448,14 @@ void PeerNetwork::drainPeers() {
         }
         Message message;
         while (peer.connection->poll(message)) {
-            if (message.type == MsgType::PeerChat && message.fields.size() >= 3) {
+            if (message.type == MsgType::PeerChat && message.fields.size() >= 4) {
                 std::int64_t timestamp = 0;
                 const std::string body = sanitizeBody(message.fields[2]);
-                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty()) {
-                    pushEvent(Event::Kind::Chat, peer.name, body, timestamp);
+                const std::string colour = sanitizeBody(message.fields[3]);
+                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty() &&
+                    isValidColor(colour)) {
+                    pushEvent(Event::Kind::Chat, peer.name, body, timestamp, colour);
                 }
-            } else if (message.type == MsgType::PeerColor && message.fields.size() >= 2) {
-                pushEvent(Event::Kind::Color, peer.name, sanitizeBody(message.fields[1]), 0);
             }
         }
         if (peer.connection->failed()) {
@@ -509,7 +500,7 @@ void PeerNetwork::enqueueDial(const std::string& name) {
 }
 
 void PeerNetwork::pushEvent(Event::Kind kind, const std::string& name, const std::string& body,
-                            std::int64_t timestamp) {
+                            std::int64_t timestamp, const std::string& colour) {
     if (events_.size() >= kMaxQueuedEvents) {
         events_.pop_front();
     }
@@ -518,6 +509,7 @@ void PeerNetwork::pushEvent(Event::Kind kind, const std::string& name, const std
     event.timestamp = timestamp;
     event.name = name;
     event.body = body;
+    event.colour = colour;
     events_.push_back(std::move(event));
 }
 

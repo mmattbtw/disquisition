@@ -6,7 +6,6 @@
 #include <cstring>
 #include <ctime>
 #include <chrono>
-#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -28,15 +27,13 @@ constexpr int kColourSystem = 3;
 constexpr int kColourHeader = 4;
 constexpr int kColourGood = 5;
 constexpr int kColourBad = 6;
-// Your own sent lines, drawn bold-white so they never match a peer's colour.
-constexpr int kColourOwnMsg = 7;
 // First colour pair number used for per-user palette colours.
 constexpr int kFirstUserColour = 20;
 
 // Maps a palette name to the basic ncurses foreground used on limited terminals.
 // Order must line up with kColorNames.
 constexpr int kBasicUserColourValues[] = {
-    COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE};
+    COLOR_MAGENTA, COLOR_CYAN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_BLUE};
 
 // Soft xterm-256 colours keep names playful without borrowing the neutral used
 // for system notices. The command names stay familiar even though the rendered
@@ -45,35 +42,6 @@ constexpr int kCandyUserColourValues[] = {211, 121, 229, 111, 183, 159, 216};
 constexpr int kCandySystemColour = 250;
 
 volatile std::sig_atomic_t gInterrupted = 0;
-
-// A stable hash of a name so every client agrees on a user's default colour
-// without needing to ask the server or a peer.
-std::string hashColour(const std::string& name) {
-    std::uint64_t hash = 1469598103934665603ULL;  // FNV-1a offset basis
-    for (const unsigned char character : name) {
-        hash ^= character;
-        hash *= 1099511628211ULL;
-    }
-    return kColorNames[hash % kColorCount];
-}
-
-// A friendly default handle for someone who did not pass --name.
-std::string randomName() {
-    constexpr const char* kAdjectives[] = {"Brave",   "Cosmic", "Crimson", "Dapper",
-                                           "Electric", "Golden", "Jolly",   "Midnight",
-                                           "Neon",    "Nimble", "Quiet",   "Solar",
-                                           "Swift",   "Velvet", "Witty",   "Zesty"};
-    constexpr const char* kNouns[] = {"Badger", "Breeze", "Comet",  "Dolphin", "Echo",
-                                      "Falcon", "Galaxy", "Lynx",   "Moose",   "Nimbus",
-                                      "Nova",   "Otter",  "Panda",  "Raven",   "Tiger",
-                                      "Wombat"};
-    static thread_local std::mt19937 generator(
-        static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::uniform_int_distribution<std::size_t> adjective(0,
-                                                         sizeof(kAdjectives) / sizeof(*kAdjectives) - 1);
-    std::uniform_int_distribution<std::size_t> noun(0, sizeof(kNouns) / sizeof(*kNouns) - 1);
-    return std::string(kAdjectives[adjective(generator)]) + "_" + kNouns[noun(generator)];
-}
 
 void handleInterrupt(int) {
     gInterrupted = 1;
@@ -201,7 +169,6 @@ bool Tui::start() {
         init_pair(kColourHeader, COLOR_BLACK, COLOR_CYAN);
         init_pair(kColourGood, COLOR_GREEN, -1);
         init_pair(kColourBad, COLOR_RED, -1);
-        init_pair(kColourOwnMsg, COLOR_WHITE, -1);
         for (std::size_t index = 0; index < kColorCount; ++index) {
             const int colour = hasCandyPalette ? kCandyUserColourValues[index]
                                                : kBasicUserColourValues[index];
@@ -243,9 +210,6 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     advertiseHost_ = advertiseHost;
     useRelay_ = useRelay;
     name_ = trim(initialName);
-    if (name_.empty()) {
-        name_ = randomName();
-    }
 
     if (!start()) {
         std::fprintf(stderr, "cannot initialise terminal\n");
@@ -473,17 +437,11 @@ void Tui::drawMessages() {
         }
         const Row& row = rows_[index];
         if (has_colors()) {
-            if (row.colour == kColourOwnMsg) {
-                wattron(messages_, A_BOLD);
-            }
             wattron(messages_, COLOR_PAIR(row.colour));
         }
         mvwaddnstr(messages_, y, 0, row.text.c_str(), width_);
         if (has_colors()) {
             wattroff(messages_, COLOR_PAIR(row.colour));
-            if (row.colour == kColourOwnMsg) {
-                wattroff(messages_, A_BOLD);
-            }
         }
         wclrtoeol(messages_);
     }
@@ -554,19 +512,29 @@ void Tui::appendSystem(const std::string& text, int colour) {
 
 int Tui::pairFor(const std::string& colour) const {
     for (std::size_t index = 0; index < kColorCount; ++index) {
-        if (colour == kColorNames[index]) {
+        if (colour == kColorNames[index] || colour == kLegacyColorNames[index]) {
             return kFirstUserColour + static_cast<int>(index);
         }
     }
-    return kColourOther;
-}
 
-int Tui::colourFor(const std::string& sender) const {
-    const auto it = colours_.find(sender);
-    if (it != colours_.end()) {
-        return pairFor(it->second);
+    int colourIndex = 0;
+    if (!parseColorIndex(colour, colourIndex) || isReservedSystemColor(colourIndex) ||
+        !has_colors() || COLORS < 256 || colourIndex >= COLORS) {
+        return kColourOther;
     }
-    return pairFor(hashColour(sender));
+    const auto existing = customColourPairs_.find(colour);
+    if (existing != customColourPairs_.end()) {
+        return existing->second;
+    }
+    if (nextCustomColourPair_ >= COLOR_PAIRS) {
+        return kColourOther;
+    }
+    const int pair = nextCustomColourPair_++;
+    if (init_pair(static_cast<short>(pair), static_cast<short>(colourIndex), -1) == ERR) {
+        return kColourOther;
+    }
+    customColourPairs_[colour] = pair;
+    return pair;
 }
 
 void Tui::rebuildRows() {
@@ -612,12 +580,12 @@ void Tui::drainIncoming() {
                     historyOpen_ = true;
                     appendSystem("recent messages");
                 }
-                if (message.fields.size() < 3) {
+                if (message.fields.size() < 4 || !isValidColor(message.fields[3])) {
                     break;
                 }
                 if (remember(message.fields[1], message.fields[0], message.fields[2])) {
                     append(formatTime(message.fields[0]) + " " + message.fields[1] + ": ",
-                           message.fields[2], colourFor(message.fields[1]));
+                           message.fields[2], pairFor(message.fields[3]));
                 }
                 break;
             }
@@ -666,42 +634,17 @@ void Tui::drainIncoming() {
             case MsgType::Users:
                 users_ = message.fields;
                 break;
-            case MsgType::Color:
-                if (message.fields.size() >= 2 && isValidColor(message.fields[1])) {
-                    const std::string& sender = message.fields[0];
-                    if (colours_[sender] != message.fields[1]) {
-                        colours_[sender] = message.fields[1];
-                        if (sender != name_) {
-                            appendSystem(sender + " chose color " + message.fields[1]);
-                        }
-                    }
-                }
-                break;
             // Through a relay every peer arrives over the one relay socket, so
             // chat is attributed from the frame's sender field instead of the
             // connection it came in on.
             case MsgType::PeerChat: {
-                if (!useRelay_ || message.fields.size() < 3) {
+                if (!useRelay_ || message.fields.size() < 4 || !isValidColor(message.fields[3])) {
                     break;
                 }
                 const std::string& sender = message.fields[0];
                 if (remember(sender, message.fields[1], message.fields[2])) {
                     append(formatTime(message.fields[1]) + " " + sender + ": ",
-                           sanitizeBody(message.fields[2]), colourFor(sender));
-                }
-                break;
-            }
-            case MsgType::PeerColor: {
-                if (!useRelay_ || message.fields.size() < 2) {
-                    break;
-                }
-                const std::string& sender = message.fields[0];
-                const std::string colour = message.fields[1];
-                if (isValidColor(colour) && colours_[sender] != colour) {
-                    colours_[sender] = colour;
-                    if (sender != name_) {
-                        appendSystem(sender + " chose color " + colour);
-                    }
+                           sanitizeBody(message.fields[2]), pairFor(message.fields[3]));
                 }
                 break;
             }
@@ -723,7 +666,7 @@ void Tui::drainPeers() {
             case PeerNetwork::Event::Kind::Chat:
                 if (remember(event.name, std::to_string(event.timestamp), event.body)) {
                     append(formatTime(std::to_string(event.timestamp)) + " " + event.name + ": ",
-                           event.body, colourFor(event.name));
+                           event.body, pairFor(event.colour));
                 }
                 break;
             case PeerNetwork::Event::Kind::Join:
@@ -731,14 +674,6 @@ void Tui::drainPeers() {
                 break;
             case PeerNetwork::Event::Kind::Leave:
                 appendSystem("direct link to " + event.name + " is down", kColourBad);
-                break;
-            case PeerNetwork::Event::Kind::Color:
-                if (isValidColor(event.body) && colours_[event.name] != event.body) {
-                    colours_[event.name] = event.body;
-                    if (event.name != name_) {
-                        appendSystem(event.name + " chose color " + event.body);
-                    }
-                }
                 break;
             case PeerNetwork::Event::Kind::Note:
                 appendSystem(event.body, kColourBad);
@@ -767,15 +702,15 @@ void Tui::deliver(const std::string& line) {
     const std::int64_t timestamp = nowSeconds();
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
-    append(formatTime(stamp) + " you: ", body, kColourOwnMsg);
+    append(formatTime(stamp) + " you: ", body, pairFor(colour_));
     if (useRelay_) {
         // The relay fans this out to the mesh on our behalf.
-        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body}});
+        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body, colour_}});
     } else {
-        peers_.sendChat(timestamp, body);
+        peers_.sendChat(timestamp, body, colour_);
     }
     if (serverReady_ && !connection_.failed()) {
-        connection_.send(Message {MsgType::Store, {stamp, body}});
+        connection_.send(Message {MsgType::Store, {stamp, body, colour_}});
     }
 }
 
@@ -943,29 +878,31 @@ void Tui::runCommand(const std::string& command) {
         std::string colour;
         stream >> colour;
         if (colour.empty()) {
-            appendSystem("usage: /color <red|green|yellow|blue|magenta|cyan|white>");
+            appendSystem("usage: /color <pink|mint|butter|periwinkle|lilac|aqua|peach|0-255>");
+            return;
+        }
+        int customIndex = 0;
+        const bool customColour = parseColorIndex(colour, customIndex);
+        if (customColour && (!has_colors() || COLORS < 256)) {
+            appendSystem("custom colors need a 256-color terminal", kColourBad);
+            return;
+        }
+        if (customColour && isReservedSystemColor(customIndex)) {
+            appendSystem("color " + colour + " is reserved for system messages", kColourBad);
             return;
         }
         if (!isValidColor(colour)) {
             appendSystem("unknown color: " + colour +
-                             " (try red, green, yellow, blue, magenta, cyan, white)",
+                             " (try pink, mint, butter, periwinkle, lilac, aqua, peach, or 0-255)",
                          kColourBad);
             return;
         }
-        colours_[name_] = colour;
-        if (useRelay_) {
-            connection_.send(Message {MsgType::PeerColor, {name_, colour}});
-        } else {
-            peers_.sendColor(colour);
-        }
-        if (serverReady_ && !connection_.failed()) {
-            connection_.send(Message {MsgType::SetColor, {colour}});
-        }
+        colour_ = colour;
         appendSystem("you chose color " + colour);
     } else if (name == "/help") {
         appendSystem("/help           show this list");
         appendSystem("/users          list everyone online");
-        appendSystem("/color <name>   set your own display color");
+        appendSystem("/color <shade>  use a candy shade or xterm color 0-255");
         appendSystem("/clear          clear the message pane");
         appendSystem("/quit, /exit    leave the chat");
     } else {

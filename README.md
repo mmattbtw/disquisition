@@ -93,12 +93,13 @@ Then connect one client per person:
 ./build/client --host 127.0.0.1 --port 9000 --name matt --p2p-port 9011
 ```
 
-Without `--name` the client picks a random handle for you. Duplicate names get
-a `-2` suffix. `--p2p-port` pins the peer listener to a fixed port (handy
+Without `--name` the client asks you for a name. Duplicate names get a `-2`
+suffix. `--p2p-port` pins the peer listener to a fixed port (handy
 through a firewall); by default the OS picks a free one and the client reports
-it. Every user is shown in a colour derived from their name, and you can pick
-your own with `/color`. Messages are stored in the `messages` table and the
-last 50 are replayed to everyone who joins.
+it. Messages start pink. Pick another candy shade with `/color mint` (also
+`butter`, `periwinkle`, `lilac`, `aqua`, or `peach`), or use any unreserved
+xterm-256 index with `/color 123`. Each message stores the color it was sent
+with, and the last 50 messages are replayed to everyone who joins.
 
 To join through a relay instead of accepting direct connections (no port
 forward), pass `--relay` with the relay's host and port:

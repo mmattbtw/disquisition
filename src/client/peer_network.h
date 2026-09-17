@@ -23,11 +23,12 @@ namespace chat {
 class PeerNetwork {
 public:
     struct Event {
-        enum class Kind { Chat, Join, Leave, Note, Color };
+        enum class Kind { Chat, Join, Leave, Note };
         Kind kind = Kind::Note;
         std::int64_t timestamp = 0;
         std::string name;
         std::string body;
+        std::string colour;
     };
 
     PeerNetwork() = default;
@@ -86,10 +87,7 @@ public:
 
     // Delivers one frame to every connected peer. A peer that died mid-send
     // surfaces as a Leave event on the next poll().
-    void sendChat(std::int64_t timestamp, const std::string& body);
-
-    // Tells every connected peer our chosen display colour.
-    void sendColor(const std::string& colour);
+    void sendChat(std::int64_t timestamp, const std::string& body, const std::string& colour);
 
     // Pops one event if there is one. New inbound connections are identified
     // and dead peers reaped along the way.
@@ -111,7 +109,7 @@ private:
     void drainPeers();
     void enqueueDial(const std::string& name);
     void pushEvent(Event::Kind kind, const std::string& name, const std::string& body,
-                   std::int64_t timestamp);
+                   std::int64_t timestamp, const std::string& colour = "");
     bool shouldDial(const Peer& peer) const;
     void scanPeersForDialsLocked();
 

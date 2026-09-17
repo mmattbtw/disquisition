@@ -290,10 +290,6 @@ void Relay::replayRoster(User& user) {
                                     {entry.first, entry.second.host, std::to_string(entry.second.port),
                                      entry.second.advertised ? "1" : "0"}});
     }
-    for (const auto& entry : user.colors) {
-        sendToClient(user, Message {MsgType::Color, {entry.first, entry.second}});
-    }
-
     Message users {MsgType::Users, {}};
     if (!user.lastUsers.fields.empty()) {
         users = user.lastUsers;
@@ -347,13 +343,6 @@ void Relay::handleServerMessage(User& user, const Message& message) {
             }
             break;
 
-        case MsgType::Color:
-            if (message.fields.size() >= 2) {
-                user.colors[message.fields[0]] = message.fields[1];
-                sendToClient(user, message);
-            }
-            break;
-
         case MsgType::Users:
             user.lastUsers = message;
             sendToClient(user, message);
@@ -386,25 +375,20 @@ void Relay::handleClientMessage(User& user, const Message& message) {
 
         case MsgType::Store:
         case MsgType::FetchHistory:
-        case MsgType::SetColor:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }
             break;
 
         case MsgType::PeerChat:
-            if (message.fields.size() >= 3) {
+            if (message.fields.size() >= 4) {
                 std::int64_t timestamp = 0;
                 const std::string body = sanitizeBody(message.fields[2]);
-                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty()) {
-                    user.peers.sendChat(timestamp, body);
+                const std::string colour = sanitizeBody(message.fields[3]);
+                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty() &&
+                    isValidColor(colour)) {
+                    user.peers.sendChat(timestamp, body, colour);
                 }
-            }
-            break;
-
-        case MsgType::PeerColor:
-            if (message.fields.size() >= 2 && isValidColor(message.fields[1])) {
-                user.peers.sendColor(message.fields[1]);
             }
             break;
 
@@ -420,10 +404,8 @@ void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
             // a direct link identifies its sender far more reliably than the
             // frame can.
             sendToClient(user, Message {MsgType::PeerChat,
-                                        {event.name, std::to_string(event.timestamp), event.body}});
-            break;
-        case PeerNetwork::Event::Kind::Color:
-            sendToClient(user, Message {MsgType::PeerColor, {event.name, event.body}});
+                                        {event.name, std::to_string(event.timestamp), event.body,
+                                         event.colour}});
             break;
         case PeerNetwork::Event::Kind::Join:
             log(user.requestedName + ": mesh link up with " + event.name);

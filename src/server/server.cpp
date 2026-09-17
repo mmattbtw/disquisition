@@ -310,9 +310,6 @@ bool Server::handleFrames(Connection& connection) {
             case MsgType::Store:
                 handleStore(connection, message);
                 break;
-            case MsgType::SetColor:
-                handleSetColor(connection, message);
-                break;
             case MsgType::FetchHistory:
                 handleFetchHistory(connection);
                 break;
@@ -365,22 +362,6 @@ void Server::handleLogin(Connection& connection, const Message& message) {
         }
     }
 
-    // Replay any stored display colours so the new peer colours everyone the
-    // way they chose, and let the room know our own stored colour.
-    for (const Connection& other : connections_) {
-        if (!other.authenticated) {
-            continue;
-        }
-        const std::string colour = database_.colorOf(other.name);
-        if (!colour.empty()) {
-            send(connection, Message {MsgType::Color, {other.name, colour}});
-        }
-    }
-    const std::string myColour = database_.colorOf(connection.name);
-    if (!myColour.empty()) {
-        broadcast(Message {MsgType::Color, {connection.name, myColour}}, &connection);
-    }
-
     log(connection.name + " joined from " + hostFor(connection));
     broadcast(Message {MsgType::PeerJoined,
                        {connection.name, hostFor(connection), std::to_string(connection.peerPort),
@@ -394,8 +375,8 @@ void Server::handleStore(Connection& connection, const Message& message) {
         reject(connection, "sign in first");
         return;
     }
-    if (message.fields.size() < 2) {
-        reject(connection, "store needs a timestamp and a body");
+    if (message.fields.size() < 3) {
+        reject(connection, "store needs a timestamp, body, and color");
         return;
     }
 
@@ -409,29 +390,14 @@ void Server::handleStore(Connection& connection, const Message& message) {
     if (body.empty()) {
         return;
     }
-
-    database_.add(timestamp, connection.name, body);
-    log(connection.name + " (stored): " + body);
-}
-
-void Server::handleSetColor(Connection& connection, const Message& message) {
-    if (!connection.authenticated) {
-        reject(connection, "sign in first");
-        return;
-    }
-    if (message.fields.empty()) {
-        reject(connection, "set color needs a color");
-        return;
-    }
-    const std::string colour = sanitizeBody(message.fields[0]);
+    const std::string colour = sanitizeBody(message.fields[2]);
     if (!isValidColor(colour)) {
-        reject(connection, "unknown color");
+        reject(connection, "invalid message color");
         return;
     }
 
-    database_.setColor(connection.name, colour);
-    log(connection.name + " chose color " + colour);
-    broadcast(Message {MsgType::Color, {connection.name, colour}});
+    database_.add(timestamp, connection.name, body, colour);
+    log(connection.name + " (stored): " + body);
 }
 
 void Server::handleFetchHistory(Connection& connection) {
@@ -446,7 +412,8 @@ void Server::sendHistory(Connection& connection) {
     const std::vector<StoredMessage> history = database_.recent(options_.historyLimit);
     for (const StoredMessage& stored : history) {
         send(connection, Message {MsgType::History,
-                                  {std::to_string(stored.timestamp), stored.sender, stored.body}});
+                                  {std::to_string(stored.timestamp), stored.sender, stored.body,
+                                   stored.colour}});
     }
     send(connection, Message {MsgType::HistoryEnd, {}});
 }

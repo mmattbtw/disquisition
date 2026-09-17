@@ -16,13 +16,13 @@ namespace chat {
 enum class MsgType : std::uint8_t {
     // client -> server
     Login = 1,         // [name, peer port, advertised host (may be empty)]
-    Store = 10,        // [timestamp, body] archive a message already sent p2p
+    Store = 10,        // [timestamp, body, colour] archive a message already sent p2p
     FetchHistory = 11, // []
 
     // server -> client
     LoginOk = 3,    // [assigned name, welcome text]
     Error = 4,      // [reason]
-    History = 6,    // [timestamp, sender, body]
+    History = 6,    // [timestamp, sender, body, colour]
     System = 7,     // [text]
     Users = 8,      // [name]*
     HistoryEnd = 9, // []
@@ -36,19 +36,12 @@ enum class MsgType : std::uint8_t {
     // which a relay uses to route a connection to the right hosted user when
     // many users share one public port.
     Hello = 15,
-    // Chat and colour frames carry the sender's name so that anything reading
+    // Chat frames carry the sender's name so that anything reading
     // them without a per-peer connection can still attribute them. That is the
     // case for a client that reaches the mesh through a relay: every peer
     // arrives over the one relay socket, so the connection cannot identify the
     // sender the way a direct link can.
-    PeerChat = 16,  // [sender, timestamp, body]
-    PeerColor = 19, // [sender, colour] the sender's chosen display colour
-
-    // client -> server
-    SetColor = 17, // [colour] ask the server to record our display colour
-
-    // server -> client
-    Color = 18     // [name, colour] a user's display colour
+    PeerChat = 16  // [sender, timestamp, body, colour]
 };
 
 // Hard cap on a single frame so a hostile client cannot make us allocate.
@@ -58,22 +51,48 @@ constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
 
-// Named display colours shared by the server and every client. The server
-// stores and relays these strings opaquely; clients map them onto ncurses
-// colour pairs. A user who has not chosen one falls back to a colour derived
-// from a stable hash of their name, so everyone agrees on it without a wire
-// round trip.
+// Display colours shared by the server and every client. Named candy shades
+// and custom xterm-256 indexes travel with each message as strings; clients
+// map them onto ncurses colour pairs.
 constexpr const char* kColorNames[] = {
-    "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
+    "pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 constexpr std::size_t kColorCount = sizeof(kColorNames) / sizeof(kColorNames[0]);
 
+// Keep accepting the old command names as aliases. Each renders as the candy
+// shade in the same position.
+constexpr const char* kLegacyColorNames[] = {
+    "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
+
+inline bool parseColorIndex(const std::string& colour, int& index) {
+    if (colour.empty() || colour.size() > 3) {
+        return false;
+    }
+    int value = 0;
+    for (const char character : colour) {
+        if (character < '0' || character > '9') {
+            return false;
+        }
+        value = value * 10 + (character - '0');
+    }
+    if (value > 255) {
+        return false;
+    }
+    index = value;
+    return true;
+}
+
+inline bool isReservedSystemColor(int index) {
+    return index == 1 || index == 2 || index == 250;
+}
+
 inline bool isValidColor(const std::string& colour) {
-    for (const char* candidate : kColorNames) {
-        if (colour == candidate) {
+    for (std::size_t index = 0; index < kColorCount; ++index) {
+        if (colour == kColorNames[index] || colour == kLegacyColorNames[index]) {
             return true;
         }
     }
-    return false;
+    int index = 0;
+    return parseColorIndex(colour, index) && !isReservedSystemColor(index);
 }
 
 struct Message {

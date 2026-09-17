@@ -70,7 +70,6 @@ private:
         bool clientWaiting = false;
         std::chrono::steady_clock::time_point nextServerAttempt;
         std::map<std::string, PeerInfo> roster;
-        std::map<std::string, std::string> colors;
         Message lastUsers {MsgType::Users, {}};
     };
 
