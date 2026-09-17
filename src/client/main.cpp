@@ -26,7 +26,52 @@ void printUsage(std::FILE* out) {
                  "                       the address the server sees you connect from. Use\n"
                  "                       your public IP or hostname to accept peers over the\n"
                  "                       internet (pair with --p2p-port + a port forward)\n"
+                 "      --relay <host[:port]>  reach the mesh through a relay instead of\n"
+                 "                       accepting direct connections. Your traffic and\n"
+                 "                       everyone else's is tunnelled through it, so no\n"
+                 "                       port forward is needed (default port 42069)\n"
                  "  -h, --help           show this message\n");
+}
+
+// Splits "host", "host:port" or "[v6]:port" into its parts. A bare host keeps
+// the supplied default port.
+bool splitHostPort(const std::string& text, std::string& host, std::uint16_t& port,
+                   std::uint16_t defaultPort) {
+    if (text.empty()) {
+        return false;
+    }
+    if (text.front() == '[') {
+        const auto close = text.find(']');
+        if (close == std::string::npos || close == 1) {
+            return false;
+        }
+        host = text.substr(1, close - 1);
+        if (close + 1 < text.size()) {
+            if (text[close + 1] != ':') {
+                return false;
+            }
+            if (!chat::parsePort(text.substr(close + 2), port, false)) {
+                return false;
+            }
+        } else {
+            port = defaultPort;
+        }
+        return true;
+    }
+    const auto colon = text.rfind(':');
+    if (colon == std::string::npos) {
+        host = text;
+        port = defaultPort;
+        return true;
+    }
+    if (text.find(':') != colon) {
+        return false;
+    }
+    host = text.substr(0, colon);
+    if (host.empty() || !chat::parsePort(text.substr(colon + 1), port, false)) {
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -37,6 +82,7 @@ int main(int argc, char** argv) {
     std::uint16_t peerPort = 0;
     std::string advertise;
     std::string name;
+    std::string relayText;
 
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
@@ -51,25 +97,26 @@ int main(int argc, char** argv) {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
                 }
-                const int value = std::stoi(argv[++index]);
-                if (value < 0 || value > 65535) {
+                if (!chat::parsePort(argv[++index], port, false)) {
                     throw std::runtime_error("port out of range");
                 }
-                port = static_cast<std::uint16_t>(value);
             } else if (argument == "--p2p-port") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
                 }
-                const int value = std::stoi(argv[++index]);
-                if (value < 0 || value > 65535) {
+                if (!chat::parsePort(argv[++index], peerPort, true)) {
                     throw std::runtime_error("port out of range");
                 }
-                peerPort = static_cast<std::uint16_t>(value);
             } else if (argument == "--advertise") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
                 }
                 advertise = argv[++index];
+            } else if (argument == "--relay") {
+                if (!hasValue) {
+                    throw std::runtime_error("missing value for " + argument);
+                }
+                relayText = argv[++index];
             } else if (argument == "-n" || argument == "--name") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
@@ -92,22 +139,43 @@ int main(int argc, char** argv) {
     // A peer closing the socket mid-write must not take the client down.
     std::signal(SIGPIPE, SIG_IGN);
 
+    const bool useRelay = !relayText.empty();
+    std::string relayHost;
+    std::uint16_t relayPort = 0;
+    if (useRelay) {
+        try {
+            if (!splitHostPort(relayText, relayHost, relayPort, 42069)) {
+                throw std::runtime_error("expected host or host:port");
+            }
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "invalid --relay value: %s\n", error.what());
+            return 1;
+        }
+    }
+
     // The peer listener must be up before we announce its port to the server.
+    // Through a relay we never listen: the relay is our public peer address.
     chat::PeerNetwork peers;
     std::string error;
-    if (!peers.start(peerPort, error)) {
+    if (useRelay) {
+        peers.setPassive(true);
+    } else if (!peers.start(peerPort, error)) {
         std::fprintf(stderr, "cannot listen for peers on port %u: %s\n", peerPort, error.c_str());
         return 1;
     }
 
+    const std::string connectHost = useRelay ? relayHost : host;
+    const std::uint16_t connectPort = useRelay ? relayPort : port;
+    const std::string advertiseHost = useRelay ? "" : advertise;
+
     chat::Connection connection;
-    if (!connection.connectTo(host, port, 5000, error)) {
-        std::fprintf(stderr, "cannot connect to %s:%u: %s; retrying in the background\n", host.c_str(),
-                     port, error.c_str());
+    if (!connection.connectTo(connectHost, connectPort, 5000, error)) {
+        std::fprintf(stderr, "cannot connect to %s:%u: %s; retrying in the background\n",
+                     connectHost.c_str(), connectPort, error.c_str());
     } else {
         connection.startReader();
     }
 
     chat::Tui tui(connection, peers);
-    return tui.run(name, host, port, advertise);
+    return tui.run(name, connectHost, connectPort, advertiseHost, useRelay);
 }

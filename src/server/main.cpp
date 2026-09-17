@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -31,11 +32,9 @@ int main(int argc, char** argv) {
                 if (index + 1 >= argc) {
                     throw std::runtime_error("missing value for " + argument);
                 }
-                const int port = std::stoi(argv[++index]);
-                if (port < 0 || port > 65535) {
+                if (!chat::parsePort(argv[++index], options.port, true)) {
                     throw std::runtime_error("port out of range");
                 }
-                options.port = static_cast<std::uint16_t>(port);
             } else if (argument == "-d" || argument == "--db") {
                 if (index + 1 >= argc) {
                     throw std::runtime_error("missing value for " + argument);
@@ -45,7 +44,13 @@ int main(int argc, char** argv) {
                 if (index + 1 >= argc) {
                     throw std::runtime_error("missing value for " + argument);
                 }
-                options.historyLimit = static_cast<std::size_t>(std::stoul(argv[++index]));
+                std::int64_t limit = 0;
+                if (!chat::parseInt64(argv[++index], limit) || limit < 0 ||
+                    static_cast<std::uint64_t>(limit) >
+                        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+                    throw std::runtime_error("history count out of range");
+                }
+                options.historyLimit = static_cast<std::size_t>(limit);
             } else if (argument == "-h" || argument == "--help") {
                 printUsage(stdout);
                 return 0;

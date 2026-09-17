@@ -26,7 +26,7 @@ public:
     ~Tui();
 
     int run(const std::string& initialName, const std::string& host, std::uint16_t port,
-            const std::string& advertiseHost);
+            const std::string& advertiseHost, bool useRelay = false);
 
 private:
     struct Entry {
@@ -71,6 +71,10 @@ private:
     std::string host_;
     std::uint16_t port_ = 0;
     std::string advertiseHost_;
+    // True when this client reaches the mesh through a relay: the relay owns
+    // the peer connections, so chat arrives on connection_ (carrying a sender)
+    // rather than as PeerNetwork events, and the local mesh stays passive.
+    bool useRelay_ = false;
 
     WINDOW* header_ = nullptr;
     WINDOW* messages_ = nullptr;

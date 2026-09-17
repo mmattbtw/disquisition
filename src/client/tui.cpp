@@ -228,10 +228,11 @@ void Tui::stop() {
 }
 
 int Tui::run(const std::string& initialName, const std::string& host, std::uint16_t port,
-             const std::string& advertiseHost) {
+             const std::string& advertiseHost, bool useRelay) {
     host_ = host;
     port_ = port;
     advertiseHost_ = advertiseHost;
+    useRelay_ = useRelay;
     name_ = trim(initialName);
     if (name_.empty()) {
         name_ = randomName();
@@ -246,17 +247,20 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
 
     layout();
 
+    const std::string endpoint = host_ + ":" + std::to_string(port_);
     std::string greeting;
     if (connection_.failed()) {
-        greeting = "server " + host_ + ":" + std::to_string(port_) + " is unreachable; retrying";
+        greeting = (useRelay_ ? "relay " : "server ") + endpoint + " is unreachable; retrying";
+    } else if (useRelay_) {
+        greeting = "connected to relay " + endpoint;
     } else {
-        greeting = "connected to " + host_ + ":" + std::to_string(port_) + " (peer port " +
-                   std::to_string(peers_.port()) + ")";
+        greeting = "connected to " + endpoint + " (peer port " + std::to_string(peers_.port()) + ")";
         if (!advertiseHost_.empty()) {
             greeting += ", advertising " + advertiseHost_;
         }
     }
-    if (!name_.empty()) {
+    // The relay decides our name, so don't announce a guess before it replies.
+    if (!name_.empty() && !useRelay_) {
         greeting += " as " + name_;
     }
     appendSystem(greeting, kColourGood);
@@ -291,7 +295,9 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
             serverReady_ = false;
             status_ = "server offline";
             statusColour_ = kColourBad;
-            appendSystem("server connection lost; peer-to-peer chat still works", kColourBad);
+            appendSystem(useRelay_ ? "relay connection lost; reconnecting"
+                                   : "server connection lost; peer-to-peer chat still works",
+                         kColourBad);
             dirty_ = true;
         }
 
@@ -663,6 +669,34 @@ void Tui::drainIncoming() {
                     }
                 }
                 break;
+            // Through a relay every peer arrives over the one relay socket, so
+            // chat is attributed from the frame's sender field instead of the
+            // connection it came in on.
+            case MsgType::PeerChat: {
+                if (!useRelay_ || message.fields.size() < 3) {
+                    break;
+                }
+                const std::string& sender = message.fields[0];
+                if (remember(sender, message.fields[1], message.fields[2])) {
+                    append(formatTime(message.fields[1]) + " " + sender + ": ",
+                           sanitizeBody(message.fields[2]), colourFor(sender));
+                }
+                break;
+            }
+            case MsgType::PeerColor: {
+                if (!useRelay_ || message.fields.size() < 2) {
+                    break;
+                }
+                const std::string& sender = message.fields[0];
+                const std::string colour = message.fields[1];
+                if (isValidColor(colour) && colours_[sender] != colour) {
+                    colours_[sender] = colour;
+                    if (sender != name_) {
+                        appendSystem(sender + " chose color " + colour, colourFor(sender));
+                    }
+                }
+                break;
+            }
             case MsgType::Error:
                 appendSystem(message.fields.empty() ? "server error" : message.fields[0], kColourBad);
                 break;
@@ -726,7 +760,12 @@ void Tui::deliver(const std::string& line) {
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
     append(formatTime(stamp) + " you: ", body, kColourOwnMsg);
-    peers_.sendChat(timestamp, body);
+    if (useRelay_) {
+        // The relay fans this out to the mesh on our behalf.
+        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body}});
+    } else {
+        peers_.sendChat(timestamp, body);
+    }
     if (serverReady_ && !connection_.failed()) {
         connection_.send(Message {MsgType::Store, {stamp, body}});
     }
@@ -887,6 +926,8 @@ void Tui::runCommand(const std::string& command) {
             }
             if (peers_.connectedTo(user)) {
                 listing += " (direct)";
+            } else if (useRelay_) {
+                listing += " (relay)";
             }
         }
         appendSystem(listing);
@@ -904,7 +945,11 @@ void Tui::runCommand(const std::string& command) {
             return;
         }
         colours_[name_] = colour;
-        peers_.sendColor(colour);
+        if (useRelay_) {
+            connection_.send(Message {MsgType::PeerColor, {name_, colour}});
+        } else {
+            peers_.sendColor(colour);
+        }
         if (serverReady_ && !connection_.failed()) {
             connection_.send(Message {MsgType::SetColor, {colour}});
         }

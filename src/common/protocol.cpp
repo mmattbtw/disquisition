@@ -164,4 +164,14 @@ bool parseInt64(const std::string& text, std::int64_t& out) {
     return true;
 }
 
+bool parsePort(const std::string& text, std::uint16_t& out, bool allowZero) {
+    std::int64_t value = 0;
+    const std::int64_t minimum = allowZero ? 0 : 1;
+    if (!parseInt64(text, value) || value < minimum || value > 65535) {
+        return false;
+    }
+    out = static_cast<std::uint16_t>(value);
+    return true;
+}
+
 }  // namespace chat

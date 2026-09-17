@@ -24,7 +24,37 @@ Storage and history simply pause during an outage; anything sent meanwhile
 travels peer-to-peer only.
 
 Peers must be able to open TCP connections to each other, so this is built
-for a LAN or a single machine rather than the open internet.
+for a LAN or a single machine rather than the open internet — unless you run a
+relay (below).
+
+## Relays: joining without port forwarding
+
+A relay is a small, state-less service you run on any host that *can* accept
+inbound connections (a VPS, say). Many users share one relay and one port: each
+client supplies its own name, and the relay signs into the server on that
+user's behalf, advertises itself as the user's peer address, and does the whole
+mesh for them — dialing reachable peers directly and calling other people's
+relays. A client never listens for anything; it just dials the relay outbound,
+so it works from behind NAT.
+
+```sh
+# on the public host: one relay, reachable at relay.mmatt.net:42069
+./build/relay --host chat.example.net --port 9000 \
+              --advertise relay.mmatt.net --listen 42069
+
+# on each laptop: no port forward, no --advertise
+./build/client --relay relay.mmatt.net:42069 --name matt
+./build/client --relay relay.mmatt.net:42069 --name jesse
+```
+
+Because several users share the port, peers dial it with a target: the `Hello`
+frame names both the caller and the user it wants, so the relay routes the link
+to the right person. Everyone else still sees each user arrive at the relay's
+address, e.g. `matt joined (relay.mmatt.net:42069)`. The relay keeps no
+database and stores no messages; it only forwards frames, and the server still
+owns accounts, discovery and history. Relay-to-relay links need no special
+support: a relay dials another user's relay exactly the way it dials any peer,
+so there is still one connection per pair.
 
 ## Layout
 
@@ -33,14 +63,15 @@ src/common/protocol.{h,cpp}   shared wire format (length-prefixed frames)
 src/server/                   poll(2) event loop + SQLite persistence
 src/client/                   ncurses TUI + socket reader thread
 src/client/peer_network.*     the peer-to-peer mesh (listener + dialer)
+src/relay/                    shared multi-user relay (one port, many users)
 ```
 
 ## Building
 
-Requires a C++17 compiler, CMake 3.16+, SQLite3, and ncurses.
+Requires a C++17 compiler, CMake 3.16+, SQLite 3.24+, and ncurses.
 
 ```sh
-make          # builds build/client and build/server
+make          # builds build/client, build/server and build/relay
 make clean    # removes the build directory
 ```
 
@@ -68,6 +99,16 @@ through a firewall); by default the OS picks a free one and the client reports
 it. Every user is shown in a colour derived from their name, and you can pick
 your own with `/color`. Messages are stored in the `messages` table and the
 last 50 are replayed to everyone who joins.
+
+To join through a relay instead of accepting direct connections (no port
+forward), pass `--relay` with the relay's host and port:
+
+```sh
+./build/client --relay relay.mmatt.net:42069 --name matt
+```
+
+The name you pass is what the relay signs in as, so any number of users can
+share one relay.
 
 ### Client keys
 

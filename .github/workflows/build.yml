@@ -41,3 +41,4 @@ jobs:
           path: |
             build/client
             build/server
+            build/relay

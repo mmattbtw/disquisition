@@ -11,7 +11,6 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
-#include <ctime>
 #include <stdexcept>
 #include <utility>
 
@@ -33,10 +32,6 @@ void installSignalHandlers() {
 
     // A client vanishing mid-write must not kill the whole server.
     std::signal(SIGPIPE, SIG_IGN);
-}
-
-std::int64_t nowSeconds() {
-    return static_cast<std::int64_t>(std::time(nullptr));
 }
 
 std::string trim(const std::string& text) {
@@ -198,11 +193,14 @@ void Server::run() {
             }
 
             bool alive = true;
-            if ((revents & POLLIN) != 0 && !connections_[index].closing) {
+            if ((revents & (POLLIN | POLLHUP)) != 0 && !connections_[index].closing) {
                 alive = readFrom(connections_[index]) && handleFrames(connections_[index]);
             }
             if (alive && !connections_[index].out.empty() && (revents & POLLOUT) != 0) {
                 alive = writeTo(connections_[index]);
+            }
+            if (alive && (revents & (POLLERR | POLLNVAL)) != 0) {
+                alive = false;
             }
             // A connection asked to close is dropped once its last words are out.
             if (alive && connections_[index].closing && connections_[index].out.empty()) {
@@ -264,7 +262,10 @@ bool Server::readFrom(Connection& connection) {
         return true;
     }
     if (bytes == 0) {
-        return false;
+        // The peer may have half-closed its write side after sending a request.
+        // Keep the socket long enough to flush any response handleFrames queues.
+        connection.closing = true;
+        return true;
     }
     if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
         return true;
@@ -494,13 +495,16 @@ std::string Server::uniqueName(const std::string& requested) const {
     if (!taken(requested)) {
         return requested;
     }
-    for (int suffix = 2; suffix < 1000; ++suffix) {
-        const std::string candidate = requested + "-" + std::to_string(suffix);
+    for (std::size_t suffix = 2;; ++suffix) {
+        const std::string ending = "-" + std::to_string(suffix);
+        const std::string candidate = ending.size() >= kMaxNameLength
+                                          ? ending.substr(ending.size() - kMaxNameLength)
+                                          : requested.substr(0, kMaxNameLength - ending.size()) +
+                                                ending;
         if (!taken(candidate)) {
             return candidate;
         }
     }
-    return requested + "-" + std::to_string(nowSeconds());
 }
 
 const std::string& Server::hostFor(const Connection& connection) const {

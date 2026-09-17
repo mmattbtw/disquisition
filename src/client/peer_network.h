@@ -38,6 +38,12 @@ public:
     // Binds the listener (`preferredPort` 0 picks a free port) and starts the
     // accept and dial threads. False with `error` set on failure.
     bool start(std::uint16_t preferredPort, std::string& error);
+
+    // Starts only the dialler, without binding a listener. A relay hosts many
+    // users behind one shared public listener, so each user's mesh runs
+    // detached and receives inbound peers through adoptInbound().
+    bool startDetached(std::string& error);
+
     void stop();
 
     std::uint16_t port() const { return listenPort_; }
@@ -49,6 +55,16 @@ public:
     // Whether we advertise a publicly reachable host (the user passed
     // --advertise). Reachability decides who dials whom across the internet.
     void setMyAdvertised(bool advertised);
+
+    // When passive, the roster is still tracked (so /users and join lines keep
+    // working) but nothing is ever dialled. A client whose traffic flows
+    // through a relay uses this: the relay owns the mesh, the client just needs
+    // the roster for display.
+    void setPassive(bool passive);
+
+    // Registers an inbound peer whose Hello a shared listener has already
+    // consumed and routed here by name. Used only in detached mode.
+    void adoptInbound(const std::string& name, std::unique_ptr<Connection> connection);
 
     // Records (or refreshes) a roster entry and dials it when the rule says
     // the call is ours to make.
@@ -104,6 +120,7 @@ private:
 
     std::string myName_;
     bool myAdvertised_ = false;
+    bool passive_ = false;
     std::map<std::string, Peer> peers_;
     std::vector<std::unique_ptr<Connection>> pending_;
     std::deque<std::string> dialQueue_;

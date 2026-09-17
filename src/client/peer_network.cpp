@@ -126,6 +126,48 @@ void PeerNetwork::setMyAdvertised(bool advertised) {
     scanPeersForDialsLocked();
 }
 
+void PeerNetwork::setPassive(bool passive) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    passive_ = passive;
+}
+
+bool PeerNetwork::startDetached(std::string& error) {
+    if (listenFd_ >= 0 || running_.load()) {
+        error = "peer network already started";
+        return false;
+    }
+    error.clear();
+    running_.store(true);
+    dialThread_ = std::thread([this] { dialLoop(); });
+    return true;
+}
+
+void PeerNetwork::adoptInbound(const std::string& name, std::unique_ptr<Connection> connection) {
+    const std::string cleaned = sanitizeName(name);
+    if (cleaned.empty() || connection == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (cleaned == myName_) {
+        return;
+    }
+    auto existing = peers_.find(cleaned);
+    if (existing != peers_.end()) {
+        if (existing->second.connection != nullptr) {
+            return;
+        }
+        existing->second.connection = std::move(connection);
+        existing->second.dialing = false;
+    } else {
+        Peer peer;
+        peer.name = cleaned;
+        peer.connection = std::move(connection);
+        peer.dialing = false;
+        peers_.emplace(cleaned, std::move(peer));
+    }
+    pushEvent(Event::Kind::Join, cleaned, "", 0);
+}
+
 void PeerNetwork::addPeer(const std::string& name, const std::string& host, std::uint16_t port,
                           bool advertised) {
     const std::string cleaned = sanitizeName(name);
@@ -138,9 +180,14 @@ void PeerNetwork::addPeer(const std::string& name, const std::string& host, std:
     }
     auto existing = peers_.find(cleaned);
     if (existing != peers_.end()) {
-        existing->second.host = host;
-        existing->second.port = port;
-        existing->second.advertised = advertised;
+        Peer& peer = existing->second;
+        peer.host = host;
+        peer.port = port;
+        peer.advertised = advertised;
+        if (peer.connection == nullptr && !peer.dialing && shouldDial(peer)) {
+            peer.dialing = true;
+            enqueueDial(peer.name);
+        }
         return;
     }
     Peer peer;
@@ -203,7 +250,7 @@ bool PeerNetwork::settled() const {
 }
 
 void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body) {
-    const Message message {MsgType::PeerChat, {std::to_string(timestamp), body}};
+    const Message message {MsgType::PeerChat, {myName_, std::to_string(timestamp), body}};
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : peers_) {
         if (entry.second.connection != nullptr) {
@@ -213,7 +260,7 @@ void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body) {
 }
 
 void PeerNetwork::sendColor(const std::string& colour) {
-    const Message message {MsgType::PeerColor, {colour}};
+    const Message message {MsgType::PeerColor, {myName_, colour}};
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& entry : peers_) {
         if (entry.second.connection != nullptr) {
@@ -311,7 +358,7 @@ void PeerNetwork::dialLoop() {
             std::string error;
             if (candidate->connectTo(host, port, kDialTimeoutMs, error)) {
                 candidate->startReader();
-                candidate->send(Message {MsgType::Hello, {announced}});
+                candidate->send(Message {MsgType::Hello, {announced, target}});
                 std::lock_guard<std::mutex> lock(mutex_);
                 const auto it = peers_.find(target);
                 if (it != peers_.end()) {
@@ -382,12 +429,14 @@ void PeerNetwork::drainPending() {
                 pushEvent(Event::Kind::Join, remote, "", 0);
                 continue;
             }
-            if (message.type == MsgType::PeerChat && message.fields.size() >= 2) {
+            if (message.type == MsgType::PeerChat && message.fields.size() >= 3) {
                 std::int64_t timestamp = 0;
-                parseInt64(message.fields[0], timestamp);
-                pushEvent(Event::Kind::Chat, remote, sanitizeBody(message.fields[1]), timestamp);
-            } else if (message.type == MsgType::PeerColor && !message.fields.empty()) {
-                pushEvent(Event::Kind::Color, remote, sanitizeBody(message.fields[0]), 0);
+                const std::string body = sanitizeBody(message.fields[2]);
+                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty()) {
+                    pushEvent(Event::Kind::Chat, remote, body, timestamp);
+                }
+            } else if (message.type == MsgType::PeerColor && message.fields.size() >= 2) {
+                pushEvent(Event::Kind::Color, remote, sanitizeBody(message.fields[1]), 0);
             }
         }
 
@@ -408,12 +457,14 @@ void PeerNetwork::drainPeers() {
         }
         Message message;
         while (peer.connection->poll(message)) {
-            if (message.type == MsgType::PeerChat && message.fields.size() >= 2) {
+            if (message.type == MsgType::PeerChat && message.fields.size() >= 3) {
                 std::int64_t timestamp = 0;
-                parseInt64(message.fields[0], timestamp);
-                pushEvent(Event::Kind::Chat, peer.name, sanitizeBody(message.fields[1]), timestamp);
-            } else if (message.type == MsgType::PeerColor && !message.fields.empty()) {
-                pushEvent(Event::Kind::Color, peer.name, sanitizeBody(message.fields[0]), 0);
+                const std::string body = sanitizeBody(message.fields[2]);
+                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty()) {
+                    pushEvent(Event::Kind::Chat, peer.name, body, timestamp);
+                }
+            } else if (message.type == MsgType::PeerColor && message.fields.size() >= 2) {
+                pushEvent(Event::Kind::Color, peer.name, sanitizeBody(message.fields[1]), 0);
             }
         }
         if (peer.connection->failed()) {
@@ -428,8 +479,8 @@ void PeerNetwork::drainPeers() {
 }
 
 bool PeerNetwork::shouldDial(const Peer& peer) const {
-    if (peer.connection != nullptr || peer.dialing || myName_.empty() || peer.name.empty() ||
-        peer.name == myName_) {
+    if (passive_ || peer.connection != nullptr || peer.dialing || myName_.empty() ||
+        peer.name.empty() || peer.name == myName_) {
         return false;
     }
     // Two peers that are symmetric (both advertised or both not) fall back to

@@ -12,7 +12,7 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 find_package(Threads REQUIRED)
-find_package(SQLite3 REQUIRED)
+find_package(SQLite3 3.24 REQUIRED)
 
 # CMake renamed this imported target at some point; support both spellings.
 if(TARGET SQLite3::SQLite3)
@@ -40,3 +40,10 @@ add_executable(client
   src/client/peer_network.cpp)
 target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(client PRIVATE chat_protocol ${CURSES_LIBRARIES} Threads::Threads)
+
+add_executable(relay
+  src/relay/main.cpp
+  src/relay/relay.cpp
+  src/client/connection.cpp
+  src/client/peer_network.cpp)
+target_link_libraries(relay PRIVATE chat_protocol Threads::Threads)

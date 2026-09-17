@@ -31,9 +31,18 @@ enum class MsgType : std::uint8_t {
     PeerLeft = 14,  // [name]
 
     // peer -> peer
-    Hello = 15,    // [name] sent once by whichever side dialled
-    PeerChat = 16, // [timestamp, body] the sender owns the connection
-    PeerColor = 19, // [colour] the sender's chosen display colour
+    // [sender, target] sent once by whichever side dialled. The receiver
+    // learns the remote from `sender`; `target` names the peer being dialled,
+    // which a relay uses to route a connection to the right hosted user when
+    // many users share one public port.
+    Hello = 15,
+    // Chat and colour frames carry the sender's name so that anything reading
+    // them without a per-peer connection can still attribute them. That is the
+    // case for a client that reaches the mesh through a relay: every peer
+    // arrives over the one relay socket, so the connection cannot identify the
+    // sender the way a direct link can.
+    PeerChat = 16,  // [sender, timestamp, body]
+    PeerColor = 19, // [sender, colour] the sender's chosen display colour
 
     // client -> server
     SetColor = 17, // [colour] ask the server to record our display colour
@@ -97,5 +106,9 @@ std::string sanitizeBody(const std::string& body);
 // Strict base-10 parse (optional leading +/-). False on empty input, junk or
 // more than 18 digits so the value can never overflow int64.
 bool parseInt64(const std::string& text, std::int64_t& out);
+
+// Strict decimal port parse. Zero is accepted only for listeners that ask the
+// OS to choose an ephemeral port.
+bool parsePort(const std::string& text, std::uint16_t& out, bool allowZero);
 
 }  // namespace chat
