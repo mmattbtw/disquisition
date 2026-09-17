@@ -4,7 +4,7 @@
 
 - Matt Morris [@mmattbtw](https://github.com/mmattbtw)
 - Jack Stefl 
-- Cameron Sapienza
+- Cameron Sapienza [@ohkee](https://github.com/ohkee)
 - Zheer Shimeirani [@z-shim](https://github.com/z-shim)
 - Jesse Tomlin [@ChaosSnakey](https://github.com/ChaosSnakey)
 
