@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -74,6 +75,58 @@ bool splitHostPort(const std::string& text, std::string& host, std::uint16_t& po
     return true;
 }
 
+std::string trim(const std::string& text) {
+    const auto begin = text.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) {
+        return "";
+    }
+    const auto end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
+}
+
+bool promptForConnection(std::string& host, std::uint16_t& port, std::string& name) {
+    host = "relay.mmatt.net";
+    port = 9000;
+
+    std::string answer;
+    std::cout << "server host [relay.mmatt.net]: " << std::flush;
+    if (!std::getline(std::cin, answer)) {
+        return false;
+    }
+    answer = trim(answer);
+    if (!answer.empty()) {
+        host = answer;
+    }
+
+    for (;;) {
+        std::cout << "server port [9000]: " << std::flush;
+        if (!std::getline(std::cin, answer)) {
+            return false;
+        }
+        answer = trim(answer);
+        if (answer.empty()) {
+            break;
+        }
+        if (chat::parsePort(answer, port, false)) {
+            break;
+        }
+        std::cout << "please enter a port from 1 to 65535\n";
+    }
+
+    for (;;) {
+        std::cout << "name: " << std::flush;
+        if (!std::getline(std::cin, answer)) {
+            return false;
+        }
+        name = chat::sanitizeName(answer);
+        if (!name.empty()) {
+            break;
+        }
+        std::cout << "please enter a name\n";
+    }
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -83,6 +136,11 @@ int main(int argc, char** argv) {
     std::string advertise;
     std::string name;
     std::string relayText;
+
+    if (argc == 1 && !promptForConnection(host, port, name)) {
+        std::fprintf(stderr, "setup cancelled before connecting\n");
+        return 1;
+    }
 
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];

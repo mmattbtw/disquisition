@@ -88,13 +88,17 @@ Start the server (it creates the database on first run):
 Then connect one client per person:
 
 ```sh
+./build/client
 ./build/client --host 127.0.0.1 --port 9000
 ./build/client --host 127.0.0.1 --port 9000 --name matt
 ./build/client --host 127.0.0.1 --port 9000 --name matt --p2p-port 9011
 ```
 
-Without `--name` the client asks you for a name. Duplicate names get a `-2`
-suffix. `--p2p-port` pins the peer listener to a fixed port (handy
+With no arguments, the client asks for the server host, server port, and your
+name before connecting. The host and port default to `relay.mmatt.net:9000`.
+Despite its hostname, this is the chat server, not the relay service. When you
+pass other arguments without `--name`, the chat screen asks for your name.
+Duplicate names get a `-2` suffix. `--p2p-port` pins the peer listener to a fixed port (handy
 through a firewall); by default the OS picks a free one and the client reports
 it. Messages start pink. Pick another candy shade with `/color mint` (also
 `butter`, `periwinkle`, `lilac`, `aqua`, or `peach`), or use any unreserved
