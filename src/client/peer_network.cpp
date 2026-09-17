@@ -20,6 +20,20 @@ constexpr std::size_t kMaxQueuedEvents = 512;
 constexpr int kDialAttempts = 3;
 constexpr int kDialTimeoutMs = 3000;
 
+bool waitForHelloOk(Connection& connection, const std::string& target) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(kDialTimeoutMs);
+    while (!connection.failed() && std::chrono::steady_clock::now() < deadline) {
+        Message response;
+        if (connection.poll(response)) {
+            return response.type == MsgType::HelloOk && !response.fields.empty() &&
+                   sanitizeName(response.fields[0]) == target;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
 }  // namespace
 
 PeerNetwork::~PeerNetwork() {
@@ -156,9 +170,15 @@ void PeerNetwork::adoptInbound(const std::string& name, std::unique_ptr<Connecti
         if (existing->second.connection != nullptr) {
             return;
         }
+        if (!connection->send(Message {MsgType::HelloOk, {myName_}})) {
+            return;
+        }
         existing->second.connection = std::move(connection);
         existing->second.dialing = false;
     } else {
+        if (!connection->send(Message {MsgType::HelloOk, {myName_}})) {
+            return;
+        }
         Peer peer;
         peer.name = cleaned;
         peer.connection = std::move(connection);
@@ -349,18 +369,20 @@ void PeerNetwork::dialLoop() {
             std::string error;
             if (candidate->connectTo(host, port, kDialTimeoutMs, error)) {
                 candidate->startReader();
-                candidate->send(Message {MsgType::Hello, {announced, target}});
-                std::lock_guard<std::mutex> lock(mutex_);
-                const auto it = peers_.find(target);
-                if (it != peers_.end()) {
-                    if (it->second.connection == nullptr) {
-                        it->second.connection = std::move(candidate);
-                        pushEvent(Event::Kind::Join, target, "", 0);
+                if (candidate->send(Message {MsgType::Hello, {announced, target}}) &&
+                    waitForHelloOk(*candidate, target)) {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    const auto it = peers_.find(target);
+                    if (it != peers_.end()) {
+                        if (it->second.connection == nullptr) {
+                            it->second.connection = std::move(candidate);
+                            pushEvent(Event::Kind::Join, target, "", 0);
+                        }
+                        it->second.dialing = false;
                     }
-                    it->second.dialing = false;
+                    done = true;
+                    break;
                 }
-                done = true;
-                break;
             }
             if (attempt + 1 < kDialAttempts) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -392,7 +414,8 @@ void PeerNetwork::drainPending() {
         Message message;
         while (connection.poll(message)) {
             if (remote.empty()) {
-                if (message.type != MsgType::Hello || message.fields.empty()) {
+                if (message.type != MsgType::Hello || message.fields.size() < 2 ||
+                    sanitizeName(message.fields[1]) != myName_) {
                     drop = true;
                     break;
                 }
@@ -404,6 +427,11 @@ void PeerNetwork::drainPending() {
                 }
                 const auto existing = peers_.find(remote);
                 if (existing != peers_.end() && existing->second.connection != nullptr) {
+                    remote.clear();
+                    drop = true;
+                    break;
+                }
+                if (!connection.send(Message {MsgType::HelloOk, {myName_}})) {
                     remote.clear();
                     drop = true;
                     break;

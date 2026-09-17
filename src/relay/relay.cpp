@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -246,7 +247,36 @@ void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Conne
 }
 
 void Relay::dropUser(const std::string& key) {
-    users_.erase(key);
+    const auto departing = users_.find(key);
+    if (departing == users_.end()) {
+        return;
+    }
+    const std::string requestedName = departing->second->requestedName;
+    const std::string assignedName = departing->second->assignedName.empty()
+                                         ? requestedName
+                                         : departing->second->assignedName;
+    users_.erase(departing);
+
+    // The chat server normally broadcasts PeerLeft. During an outage the
+    // relay is the only process that knows one of its local clients left, so
+    // remove that stale route from every other hosted user's mesh immediately.
+    for (auto& entry : users_) {
+        User& user = *entry.second;
+        user.roster.erase(requestedName);
+        user.roster.erase(assignedName);
+        user.peers.removePeer(requestedName);
+        user.peers.removePeer(assignedName);
+
+        auto& visibleUsers = user.lastUsers.fields;
+        visibleUsers.erase(std::remove(visibleUsers.begin(), visibleUsers.end(), requestedName),
+                           visibleUsers.end());
+        visibleUsers.erase(std::remove(visibleUsers.begin(), visibleUsers.end(), assignedName),
+                           visibleUsers.end());
+        if (!user.serverReady) {
+            sendToClient(user, Message {MsgType::PeerLeft, {assignedName}});
+            sendToClient(user, user.lastUsers);
+        }
+    }
 }
 
 bool Relay::ensureServer(User& user) {

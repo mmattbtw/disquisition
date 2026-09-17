@@ -36,6 +36,7 @@ enum class MsgType : std::uint8_t {
     // which a relay uses to route a connection to the right hosted user when
     // many users share one public port.
     Hello = 15,
+    HelloOk = 17, // [target] confirms that the requested peer accepted the link
     // Chat frames carry the sender's name so that anything reading
     // them without a per-peer connection can still attribute them. That is the
     // case for a client that reaches the mesh through a relay: every peer

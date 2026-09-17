@@ -99,6 +99,7 @@ const char* typeName(MsgType type) {
         case MsgType::PeerJoined: return "PeerJoined";
         case MsgType::PeerLeft: return "PeerLeft";
         case MsgType::Hello: return "Hello";
+        case MsgType::HelloOk: return "HelloOk";
         case MsgType::PeerChat: return "PeerChat";
     }
     return "Unknown";
