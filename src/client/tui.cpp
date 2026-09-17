@@ -28,6 +28,8 @@ constexpr int kColourSystem = 3;
 constexpr int kColourHeader = 4;
 constexpr int kColourGood = 5;
 constexpr int kColourBad = 6;
+// Your own sent lines, drawn bold-white so they never match a peer's colour.
+constexpr int kColourOwnMsg = 7;
 // First colour pair number used for per-user palette colours.
 constexpr int kFirstUserColour = 20;
 
@@ -192,6 +194,7 @@ bool Tui::start() {
         init_pair(kColourHeader, COLOR_BLACK, COLOR_CYAN);
         init_pair(kColourGood, COLOR_GREEN, -1);
         init_pair(kColourBad, COLOR_RED, -1);
+        init_pair(kColourOwnMsg, COLOR_WHITE, -1);
         for (std::size_t index = 0; index < kColorCount; ++index) {
             init_pair(kFirstUserColour + static_cast<int>(index), kUserColourValues[index], -1);
         }
@@ -455,11 +458,17 @@ void Tui::drawMessages() {
         }
         const Row& row = rows_[index];
         if (has_colors()) {
+            if (row.colour == kColourOwnMsg) {
+                wattron(messages_, A_BOLD);
+            }
             wattron(messages_, COLOR_PAIR(row.colour));
         }
         mvwaddnstr(messages_, y, 0, row.text.c_str(), width_);
         if (has_colors()) {
             wattroff(messages_, COLOR_PAIR(row.colour));
+            if (row.colour == kColourOwnMsg) {
+                wattroff(messages_, A_BOLD);
+            }
         }
         wclrtoeol(messages_);
     }
@@ -644,10 +653,13 @@ void Tui::drainIncoming() {
                 break;
             case MsgType::Color:
                 if (message.fields.size() >= 2 && isValidColor(message.fields[1])) {
-                    colours_[message.fields[0]] = message.fields[1];
-                    if (message.fields[0] != name_) {
-                        appendSystem(message.fields[0] + " chose colour " + message.fields[1],
-                                     colourFor(message.fields[0]));
+                    const std::string& sender = message.fields[0];
+                    if (colours_[sender] != message.fields[1]) {
+                        colours_[sender] = message.fields[1];
+                        if (sender != name_) {
+                            appendSystem(sender + " chose color " + message.fields[1],
+                                         colourFor(sender));
+                        }
                     }
                 }
                 break;
@@ -679,11 +691,10 @@ void Tui::drainPeers() {
                 appendSystem("direct link to " + event.name + " is down", kColourBad);
                 break;
             case PeerNetwork::Event::Kind::Color:
-                if (isValidColor(event.body)) {
+                if (isValidColor(event.body) && colours_[event.name] != event.body) {
                     colours_[event.name] = event.body;
                     if (event.name != name_) {
-                        appendSystem(event.name + " chose colour " + event.body,
-                                     colourFor(event.name));
+                        appendSystem(event.name + " chose color " + event.body, colourFor(event.name));
                     }
                 }
                 break;
@@ -714,7 +725,7 @@ void Tui::deliver(const std::string& line) {
     const std::int64_t timestamp = nowSeconds();
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
-    append(formatTime(stamp) + " you: ", body, colourFor(name_));
+    append(formatTime(stamp) + " you: ", body, kColourOwnMsg);
     peers_.sendChat(timestamp, body);
     if (serverReady_ && !connection_.failed()) {
         connection_.send(Message {MsgType::Store, {stamp, body}});
@@ -887,7 +898,8 @@ void Tui::runCommand(const std::string& command) {
             return;
         }
         if (!isValidColor(colour)) {
-            appendSystem("unknown colour: " + colour + " (try red, green, yellow, blue, magenta, cyan, white)",
+            appendSystem("unknown color: " + colour +
+                             " (try red, green, yellow, blue, magenta, cyan, white)",
                          kColourBad);
             return;
         }
@@ -896,11 +908,11 @@ void Tui::runCommand(const std::string& command) {
         if (serverReady_ && !connection_.failed()) {
             connection_.send(Message {MsgType::SetColor, {colour}});
         }
-        appendSystem("you chose colour " + colour, colourFor(name_));
+        appendSystem("you chose color " + colour, colourFor(name_));
     } else if (name == "/help") {
         appendSystem("/help           show this list");
         appendSystem("/users          list everyone online");
-        appendSystem("/color <name>   set your own display colour");
+        appendSystem("/color <name>   set your own display color");
         appendSystem("/clear          clear the message pane");
         appendSystem("/quit, /exit    leave the chat");
     } else {

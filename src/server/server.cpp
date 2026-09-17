@@ -429,7 +429,7 @@ void Server::handleSetColor(Connection& connection, const Message& message) {
     }
 
     database_.setColor(connection.name, colour);
-    log(connection.name + " chose colour " + colour);
+    log(connection.name + " chose color " + colour);
     broadcast(Message {MsgType::Color, {connection.name, colour}});
 }
 
