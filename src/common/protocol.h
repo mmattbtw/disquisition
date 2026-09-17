@@ -32,7 +32,14 @@ enum class MsgType : std::uint8_t {
 
     // peer -> peer
     Hello = 15,    // [name] sent once by whichever side dialled
-    PeerChat = 16  // [timestamp, body] the sender owns the connection
+    PeerChat = 16, // [timestamp, body] the sender owns the connection
+    PeerColor = 19, // [colour] the sender's chosen display colour
+
+    // client -> server
+    SetColor = 17, // [colour] ask the server to record our display colour
+
+    // server -> client
+    Color = 18     // [name, colour] a user's display colour
 };
 
 // Hard cap on a single frame so a hostile client cannot make us allocate.
@@ -41,6 +48,24 @@ constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
 // Limits shared by the server and every peer so both ends agree on them.
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
+
+// Named display colours shared by the server and every client. The server
+// stores and relays these strings opaquely; clients map them onto ncurses
+// colour pairs. A user who has not chosen one falls back to a colour derived
+// from a stable hash of their name, so everyone agrees on it without a wire
+// round trip.
+constexpr const char* kColorNames[] = {
+    "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
+constexpr std::size_t kColorCount = sizeof(kColorNames) / sizeof(kColorNames[0]);
+
+inline bool isValidColor(const std::string& colour) {
+    for (const char* candidate : kColorNames) {
+        if (colour == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
 
 struct Message {
     MsgType type = MsgType::Error;

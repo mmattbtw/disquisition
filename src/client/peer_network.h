@@ -23,7 +23,7 @@ namespace chat {
 class PeerNetwork {
 public:
     struct Event {
-        enum class Kind { Chat, Join, Leave, Note };
+        enum class Kind { Chat, Join, Leave, Note, Color };
         Kind kind = Kind::Note;
         std::int64_t timestamp = 0;
         std::string name;
@@ -71,6 +71,9 @@ public:
     // Delivers one frame to every connected peer. A peer that died mid-send
     // surfaces as a Leave event on the next poll().
     void sendChat(std::int64_t timestamp, const std::string& body);
+
+    // Tells every connected peer our chosen display colour.
+    void sendColor(const std::string& colour);
 
     // Pops one event if there is one. New inbound connections are identified
     // and dead peers reaped along the way.

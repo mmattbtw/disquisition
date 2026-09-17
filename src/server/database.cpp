@@ -45,6 +45,10 @@ Database::Database(const std::string& path) {
          "  timestamp INTEGER NOT NULL,"
          "  sender TEXT NOT NULL,"
          "  body TEXT NOT NULL)");
+    exec(db_,
+         "CREATE TABLE IF NOT EXISTS users ("
+         "  name TEXT PRIMARY KEY,"
+         "  colour TEXT NOT NULL)");
 
     if (sqlite3_prepare_v2(db_, "INSERT INTO messages (timestamp, sender, body) VALUES (?, ?, ?)", -1,
                            &insert_, nullptr) != SQLITE_OK) {
@@ -55,6 +59,16 @@ Database::Database(const std::string& path) {
                            &select_, nullptr) != SQLITE_OK) {
         fail(db_, "cannot prepare select");
     }
+    if (sqlite3_prepare_v2(db_,
+                           "INSERT INTO users (name, colour) VALUES (?, ?) "
+                           "ON CONFLICT(name) DO UPDATE SET colour = excluded.colour",
+                           -1, &colorInsert_, nullptr) != SQLITE_OK) {
+        fail(db_, "cannot prepare colour insert");
+    }
+    if (sqlite3_prepare_v2(db_, "SELECT colour FROM users WHERE name = ?", -1, &colorSelect_,
+                           nullptr) != SQLITE_OK) {
+        fail(db_, "cannot prepare colour select");
+    }
 }
 
 Database::~Database() {
@@ -63,6 +77,12 @@ Database::~Database() {
     }
     if (select_ != nullptr) {
         sqlite3_finalize(select_);
+    }
+    if (colorInsert_ != nullptr) {
+        sqlite3_finalize(colorInsert_);
+    }
+    if (colorSelect_ != nullptr) {
+        sqlite3_finalize(colorSelect_);
     }
     if (db_ != nullptr) {
         sqlite3_close(db_);
@@ -106,6 +126,29 @@ std::vector<StoredMessage> Database::recent(std::size_t limit) {
 
     std::reverse(messages.begin(), messages.end());
     return messages;
+}
+
+void Database::setColor(const std::string& name, const std::string& colour) {
+    sqlite3_reset(colorInsert_);
+    sqlite3_clear_bindings(colorInsert_);
+    sqlite3_bind_text(colorInsert_, 1, name.c_str(), static_cast<int>(name.size()), SQLITE_STATIC);
+    sqlite3_bind_text(colorInsert_, 2, colour.c_str(), static_cast<int>(colour.size()), SQLITE_STATIC);
+    if (sqlite3_step(colorInsert_) != SQLITE_DONE) {
+        fail(db_, "cannot store colour");
+    }
+}
+
+std::string Database::colorOf(const std::string& name) const {
+    sqlite3_reset(colorSelect_);
+    sqlite3_clear_bindings(colorSelect_);
+    sqlite3_bind_text(colorSelect_, 1, name.c_str(), static_cast<int>(name.size()), SQLITE_STATIC);
+
+    std::string colour;
+    if (sqlite3_step(colorSelect_) == SQLITE_ROW) {
+        const auto* value = reinterpret_cast<const char*>(sqlite3_column_text(colorSelect_, 0));
+        colour = value != nullptr ? value : "";
+    }
+    return colour;
 }
 
 }  // namespace chat

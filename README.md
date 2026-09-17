@@ -62,11 +62,12 @@ Then connect one client per person:
 ./build/client --host 127.0.0.1 --port 9000 --name matt --p2p-port 9011
 ```
 
-Without `--name` the client asks for one. Duplicate names get a `-2` suffix.
-`--p2p-port` pins the peer listener to a fixed port (handy through a
-firewall); by default the OS picks a free one and the client reports it.
-Messages are stored in the `messages` table and the last 50 are replayed to
-everyone who joins.
+Without `--name` the client picks a random handle for you. Duplicate names get
+a `-2` suffix. `--p2p-port` pins the peer listener to a fixed port (handy
+through a firewall); by default the OS picks a free one and the client reports
+it. Every user is shown in a colour derived from their name, and you can pick
+your own with `/color`. Messages are stored in the `messages` table and the
+last 50 are replayed to everyone who joins.
 
 ### Client keys
 
@@ -75,7 +76,7 @@ everyone who joins.
 | `Enter` | send |
 | `Up` / `Down`, `PgUp` / `PgDn`, `Home` / `End` | scroll the message pane |
 | `Ctrl-C` | quit |
-| `/help`, `/users`, `/clear`, `/quit` | commands |
+| `/help`, `/users`, `/color <name>`, `/clear`, `/quit` | commands |
 
 ## Group Members
 

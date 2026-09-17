@@ -100,6 +100,9 @@ const char* typeName(MsgType type) {
         case MsgType::PeerLeft: return "PeerLeft";
         case MsgType::Hello: return "Hello";
         case MsgType::PeerChat: return "PeerChat";
+        case MsgType::PeerColor: return "PeerColor";
+        case MsgType::SetColor: return "SetColor";
+        case MsgType::Color: return "Color";
     }
     return "Unknown";
 }

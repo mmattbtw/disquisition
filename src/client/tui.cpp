@@ -6,6 +6,7 @@
 #include <cstring>
 #include <ctime>
 #include <chrono>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -27,8 +28,44 @@ constexpr int kColourSystem = 3;
 constexpr int kColourHeader = 4;
 constexpr int kColourGood = 5;
 constexpr int kColourBad = 6;
+// First colour pair number used for per-user palette colours.
+constexpr int kFirstUserColour = 20;
+
+// Maps a palette name to the ncurses foreground colour value used to build
+// that user's pair. Order must line up with kColorNames.
+constexpr int kUserColourValues[] = {
+    COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE};
 
 volatile std::sig_atomic_t gInterrupted = 0;
+
+// A stable hash of a name so every client agrees on a user's default colour
+// without needing to ask the server or a peer.
+std::string hashColour(const std::string& name) {
+    std::uint64_t hash = 1469598103934665603ULL;  // FNV-1a offset basis
+    for (const unsigned char character : name) {
+        hash ^= character;
+        hash *= 1099511628211ULL;
+    }
+    return kColorNames[hash % kColorCount];
+}
+
+// A friendly default handle for someone who did not pass --name.
+std::string randomName() {
+    constexpr const char* kAdjectives[] = {"Brave",   "Cosmic", "Crimson", "Dapper",
+                                           "Electric", "Golden", "Jolly",   "Midnight",
+                                           "Neon",    "Nimble", "Quiet",   "Solar",
+                                           "Swift",   "Velvet", "Witty",   "Zesty"};
+    constexpr const char* kNouns[] = {"Badger", "Breeze", "Comet",  "Dolphin", "Echo",
+                                      "Falcon", "Galaxy", "Lynx",   "Moose",   "Nimbus",
+                                      "Nova",   "Otter",  "Panda",  "Raven",   "Tiger",
+                                      "Wombat"};
+    static thread_local std::mt19937 generator(
+        static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::uniform_int_distribution<std::size_t> adjective(0,
+                                                         sizeof(kAdjectives) / sizeof(*kAdjectives) - 1);
+    std::uniform_int_distribution<std::size_t> noun(0, sizeof(kNouns) / sizeof(*kNouns) - 1);
+    return std::string(kAdjectives[adjective(generator)]) + "_" + kNouns[noun(generator)];
+}
 
 void handleInterrupt(int) {
     gInterrupted = 1;
@@ -155,6 +192,9 @@ bool Tui::start() {
         init_pair(kColourHeader, COLOR_BLACK, COLOR_CYAN);
         init_pair(kColourGood, COLOR_GREEN, -1);
         init_pair(kColourBad, COLOR_RED, -1);
+        for (std::size_t index = 0; index < kColorCount; ++index) {
+            init_pair(kFirstUserColour + static_cast<int>(index), kUserColourValues[index], -1);
+        }
     }
 
     struct sigaction action {};
@@ -190,6 +230,9 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     port_ = port;
     advertiseHost_ = advertiseHost;
     name_ = trim(initialName);
+    if (name_.empty()) {
+        name_ = randomName();
+    }
 
     if (!start()) {
         std::fprintf(stderr, "cannot initialise terminal\n");
@@ -485,6 +528,23 @@ void Tui::appendSystem(const std::string& text, int colour) {
     append("", "* " + text, colour);
 }
 
+int Tui::pairFor(const std::string& colour) const {
+    for (std::size_t index = 0; index < kColorCount; ++index) {
+        if (colour == kColorNames[index]) {
+            return kFirstUserColour + static_cast<int>(index);
+        }
+    }
+    return kColourOther;
+}
+
+int Tui::colourFor(const std::string& sender) const {
+    const auto it = colours_.find(sender);
+    if (it != colours_.end()) {
+        return pairFor(it->second);
+    }
+    return pairFor(hashColour(sender));
+}
+
 void Tui::rebuildRows() {
     rows_.clear();
     for (const Entry& entry : entries_) {
@@ -533,7 +593,7 @@ void Tui::drainIncoming() {
                 }
                 if (remember(message.fields[1], message.fields[0], message.fields[2])) {
                     append(formatTime(message.fields[0]) + " " + message.fields[1] + ": ",
-                           message.fields[2], 0);
+                           message.fields[2], colourFor(message.fields[1]));
                 }
                 break;
             }
@@ -582,6 +642,15 @@ void Tui::drainIncoming() {
             case MsgType::Users:
                 users_ = message.fields;
                 break;
+            case MsgType::Color:
+                if (message.fields.size() >= 2 && isValidColor(message.fields[1])) {
+                    colours_[message.fields[0]] = message.fields[1];
+                    if (message.fields[0] != name_) {
+                        appendSystem(message.fields[0] + " chose colour " + message.fields[1],
+                                     colourFor(message.fields[0]));
+                    }
+                }
+                break;
             case MsgType::Error:
                 appendSystem(message.fields.empty() ? "server error" : message.fields[0], kColourBad);
                 break;
@@ -600,7 +669,7 @@ void Tui::drainPeers() {
             case PeerNetwork::Event::Kind::Chat:
                 if (remember(event.name, std::to_string(event.timestamp), event.body)) {
                     append(formatTime(std::to_string(event.timestamp)) + " " + event.name + ": ",
-                           event.body, kColourOther);
+                           event.body, colourFor(event.name));
                 }
                 break;
             case PeerNetwork::Event::Kind::Join:
@@ -608,6 +677,15 @@ void Tui::drainPeers() {
                 break;
             case PeerNetwork::Event::Kind::Leave:
                 appendSystem("direct link to " + event.name + " is down", kColourBad);
+                break;
+            case PeerNetwork::Event::Kind::Color:
+                if (isValidColor(event.body)) {
+                    colours_[event.name] = event.body;
+                    if (event.name != name_) {
+                        appendSystem(event.name + " chose colour " + event.body,
+                                     colourFor(event.name));
+                    }
+                }
                 break;
             case PeerNetwork::Event::Kind::Note:
                 appendSystem(event.body, kColourBad);
@@ -636,7 +714,7 @@ void Tui::deliver(const std::string& line) {
     const std::int64_t timestamp = nowSeconds();
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
-    append(formatTime(stamp) + " you: ", body, kColourOwn);
+    append(formatTime(stamp) + " you: ", body, colourFor(name_));
     peers_.sendChat(timestamp, body);
     if (serverReady_ && !connection_.failed()) {
         connection_.send(Message {MsgType::Store, {stamp, body}});
@@ -801,11 +879,30 @@ void Tui::runCommand(const std::string& command) {
             }
         }
         appendSystem(listing);
+    } else if (name == "/color") {
+        std::string colour;
+        stream >> colour;
+        if (colour.empty()) {
+            appendSystem("usage: /color <red|green|yellow|blue|magenta|cyan|white>");
+            return;
+        }
+        if (!isValidColor(colour)) {
+            appendSystem("unknown colour: " + colour + " (try red, green, yellow, blue, magenta, cyan, white)",
+                         kColourBad);
+            return;
+        }
+        colours_[name_] = colour;
+        peers_.sendColor(colour);
+        if (serverReady_ && !connection_.failed()) {
+            connection_.send(Message {MsgType::SetColor, {colour}});
+        }
+        appendSystem("you chose colour " + colour, colourFor(name_));
     } else if (name == "/help") {
-        appendSystem("/help          show this list");
-        appendSystem("/users         list everyone online");
-        appendSystem("/clear         clear the message pane");
-        appendSystem("/quit, /exit   leave the chat");
+        appendSystem("/help           show this list");
+        appendSystem("/users          list everyone online");
+        appendSystem("/color <name>   set your own display colour");
+        appendSystem("/clear          clear the message pane");
+        appendSystem("/quit, /exit    leave the chat");
     } else {
         appendSystem("unknown command: " + name, kColourBad);
     }

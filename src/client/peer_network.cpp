@@ -212,6 +212,16 @@ void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body) {
     }
 }
 
+void PeerNetwork::sendColor(const std::string& colour) {
+    const Message message {MsgType::PeerColor, {colour}};
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : peers_) {
+        if (entry.second.connection != nullptr) {
+            entry.second.connection->send(message);
+        }
+    }
+}
+
 bool PeerNetwork::poll(Event& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     drainPending();
@@ -376,6 +386,8 @@ void PeerNetwork::drainPending() {
                 std::int64_t timestamp = 0;
                 parseInt64(message.fields[0], timestamp);
                 pushEvent(Event::Kind::Chat, remote, sanitizeBody(message.fields[1]), timestamp);
+            } else if (message.type == MsgType::PeerColor && !message.fields.empty()) {
+                pushEvent(Event::Kind::Color, remote, sanitizeBody(message.fields[0]), 0);
             }
         }
 
@@ -400,6 +412,8 @@ void PeerNetwork::drainPeers() {
                 std::int64_t timestamp = 0;
                 parseInt64(message.fields[0], timestamp);
                 pushEvent(Event::Kind::Chat, peer.name, sanitizeBody(message.fields[1]), timestamp);
+            } else if (message.type == MsgType::PeerColor && !message.fields.empty()) {
+                pushEvent(Event::Kind::Color, peer.name, sanitizeBody(message.fields[0]), 0);
             }
         }
         if (peer.connection->failed()) {
