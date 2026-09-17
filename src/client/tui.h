@@ -24,7 +24,8 @@ public:
     Tui(Connection& connection, PeerNetwork& peers);
     ~Tui();
 
-    int run(const std::string& initialName, const std::string& host, std::uint16_t port);
+    int run(const std::string& initialName, const std::string& host, std::uint16_t port,
+            const std::string& advertiseHost);
 
 private:
     struct Entry {
@@ -55,6 +56,7 @@ private:
     void drainIncoming();
     void drainPeers();
     bool remember(const std::string& sender, const std::string& timestamp, const std::string& body);
+    void sendLogin();
     void deliver(const std::string& line);
     void monitorServer();
     void handleKey(int key);
@@ -65,6 +67,7 @@ private:
     PeerNetwork& peers_;
     std::string host_;
     std::uint16_t port_ = 0;
+    std::string advertiseHost_;
 
     WINDOW* header_ = nullptr;
     WINDOW* messages_ = nullptr;

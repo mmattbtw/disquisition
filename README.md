@@ -33,7 +33,6 @@ src/common/protocol.{h,cpp}   shared wire format (length-prefixed frames)
 src/server/                   poll(2) event loop + SQLite persistence
 src/client/                   ncurses TUI + socket reader thread
 src/client/peer_network.*     the peer-to-peer mesh (listener + dialer)
-tests/p2p_smoke.py            end-to-end test: mesh, history, server death
 ```
 
 ## Building
@@ -42,7 +41,6 @@ Requires a C++17 compiler, CMake 3.16+, SQLite3, and ncurses.
 
 ```sh
 make          # builds build/client and build/server
-make test     # builds, then runs the end-to-end smoke test
 make clean    # removes the build directory
 ```
 

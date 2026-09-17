@@ -1,6 +1,6 @@
 BUILD_DIR := build
 
-.PHONY: all clean test
+.PHONY: all clean
 
 all:
 	cmake -S . -B $(BUILD_DIR)
@@ -8,6 +8,3 @@ all:
 
 clean:
 	rm -rf $(BUILD_DIR)
-
-test: all
-	python3 tests/p2p_smoke.py

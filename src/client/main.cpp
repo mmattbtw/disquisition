@@ -22,6 +22,10 @@ void printUsage(std::FILE* out) {
                  "  -n, --name <name>    sign in automatically with this name\n"
                  "      --p2p-port <port>  listen port for direct peer connections\n"
                  "                       (default 0, which picks a free port)\n"
+                 "      --advertise <host> address to tell peers to dial for p2p, instead of\n"
+                 "                       the address the server sees you connect from. Use\n"
+                 "                       your public IP or hostname to accept peers over the\n"
+                 "                       internet (pair with --p2p-port + a port forward)\n"
                  "  -h, --help           show this message\n");
 }
 
@@ -31,6 +35,7 @@ int main(int argc, char** argv) {
     std::string host = "127.0.0.1";
     std::uint16_t port = 9000;
     std::uint16_t peerPort = 0;
+    std::string advertise;
     std::string name;
 
     for (int index = 1; index < argc; ++index) {
@@ -60,6 +65,11 @@ int main(int argc, char** argv) {
                     throw std::runtime_error("port out of range");
                 }
                 peerPort = static_cast<std::uint16_t>(value);
+            } else if (argument == "--advertise") {
+                if (!hasValue) {
+                    throw std::runtime_error("missing value for " + argument);
+                }
+                advertise = argv[++index];
             } else if (argument == "-n" || argument == "--name") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
@@ -99,5 +109,5 @@ int main(int argc, char** argv) {
     }
 
     chat::Tui tui(connection, peers);
-    return tui.run(name, host, port);
+    return tui.run(name, host, port, advertise);
 }

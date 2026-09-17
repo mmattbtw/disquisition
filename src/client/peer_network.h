@@ -46,9 +46,14 @@ public:
     // before feeding the roster in.
     void setMyName(const std::string& name);
 
+    // Whether we advertise a publicly reachable host (the user passed
+    // --advertise). Reachability decides who dials whom across the internet.
+    void setMyAdvertised(bool advertised);
+
     // Records (or refreshes) a roster entry and dials it when the rule says
     // the call is ours to make.
-    void addPeer(const std::string& name, const std::string& host, std::uint16_t port);
+    void addPeer(const std::string& name, const std::string& host, std::uint16_t port,
+                 bool advertised);
     void removePeer(const std::string& name);
 
     bool connectedTo(const std::string& name) const;
@@ -72,6 +77,7 @@ private:
         std::string name;
         std::string host;
         std::uint16_t port = 0;
+        bool advertised = false;
         bool dialing = false;
         std::unique_ptr<Connection> connection;
     };
@@ -83,11 +89,14 @@ private:
     void enqueueDial(const std::string& name);
     void pushEvent(Event::Kind kind, const std::string& name, const std::string& body,
                    std::int64_t timestamp);
+    bool shouldDial(const Peer& peer) const;
+    void scanPeersForDialsLocked();
 
     int listenFd_ = -1;
     std::uint16_t listenPort_ = 0;
 
     std::string myName_;
+    bool myAdvertised_ = false;
     std::map<std::string, Peer> peers_;
     std::vector<std::unique_ptr<Connection>> pending_;
     std::deque<std::string> dialQueue_;

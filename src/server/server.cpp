@@ -39,6 +39,32 @@ std::int64_t nowSeconds() {
     return static_cast<std::int64_t>(std::time(nullptr));
 }
 
+std::string trim(const std::string& text) {
+    const auto begin = text.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) {
+        return "";
+    }
+    const auto end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
+}
+
+// A peer's advertised address is just relayed to whoever wants to dial it, so
+// we only clean it enough that it cannot smuggle stray bytes into a frame.
+std::string sanitizeHost(const std::string& host) {
+    std::string cleaned = trim(host);
+    constexpr std::size_t kMaxHostLength = 253;
+    if (cleaned.size() > kMaxHostLength) {
+        cleaned.resize(kMaxHostLength);
+    }
+    for (char& character : cleaned) {
+        const unsigned char value = static_cast<unsigned char>(character);
+        if (value < 0x20 || value == 0x7F) {
+            character = '?';
+        }
+    }
+    return cleaned;
+}
+
 std::string numericHost(const sockaddr_storage& address) {
     char host[NI_MAXHOST] = {0};
     if (getnameinfo(reinterpret_cast<const sockaddr*>(&address), sizeof(address), host, sizeof(host),
@@ -320,6 +346,7 @@ void Server::handleLogin(Connection& connection, const Message& message) {
 
     connection.name = uniqueName(requested);
     connection.peerPort = static_cast<std::uint16_t>(peerPort);
+    connection.advertisedHost = sanitizeHost(message.fields.size() >= 3 ? message.fields[2] : "");
     connection.authenticated = true;
 
     send(connection, Message {MsgType::LoginOk, {connection.name, "welcome, " + connection.name}});
@@ -329,13 +356,15 @@ void Server::handleLogin(Connection& connection, const Message& message) {
     for (const Connection& other : connections_) {
         if (&other != &connection && other.authenticated) {
             send(connection, Message {MsgType::Peer,
-                                      {other.name, other.host, std::to_string(other.peerPort)}});
+                                      {other.name, hostFor(other), std::to_string(other.peerPort),
+                                       other.advertisedHost.empty() ? "0" : "1"}});
         }
     }
 
-    log(connection.name + " joined from " + connection.host);
+    log(connection.name + " joined from " + hostFor(connection));
     broadcast(Message {MsgType::PeerJoined,
-                       {connection.name, connection.host, std::to_string(connection.peerPort)}},
+                       {connection.name, hostFor(connection), std::to_string(connection.peerPort),
+                        connection.advertisedHost.empty() ? "0" : "1"}},
               &connection);
     broadcastUsers();
 }
@@ -433,6 +462,10 @@ std::string Server::uniqueName(const std::string& requested) const {
         }
     }
     return requested + "-" + std::to_string(nowSeconds());
+}
+
+const std::string& Server::hostFor(const Connection& connection) const {
+    return connection.advertisedHost.empty() ? connection.host : connection.advertisedHost;
 }
 
 void Server::dropConnection(std::size_t index) {

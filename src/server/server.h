@@ -37,8 +37,10 @@ private:
         std::string out;
         std::string name;
         // Address the client connected from, announced to other peers so they
-        // can open direct TCP connections to it.
+        // can open direct TCP connections to it. If the client supplied its
+        // own advertised host (e.g. a public IP) that takes precedence.
         std::string host;
+        std::string advertisedHost;
         std::uint16_t peerPort = 0;
         bool authenticated = false;
         bool closing = false;
@@ -60,6 +62,7 @@ private:
     void broadcastUsers();
 
     std::string uniqueName(const std::string& requested) const;
+    const std::string& hostFor(const Connection& connection) const;
     void dropConnection(std::size_t index);
     void log(const std::string& text) const;
 

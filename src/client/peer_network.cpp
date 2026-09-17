@@ -117,16 +117,17 @@ void PeerNetwork::stop() {
 void PeerNetwork::setMyName(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
     myName_ = name;
-    for (auto& entry : peers_) {
-        Peer& peer = entry.second;
-        if (peer.connection == nullptr && !peer.dialing && myName_ < peer.name) {
-            peer.dialing = true;
-            enqueueDial(peer.name);
-        }
-    }
+    scanPeersForDialsLocked();
 }
 
-void PeerNetwork::addPeer(const std::string& name, const std::string& host, std::uint16_t port) {
+void PeerNetwork::setMyAdvertised(bool advertised) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    myAdvertised_ = advertised;
+    scanPeersForDialsLocked();
+}
+
+void PeerNetwork::addPeer(const std::string& name, const std::string& host, std::uint16_t port,
+                          bool advertised) {
     const std::string cleaned = sanitizeName(name);
     if (cleaned.empty() || port == 0) {
         return;
@@ -139,13 +140,15 @@ void PeerNetwork::addPeer(const std::string& name, const std::string& host, std:
     if (existing != peers_.end()) {
         existing->second.host = host;
         existing->second.port = port;
+        existing->second.advertised = advertised;
         return;
     }
     Peer peer;
     peer.name = cleaned;
     peer.host = host;
     peer.port = port;
-    peer.dialing = !myName_.empty() && myName_ < cleaned;
+    peer.advertised = advertised;
+    peer.dialing = shouldDial(peer);
     const bool dial = peer.dialing;
     peers_.emplace(cleaned, std::move(peer));
     if (dial) {
@@ -391,10 +394,35 @@ void PeerNetwork::drainPeers() {
         if (peer.connection->failed()) {
             pushEvent(Event::Kind::Leave, peer.name, "", 0);
             peer.connection.reset();
-            if (!myName_.empty() && myName_ < peer.name && !peer.dialing) {
+            if (shouldDial(peer) && !peer.dialing) {
                 peer.dialing = true;
                 enqueueDial(peer.name);
             }
+        }
+    }
+}
+
+bool PeerNetwork::shouldDial(const Peer& peer) const {
+    if (peer.connection != nullptr || peer.dialing || myName_.empty() || peer.name.empty() ||
+        peer.name == myName_) {
+        return false;
+    }
+    // Two peers that are symmetric (both advertised or both not) fall back to
+    // the name rule so exactly one dials. If only one is publicly reachable,
+    // the unreachable side must be the one to call out, or the link can never
+    // form over the internet.
+    if (myAdvertised_ == peer.advertised) {
+        return myName_ < peer.name;
+    }
+    return peer.advertised;
+}
+
+void PeerNetwork::scanPeersForDialsLocked() {
+    for (auto& entry : peers_) {
+        Peer& peer = entry.second;
+        if (peer.connection == nullptr && !peer.dialing && shouldDial(peer)) {
+            peer.dialing = true;
+            enqueueDial(peer.name);
         }
     }
 }

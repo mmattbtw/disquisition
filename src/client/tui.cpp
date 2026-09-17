@@ -184,15 +184,19 @@ void Tui::stop() {
     }
 }
 
-int Tui::run(const std::string& initialName, const std::string& host, std::uint16_t port) {
+int Tui::run(const std::string& initialName, const std::string& host, std::uint16_t port,
+             const std::string& advertiseHost) {
     host_ = host;
     port_ = port;
+    advertiseHost_ = advertiseHost;
     name_ = trim(initialName);
 
     if (!start()) {
         std::fprintf(stderr, "cannot initialise terminal\n");
         return 1;
     }
+
+    peers_.setMyAdvertised(!advertiseHost_.empty());
 
     layout();
 
@@ -202,6 +206,9 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     } else {
         greeting = "connected to " + host_ + ":" + std::to_string(port_) + " (peer port " +
                    std::to_string(peers_.port()) + ")";
+        if (!advertiseHost_.empty()) {
+            greeting += ", advertising " + advertiseHost_;
+        }
     }
     if (!name_.empty()) {
         greeting += " as " + name_;
@@ -212,7 +219,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
         loginGen_ = transportGen_.load();
         loginSent_ = true;
         status_ = "signing in";
-        connection_.send(Message {MsgType::Login, {name_, std::to_string(peers_.port())}});
+        sendLogin();
     } else if (name_.empty()) {
         appendSystem("type a name and press enter to join");
     }
@@ -255,7 +262,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
                 loginSent_ = true;
                 status_ = "signing in";
                 statusColour_ = kColourSystem;
-                connection_.send(Message {MsgType::Login, {name_, std::to_string(peers_.port())}});
+                sendLogin();
             } else if (name_.empty()) {
                 status_ = "connecting";
                 statusColour_ = kColourSystem;
@@ -534,7 +541,7 @@ void Tui::drainIncoming() {
                 historyOpen_ = false;
                 break;
             case MsgType::Peer: {
-                if (message.fields.size() < 3) {
+                if (message.fields.size() < 4) {
                     break;
                 }
                 std::int64_t peerPort = 0;
@@ -542,13 +549,13 @@ void Tui::drainIncoming() {
                     break;
                 }
                 peers_.addPeer(message.fields[0], message.fields[1],
-                               static_cast<std::uint16_t>(peerPort));
+                               static_cast<std::uint16_t>(peerPort), message.fields[3] == "1");
                 appendSystem(message.fields[0] + " is online at " + message.fields[1] + ":" +
                              message.fields[2]);
                 break;
             }
             case MsgType::PeerJoined: {
-                if (message.fields.size() < 3) {
+                if (message.fields.size() < 4) {
                     break;
                 }
                 std::int64_t peerPort = 0;
@@ -556,7 +563,7 @@ void Tui::drainIncoming() {
                     break;
                 }
                 peers_.addPeer(message.fields[0], message.fields[1],
-                               static_cast<std::uint16_t>(peerPort));
+                               static_cast<std::uint16_t>(peerPort), message.fields[3] == "1");
                 appendSystem(message.fields[0] + " joined (" + message.fields[1] + ":" +
                              message.fields[2] + ")");
                 break;
@@ -614,6 +621,11 @@ bool Tui::remember(const std::string& sender, const std::string& timestamp, cons
         seen_.clear();
     }
     return seen_.insert(dedupeKey(sender, timestamp, body)).second;
+}
+
+void Tui::sendLogin() {
+    connection_.send(Message {MsgType::Login,
+                              {name_, std::to_string(peers_.port()), advertiseHost_}});
 }
 
 void Tui::deliver(const std::string& line) {
@@ -747,7 +759,7 @@ void Tui::submit() {
         statusColour_ = kColourSystem;
         if (!connection_.failed() && loginGen_ != transportGen_.load()) {
             loginGen_ = transportGen_.load();
-            connection_.send(Message {MsgType::Login, {name_, std::to_string(peers_.port())}});
+            sendLogin();
         } else if (connection_.failed()) {
             appendSystem("server unreachable; signing in as soon as it is back");
             monitorCv_.notify_all();

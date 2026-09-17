@@ -15,7 +15,7 @@ namespace chat {
 // and exchange frames directly.
 enum class MsgType : std::uint8_t {
     // client -> server
-    Login = 1,         // [name, peer port]
+    Login = 1,         // [name, peer port, advertised host (may be empty)]
     Store = 10,        // [timestamp, body] archive a message already sent p2p
     FetchHistory = 11, // []
 
@@ -26,8 +26,8 @@ enum class MsgType : std::uint8_t {
     System = 7,     // [text]
     Users = 8,      // [name]*
     HistoryEnd = 9, // []
-    Peer = 12,      // [name, host, port] one entry of the on-line roster
-    PeerJoined = 13, // [name, host, port]
+    Peer = 12,      // [name, host, port, advertised (0|1)] one roster entry
+    PeerJoined = 13, // [name, host, port, advertised (0|1)]
     PeerLeft = 14,  // [name]
 
     // peer -> peer
