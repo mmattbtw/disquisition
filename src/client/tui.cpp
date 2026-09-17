@@ -33,10 +33,16 @@ constexpr int kColourOwnMsg = 7;
 // First colour pair number used for per-user palette colours.
 constexpr int kFirstUserColour = 20;
 
-// Maps a palette name to the ncurses foreground colour value used to build
-// that user's pair. Order must line up with kColorNames.
-constexpr int kUserColourValues[] = {
+// Maps a palette name to the basic ncurses foreground used on limited terminals.
+// Order must line up with kColorNames.
+constexpr int kBasicUserColourValues[] = {
     COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE};
+
+// Soft xterm-256 colours keep names playful without borrowing the neutral used
+// for system notices. The command names stay familiar even though the rendered
+// shades are pink, mint, butter, periwinkle, lilac, aqua, and peach.
+constexpr int kCandyUserColourValues[] = {211, 121, 229, 111, 183, 159, 216};
+constexpr int kCandySystemColour = 250;
 
 volatile std::sig_atomic_t gInterrupted = 0;
 
@@ -188,15 +194,18 @@ bool Tui::start() {
     if (has_colors()) {
         start_color();
         use_default_colors();
+        const bool hasCandyPalette = COLORS >= 256;
         init_pair(kColourOwn, COLOR_CYAN, -1);
         init_pair(kColourOther, COLOR_MAGENTA, -1);
-        init_pair(kColourSystem, COLOR_YELLOW, -1);
+        init_pair(kColourSystem, hasCandyPalette ? kCandySystemColour : COLOR_WHITE, -1);
         init_pair(kColourHeader, COLOR_BLACK, COLOR_CYAN);
         init_pair(kColourGood, COLOR_GREEN, -1);
         init_pair(kColourBad, COLOR_RED, -1);
         init_pair(kColourOwnMsg, COLOR_WHITE, -1);
         for (std::size_t index = 0; index < kColorCount; ++index) {
-            init_pair(kFirstUserColour + static_cast<int>(index), kUserColourValues[index], -1);
+            const int colour = hasCandyPalette ? kCandyUserColourValues[index]
+                                               : kBasicUserColourValues[index];
+            init_pair(kFirstUserColour + static_cast<int>(index), colour, -1);
         }
     }
 
@@ -663,8 +672,7 @@ void Tui::drainIncoming() {
                     if (colours_[sender] != message.fields[1]) {
                         colours_[sender] = message.fields[1];
                         if (sender != name_) {
-                            appendSystem(sender + " chose color " + message.fields[1],
-                                         colourFor(sender));
+                            appendSystem(sender + " chose color " + message.fields[1]);
                         }
                     }
                 }
@@ -692,7 +700,7 @@ void Tui::drainIncoming() {
                 if (isValidColor(colour) && colours_[sender] != colour) {
                     colours_[sender] = colour;
                     if (sender != name_) {
-                        appendSystem(sender + " chose color " + colour, colourFor(sender));
+                        appendSystem(sender + " chose color " + colour);
                     }
                 }
                 break;
@@ -728,7 +736,7 @@ void Tui::drainPeers() {
                 if (isValidColor(event.body) && colours_[event.name] != event.body) {
                     colours_[event.name] = event.body;
                     if (event.name != name_) {
-                        appendSystem(event.name + " chose color " + event.body, colourFor(event.name));
+                        appendSystem(event.name + " chose color " + event.body);
                     }
                 }
                 break;
@@ -953,7 +961,7 @@ void Tui::runCommand(const std::string& command) {
         if (serverReady_ && !connection_.failed()) {
             connection_.send(Message {MsgType::SetColor, {colour}});
         }
-        appendSystem("you chose color " + colour, colourFor(name_));
+        appendSystem("you chose color " + colour);
     } else if (name == "/help") {
         appendSystem("/help           show this list");
         appendSystem("/users          list everyone online");
