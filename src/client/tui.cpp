@@ -791,6 +791,11 @@ void Tui::runCommand(const std::string& command) {
         std::string listing = "online:";
         for (const std::string& user : users_) {
             listing += " " + user;
+            std::string host;
+            std::uint16_t peerPort = 0;
+            if (peers_.peerAddress(user, host, peerPort)) {
+                listing += " (" + host + ":" + std::to_string(peerPort) + ")";
+            }
             if (peers_.connectedTo(user)) {
                 listing += " (direct)";
             }

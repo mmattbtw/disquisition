@@ -167,6 +167,17 @@ bool PeerNetwork::connectedTo(const std::string& name) const {
     return it != peers_.end() && it->second.connection != nullptr;
 }
 
+bool PeerNetwork::peerAddress(const std::string& name, std::string& host, std::uint16_t& port) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = peers_.find(name);
+    if (it == peers_.end()) {
+        return false;
+    }
+    host = it->second.host;
+    port = it->second.port;
+    return true;
+}
+
 std::size_t PeerNetwork::connectedCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::size_t count = 0;

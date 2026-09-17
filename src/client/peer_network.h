@@ -59,6 +59,10 @@ public:
     bool connectedTo(const std::string& name) const;
     std::size_t connectedCount() const;
 
+    // Fills `host` and `port` with the address peers are told to dial for
+    // `name`, if the roster knows about that peer.
+    bool peerAddress(const std::string& name, std::string& host, std::uint16_t& port) const;
+
     // True when nothing is dialling and every inbound connection has been
     // identified: the mesh is as complete as it is going to get, so history
     // fetched now cannot miss anything a reachable peer already stored.
