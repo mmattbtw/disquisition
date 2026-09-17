@@ -29,7 +29,7 @@ relay (below).
 
 ## Relays: joining without port forwarding
 
-A relay is a small, state-less service you run on any host that *can* accept
+A relay is a small, state-less service you run on any host that _can_ accept
 inbound connections (a VPS, say). Many users share one relay and one port: each
 client supplies its own name, and the relay signs into the server on that
 user's behalf, advertises itself as the user's peer address, and does the whole
@@ -38,19 +38,19 @@ relays. A client never listens for anything; it just dials the relay outbound,
 so it works from behind NAT.
 
 ```sh
-# on the public host: one relay, reachable at relay.mmatt.net:42069
-./build/relay --host chat.example.net --port 9000 \
-              --advertise relay.mmatt.net --listen 42069
+# on the public host: one relay, reachable at relay.mmatt.net:3333
+./build/relay --host relay.mmatt.net --port 9000 \
+              --advertise relay.mmatt.net --listen 3333
 
 # on each laptop: no port forward, no --advertise
-./build/client --relay relay.mmatt.net:42069 --name matt
-./build/client --relay relay.mmatt.net:42069 --name jesse
+./build/client --relay relay.mmatt.net:3333 --name matt
+./build/client --relay relay.mmatt.net:3333 --name jesse
 ```
 
 Because several users share the port, peers dial it with a target: the `Hello`
 frame names both the caller and the user it wants, so the relay routes the link
 to the right person. Everyone else still sees each user arrive at the relay's
-address, e.g. `matt joined (relay.mmatt.net:42069)`. The relay keeps no
+address, e.g. `matt joined (relay.mmatt.net:3333)`. The relay keeps no
 database and stores no messages; it only forwards frames, and the server still
 owns accounts, discovery and history. Relay-to-relay links need no special
 support: a relay dials another user's relay exactly the way it dials any peer,
@@ -109,7 +109,7 @@ To join through a relay instead of accepting direct connections (no port
 forward), pass `--relay` with the relay's host and port:
 
 ```sh
-./build/client --relay relay.mmatt.net:42069 --name matt
+./build/client --relay relay.mmatt.net:3333 --name matt
 ```
 
 The name you pass is what the relay signs in as, so any number of users can
@@ -117,17 +117,17 @@ share one relay.
 
 ### Client keys
 
-| Key | Action |
-| --- | --- |
-| `Enter` | send |
-| `Up` / `Down`, `PgUp` / `PgDn`, `Home` / `End` | scroll the message pane |
-| `Ctrl-C` | quit |
-| `/help`, `/users`, `/color <name>`, `/clear`, `/quit` | commands |
+| Key                                                   | Action                  |
+| ----------------------------------------------------- | ----------------------- |
+| `Enter`                                               | send                    |
+| `Up` / `Down`, `PgUp` / `PgDn`, `Home` / `End`        | scroll the message pane |
+| `Ctrl-C`                                              | quit                    |
+| `/help`, `/users`, `/color <name>`, `/clear`, `/quit` | commands                |
 
 ## Group Members
 
 - Matt Morris [@mmattbtw](https://github.com/mmattbtw)
-- Jack Stefl 
+- Jack Stefl
 - Cameron Sapienza
 - Zheer Shimeirani [@z-shim](https://github.com/z-shim)
 - Jesse Tomlin [@ChaosSnakey](https://github.com/ChaosSnakey)
