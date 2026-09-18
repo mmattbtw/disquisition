@@ -22,7 +22,7 @@ jobs:
             deps: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         if: ${{ matrix.deps != '' }}
@@ -35,7 +35,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: |
