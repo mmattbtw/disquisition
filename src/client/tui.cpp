@@ -491,11 +491,11 @@ void Tui::drawInput() {
     }
     const std::string visible = text_.substr(start, static_cast<std::size_t>(available));
     if (has_colors()) {
-        wattron(input_, COLOR_PAIR(kColorOwn));
+        wattron(input_, COLOR_PAIR(pairFor(color_)));
     }
     mvwaddstr(input_, 0, labelLength, visible.c_str());
     if (has_colors()) {
-        wattroff(input_, COLOR_PAIR(kColorOwn));
+        wattroff(input_, COLOR_PAIR(pairFor(color_)));
     }
 
     const int cursorX = labelLength + static_cast<int>(cursor_ - start);
@@ -906,7 +906,9 @@ void Tui::runCommand(const std::string& command) {
         std::string color;
         stream >> color;
         if (color.empty()) {
+            const std::string who = name_.empty() ? "you" : name_;
             appendSystem("usage: /color <" + paletteList() + "|0-255>");
+            appendSystem("right now " + who, pairFor(color_));
             return;
         }
         int customIndex = 0;
@@ -925,7 +927,7 @@ void Tui::runCommand(const std::string& command) {
             return;
         }
         color_ = color;
-        appendSystem("you chose color " + color);
+        appendSystem("you chose color " + color, pairFor(color_));
     } else if (name == "/help") {
         appendSystem("/help           show this list");
         appendSystem("/users          list everyone online");
