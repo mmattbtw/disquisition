@@ -30,7 +30,7 @@ void printUsage(std::FILE* out) {
                  "      --relay <host[:port]>  reach the mesh through a relay instead of\n"
                  "                       accepting direct connections. Your traffic and\n"
                  "                       everyone else's is tunnelled through it, so no\n"
-                 "                       port forward is needed (default port 42069)\n"
+                 "                       port forward is needed (default port 3333)\n"
                  "      --leak-my-ip     if the relay drops, fall back to a direct connection\n"
                  "                       while continuing to retry the relay\n"
                  "  -h, --help           show this message\n");
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     std::uint16_t relayPort = 0;
     if (useRelay) {
         try {
-            if (!splitHostPort(relayText, relayHost, relayPort, 42069)) {
+            if (!splitHostPort(relayText, relayHost, relayPort, 3333)) {
                 throw std::runtime_error("expected host or host:port");
             }
         } catch (const std::exception& error) {

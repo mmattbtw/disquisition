@@ -70,7 +70,8 @@ int main() {
         close(client);
     });
 
-    disquisition::Client client("127.0.0.1:" + std::to_string(port));
+    disquisition::Client client("127.0.0.1:" + std::to_string(port),
+                                disquisition::Client::RELAY);
     client.onMessage(receiveCallback);
     client.connect();
     client.setName("matt");
@@ -124,8 +125,8 @@ int main() {
         close(directSocket);
     });
 
-    disquisition::Client directClient("127.0.0.1:" + std::to_string(directPort),
-                                      disquisition::Client::DIRECT);
+    // A one-argument Client uses direct mode by default.
+    disquisition::Client directClient("127.0.0.1:" + std::to_string(directPort));
     directClient.connect();
     directClient.setName("matt");
     directClient.sendMessage("direct hello");

@@ -21,7 +21,7 @@ void printUsage(std::FILE* out) {
                  "                          recommended: it is what lets unreachable\n"
                  "                          clients be discovered and dialled\n"
                  "      --listen <port>     the one port every hosted user shares, for\n"
-                 "                          clients and peers alike (default 42069)\n"
+                 "                          clients and peers alike (default 3333)\n"
                  "  -h, --help              show this message\n"
                  "\n"
                  "Names come from the clients: any number of clients may attach, each\n"

@@ -16,7 +16,7 @@ namespace disquisition
 // A program that wants to receive messages gives onMessage the name of a
 // function to call. The usual order looks like this:
 //
-//     Client client("relay.mmatt.net:3333");
+//     Client client("chat.example.net:9000");
 //     client.onMessage(showMessage);
 //     client.connect();
 //     client.setName("matt");
@@ -69,9 +69,9 @@ private:
 
 public:
     // address must contain a host name and port separated by a colon.
-    // RELAY is the default so the original one-argument example still works.
-    // To connect directly, pass Client::DIRECT as the second argument.
-    Client(std::string address, ConnectionType type = RELAY);
+    // DIRECT is the default. Pass Client::RELAY as the second argument when
+    // the address belongs to a relay instead of the central server.
+    Client(std::string address, ConnectionType type = DIRECT);
 
     // Closing the socket in the destructor prevents a program from leaving a
     // connection open when a Client object goes out of scope.

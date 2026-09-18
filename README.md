@@ -1,137 +1,229 @@
 # disquisition
 
-A tiny group text chat with a hybrid peer-to-peer design: a C++ server
-handles accounts, peer discovery and message storage in SQLite, but live
-chat travels directly between peers over raw TCP sockets. Kill the server
-mid-conversation and the mesh keeps talking.
+Disquisition is a small C++17 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and stores recent messages in SQLite. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
 
-## How it works
+The repository builds four pieces:
 
-Each client listens on its own peer port (picked automatically unless you
-pass `--p2p-port`) and announces it at login. The server hands out the
-on-line roster (`name, host, port`) and broadcasts joins and leaves. Peers
-then form a full mesh: for every pair, the peer whose name sorts first
-dials the other and introduces itself with a `Hello` frame, so there is
-exactly one TCP connection per pair with no negotiation.
+- `server`, the discovery and history service
+- `client`, an ncurses terminal client
+- `relay`, a shared gateway for clients that cannot accept inbound connections
+- `disquisition::client`, a static C++ client library
 
-Sending a line delivers it straight to every connected peer and also
-`Store`s a copy on the server for history. New joiners fetch recent
-messages from the server only after their mesh has settled, and anything
-arriving through both paths is shown once. If the server connection drops,
-the client stays up on peer-to-peer alone and signs itself back in when
-the server returns — it even starts without a server and waits for one.
-Storage and history simply pause during an outage; anything sent meanwhile
-travels peer-to-peer only.
+This is a plain TCP protocol. It does not provide encryption, authentication, private rooms, or access control. Use it only on networks and hosts you trust.
 
-Peers must be able to open TCP connections to each other, so this is built
-for a LAN or a single machine rather than the open internet — unless you run a
-relay (below).
+## Requirements
 
-## Relays: joining without port forwarding
+- CMake 3.16 or newer
+- a C++17 compiler
+- SQLite 3.24 or newer, including development headers
+- ncurses, including development headers
+- POSIX sockets and `poll`
 
-A relay is a small, state-less service you run on any host that _can_ accept
-inbound connections (a VPS, say). Many users share one relay and one port: each
-client supplies its own name, and the relay signs into the server on that
-user's behalf, advertises itself as the user's peer address, and does the whole
-mesh for them — dialing reachable peers directly and calling other people's
-relays. A client never listens for anything; it just dials the relay outbound,
-so it works from behind NAT.
+## Build and test
 
 ```sh
-# on the public host: one relay, reachable at relay.mmatt.net:3333
-./build/relay --host relay.mmatt.net --port 9000 \
-              --advertise relay.mmatt.net --listen 3333
-
-# on each laptop: no port forward, no --advertise
-./build/client --relay relay.mmatt.net:3333 --name matt
-./build/client --relay relay.mmatt.net:3333 --name jesse
+make
+ctest --test-dir build --output-on-failure
 ```
 
-Because several users share the port, peers dial it with a target: the `Hello`
-frame names both the caller and the user it wants, so the relay routes the link
-to the right person. Everyone else still sees each user arrive at the relay's
-address, e.g. `matt joined (relay.mmatt.net:3333)`. The relay keeps no
-database and stores no messages; it only forwards frames, and the server still
-owns accounts, discovery and history. Relay-to-relay links need no special
-support: a relay dials another user's relay exactly the way it dials any peer,
-so there is still one connection per pair.
+The build creates `build/server`, `build/client`, `build/relay`, and the static client library. `make clean` removes the `build` directory.
 
-## Layout
-
-```
-src/common/protocol.{h,cpp}   shared wire format (length-prefixed frames)
-src/server/                   poll(2) event loop + SQLite persistence
-src/client/                   ncurses TUI + socket reader thread
-src/client/peer_network.*     the peer-to-peer mesh (listener + dialer)
-src/relay/                    shared multi-user relay (one port, many users)
-```
-
-## Building
-
-Requires a C++17 compiler, CMake 3.16+, SQLite 3.24+, and ncurses.
+You can also use CMake directly:
 
 ```sh
-make          # builds build/client, build/server and build/relay
-make clean    # removes the build directory
+cmake -S . -B build
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-(Or run the CMake commands from the Makefile directly if you prefer.)
+## Run a local chat
 
-## Running
-
-Start the server (it creates the database on first run):
+Start the server. It creates `chat.db` if the file does not exist.
 
 ```sh
 ./build/server --port 9000 --db chat.db
 ```
 
-### C++ client library
+Open another terminal for each client:
 
-Link the `disquisition::client` CMake target and include
-`<disquisition/client.h>`. This first version sends messages through a relay
-or through direct peer connections.
+```sh
+./build/client --host 127.0.0.1 --port 9000 --name matt
+./build/client --host 127.0.0.1 --port 9000 --name jesse
+```
+
+Each direct client opens a peer listener on an automatically selected port. On a LAN, the server announces the source address it sees. Across routed networks, pass a reachable address with `--advertise` and forward the chosen `--p2p-port` through the firewall or router.
+
+```sh
+./build/client \
+  --host chat.example.net \
+  --port 9000 \
+  --name matt \
+  --advertise matt.example.net \
+  --p2p-port 9011
+```
+
+If two connected users request the same name, the server gives the later user a suffix such as `-2`.
+
+Running `./build/client` with no arguments starts an interactive setup prompt. That prompt defaults to `relay.mmatt.net:9000`. When any command-line option is present, the normal command-line defaults are `127.0.0.1:9000`.
+
+## How delivery works
+
+After sign-in, the server sends the client a roster containing each user's host and peer port. For each pair of users, the lexicographically earlier name opens the connection. This produces one TCP connection per pair.
+
+When the terminal client sends a message, it does two separate things:
+
+1. It sends the live message to the peer mesh.
+2. It sends a copy to the server for SQLite storage.
+
+After joining, the terminal client waits for its peer links to settle and then requests recent history. It removes duplicates when the same message arrives from both the live mesh and history.
+
+The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery and history storage stop. Messages sent during that outage are not added to SQLite later.
+
+## Use a relay
+
+A relay accepts outbound client connections and participates in the peer mesh for those clients. It is useful when clients are behind NAT or cannot expose a listening port. One relay process can host multiple users on one public port.
+
+Run the relay on a host that can accept inbound TCP connections:
+
+```sh
+./build/relay \
+  --host chat.example.net \
+  --port 9000 \
+  --advertise relay.example.net \
+  --listen 3333
+```
+
+Then connect clients to it:
+
+```sh
+./build/client --relay relay.example.net:3333 --name matt
+./build/client --relay relay.example.net:3333 --name jesse
+```
+
+The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server still handles names, discovery, and stored history.
+
+If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
+
+The relay port defaults to `3333` when it is omitted from `--relay`. The relay's own `--listen` option has the same default.
+
+### Optional direct fallback
+
+`--leak-my-ip` lets a relayed terminal client fall back to a direct server connection when the relay is unavailable. It starts a local peer listener, reveals the client address to the server and other peers, and switches back to the relay when it returns.
+
+```sh
+./build/client \
+  --relay relay.example.net:3333 \
+  --host chat.example.net \
+  --port 9000 \
+  --leak-my-ip \
+  --name matt
+```
+
+If `--host` is absent, the fallback assumes that the chat server runs on the relay host at the selected server port, which defaults to `9000`.
+
+## Command-line reference
+
+### Server
+
+```text
+-p, --port <port>       Listen port. Default: 9000
+-d, --db <path>         SQLite file. Default: chat.db
+    --history <count>   Messages returned for history. Default: 50
+-h, --help              Show help
+```
+
+Passing port `0` asks the operating system to select a free server port.
+
+### Client
+
+```text
+-H, --host <host>          Server host. CLI default: 127.0.0.1
+-p, --port <port>          Server port. Default: 9000
+-n, --name <name>          Name to request at sign-in
+    --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
+    --advertise <host>     Reachable address announced to peers
+    --relay <host[:port]>  Use a relay. Default relay port: 3333
+    --leak-my-ip            Fall back to direct mode if the relay is unavailable
+-h, --help                 Show help
+```
+
+### Relay
+
+```text
+-H, --host <host>       Chat server host. Default: 127.0.0.1
+-p, --port <port>       Chat server port. Default: 9000
+    --advertise <host>  Public address announced for the relay
+    --listen <port>     Shared client and peer port. Default: 3333
+-h, --help              Show help
+```
+
+For normal remote use, set `--advertise` to the relay's public DNS name or IP address.
+
+## Terminal client controls
+
+| Input | Action |
+| --- | --- |
+| `Enter` | Send the current line |
+| `Up`, `Down` | Scroll one row |
+| `PgUp`, `PgDn` | Scroll one page |
+| `Home`, `End` | Jump to the oldest or newest message |
+| `Ctrl-C`, `Ctrl-D` | Quit |
+| `Ctrl-L` | Redraw the terminal |
+| `/users` | List users and known connection routes |
+| `/color <value>` | Set a named shade or an xterm-256 index |
+| `/clear` | Clear the local message pane |
+| `/help` | Show commands |
+| `/quit`, `/exit` | Quit |
+
+Named colors are `pink`, `mint`, `butter`, `periwinkle`, `lilac`, `aqua`, and `peach`. Numeric colors range from `0` through `255`, except `1`, `2`, and `250`, which the interface reserves for system text. Numeric colors require a 256-color terminal. Your own messages appear white in your terminal regardless of the color sent to other users.
+
+Names are trimmed, limited to 20 bytes, and have spaces changed to underscores. Message bodies are trimmed and limited to 2,000 bytes.
+
+## C++ client library
+
+CMake exposes the static library as `disquisition::client`. Include its public header with:
+
+```cpp
+#include <disquisition/client.h>
+```
+
+A direct connection to the central server is the default:
 
 ```cpp
 #include <iostream>
 #include <string>
+
 #include <disquisition/client.h>
 
-void showMessage(std::string sender, std::string message);
-
-disquisition::Client client("relay.mmatt.net:3333", disquisition::Client::RELAY);
-client.onMessage(showMessage);
-client.connect();
-client.setName("matt");
-client.sendMessage("what's up");
-client.setColor(20);
-client.disconnect();
-```
-
-The message function can be an ordinary function that accepts the sender and
-message text:
-
-```cpp
-void showMessage(std::string sender, std::string message)
+void showMessage(std::string sender, std::string body)
 {
-    std::cout << sender << ": " << message << std::endl;
+    std::cout << sender << ": " << body << '\n';
+}
+
+int main()
+{
+    disquisition::Client client("chat.example.net:3333");
+    client.onMessage(showMessage);
+    client.connect();
+    client.setName("matt");
+    client.setColor(20);
+    client.sendMessage("hello");
+    client.disconnect();
 }
 ```
 
-`RELAY` is the default, so the second constructor argument may be left out.
-Use `DIRECT` with the central server address to join the peer-to-peer network
-without a relay:
+To connect through a relay, select `RELAY`:
 
 ```cpp
-disquisition::Client client("relay.mmatt.net:9000", disquisition::Client::DIRECT);
+disquisition::Client client(
+    "relay.example.net:42069",
+    disquisition::Client::RELAY
+);
 ```
 
-The methods throw an exception when an address, name, message, color, or
-network connection is invalid.
+The current library is smaller than the terminal client. It supports live send and receive, direct or relay mode, and history storage for sent messages. It does not request stored history, reconnect after a connection failure, expose the user roster, or report the final suffixed name. The message callback runs on the library's background service thread, so callback code must be thread-safe. The API throws standard exceptions for invalid values, invalid call order, and connection failures.
 
-The [basic client example](examples/basic_client.cpp) asks for the connection
-settings and then sends each line you type. It is kept separate from the CMake
-build so it can be copied into a small class project. Build it from its own
-folder:
+See [`examples/basic_client.cpp`](examples/basic_client.cpp) for an interactive example. It uses its own Makefile and compiles the required project sources directly:
 
 ```sh
 cd examples
@@ -139,57 +231,21 @@ make
 ./basic_client
 ```
 
-Then connect one client per person:
+## Repository layout
 
-```sh
-./build/client
-./build/client --host 127.0.0.1 --port 9000
-./build/client --host 127.0.0.1 --port 9000 --name matt
-./build/client --host 127.0.0.1 --port 9000 --name matt --p2p-port 9011
+```text
+include/disquisition/client.h  Public C++ library API
+src/lib/                       Client library implementation
+src/common/                    Shared framed wire protocol
+src/server/                    Discovery and SQLite history server
+src/client/                    Terminal UI, connection code, and peer mesh
+src/relay/                     Multi-user relay
+test/                          Client library test
+examples/                      Standalone library example
+docs/                          Contributor notes
 ```
 
-With no arguments, the client asks for the server host, server port, and your
-name before connecting. The host and port default to `relay.mmatt.net:9000`.
-Despite its hostname, this is the chat server, not the relay service. When you
-pass other arguments without `--name`, the chat screen asks for your name.
-Duplicate names get a `-2` suffix. `--p2p-port` pins the peer listener to a fixed port (handy
-through a firewall); by default the OS picks a free one and the client reports
-it. Each connection starts on a random candy shade. Pick another with
-`/color mint` (also `pink`, `butter`, `periwinkle`, `lilac`, `aqua`, or
-`peach`), or use any unreserved xterm-256 index with `/color 123`. Each
-message stores the color it was sent with, and the last 50 messages are
-replayed to everyone who joins. Your own messages always show in white.
-
-To join through a relay instead of accepting direct connections (no port
-forward), pass `--relay` with the relay's host and port:
-
-```sh
-./build/client --relay relay.mmatt.net:3333 --name matt
-```
-
-The name you pass is what the relay signs in as, so any number of users can
-share one relay.
-
-Pass `--leak-my-ip` to fall back to the server and direct peer connections when
-the relay is unavailable. The client keeps retrying the relay and switches back
-when it returns. The fallback server defaults to the relay host on port 9000;
-use `--host` and `--port` when the relay connects to a different server. This
-exposes your IP address to the server and other peers:
-
-```sh
-./build/client --relay relay.mmatt.net:3333 --leak-my-ip --name matt
-```
-
-### Client keys
-
-| Key                                                   | Action                  |
-| ----------------------------------------------------- | ----------------------- |
-| `Enter`                                               | send                    |
-| `Up` / `Down`, `PgUp` / `PgDn`, `Home` / `End`        | scroll the message pane |
-| `Ctrl-C`                                              | quit                    |
-| `/help`, `/users`, `/color <name>`, `/clear`, `/quit` | commands                |
-
-## Group Members
+## Contributors
 
 - Matt Morris [@mmattbtw](https://github.com/mmattbtw)
 - Jack Stefl
@@ -197,7 +253,4 @@ exposes your IP address to the server and other peers:
 - Zheer Shimeirani [@z-shim](https://github.com/z-shim)
 - Jesse Tomlin [@ChaosSnakey](https://github.com/ChaosSnakey)
 
-> [!TIP]
-> Add your name to the above list if you are not already included.
->
-> If you need help, you can follow the step by step guide here: https://github.com/mmattbtw/disquisition/blob/main/docs/git_crash_course.md#guided-tutorial-add-your-name-to-readmemd
+To add your name, follow the [Git crash course](docs/git_crash_course.md#guided-tutorial-add-your-name-to-readmemd).

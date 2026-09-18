@@ -27,7 +27,7 @@ struct RelayOptions {
     std::string advertiseHost;
     // The one port every hosted user shares: peers dial it to reach any of
     // them and each user's client dials it as its upstream.
-    std::uint16_t port = 42069;
+    std::uint16_t port = 3333;
     std::size_t maxUsers = 64;
 };
 
