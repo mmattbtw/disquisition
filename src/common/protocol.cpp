@@ -3,6 +3,8 @@
 namespace chat {
 namespace {
 
+// Add a 32-bit number to a byte string in big-endian order. Each shift moves
+// the wanted byte into the lowest position. The mask keeps only that byte.
 void appendU32(std::string& out, std::uint32_t value) {
     out.push_back(static_cast<char>((value >> 24) & 0xFF));
     out.push_back(static_cast<char>((value >> 16) & 0xFF));
@@ -10,6 +12,8 @@ void appendU32(std::string& out, std::uint32_t value) {
     out.push_back(static_cast<char>(value & 0xFF));
 }
 
+// Read the four bytes written by appendU32 and rebuild the original number.
+// unsigned char prevents a byte above 127 from being treated as negative.
 std::uint32_t readU32(const char* data) {
     return (static_cast<std::uint32_t>(static_cast<unsigned char>(data[0])) << 24) |
            (static_cast<std::uint32_t>(static_cast<unsigned char>(data[1])) << 16) |
@@ -17,9 +21,12 @@ std::uint32_t readU32(const char* data) {
            static_cast<std::uint32_t>(static_cast<unsigned char>(data[3]));
 }
 
+// Remove spaces, tabs, and line endings from both ends of a string. Whitespace
+// inside the string stays where it is.
 std::string trimWhitespace(const std::string& text) {
     const auto begin = text.find_first_not_of(" \t\r\n");
     if (begin == std::string::npos) {
+        // The string was empty or contained only whitespace.
         return "";
     }
     const auto end = text.find_last_not_of(" \t\r\n");
@@ -29,6 +36,8 @@ std::string trimWhitespace(const std::string& text) {
 }  // namespace
 
 std::string encode(const Message& message) {
+    // Build the payload first. Its first byte is the message type. Every field
+    // starts with its byte count so decode knows exactly where that field ends.
     std::string payload;
     payload.push_back(static_cast<char>(message.type));
     for (const std::string& field : message.fields) {
@@ -36,6 +45,8 @@ std::string encode(const Message& message) {
         payload.append(field);
     }
 
+    // The completed frame starts with the payload size. reserve avoids extra
+    // memory allocations while the strings are joined.
     std::string frame;
     frame.reserve(payload.size() + 4);
     appendU32(frame, static_cast<std::uint32_t>(payload.size()));
@@ -44,18 +55,25 @@ std::string encode(const Message& message) {
 }
 
 DecodeStatus decode(std::string& buffer, Message& out) {
+    // The first four bytes hold the payload size. Without all four, there is
+    // not enough information to decide how long the frame should be.
     if (buffer.size() < 4) {
         return DecodeStatus::Incomplete;
     }
 
     const std::uint32_t size = readU32(buffer.data());
+    // A payload must contain at least its one-byte message type. The upper
+    // limit protects memory use and matches the check documented in the header.
     if (size == 0 || size > kMaxFrameSize) {
         return DecodeStatus::Malformed;
     }
     if (buffer.size() < 4 + size) {
+        // The size is valid, but TCP has not delivered the whole frame yet.
         return DecodeStatus::Incomplete;
     }
 
+    // cursor points at the next unread byte. remaining records how many bytes
+    // are left in this payload. The first payload byte is always the type.
     const char* cursor = buffer.data() + 4;
     std::size_t remaining = size;
 
@@ -65,12 +83,14 @@ DecodeStatus decode(std::string& buffer, Message& out) {
     --remaining;
 
     while (remaining > 0) {
+        // Every field needs a four-byte length before its text.
         if (remaining < 4) {
             return DecodeStatus::Malformed;
         }
         const std::uint32_t length = readU32(cursor);
         cursor += 4;
         remaining -= 4;
+        // A field cannot be longer than the unread part of the payload.
         if (length > remaining) {
             return DecodeStatus::Malformed;
         }
@@ -79,12 +99,15 @@ DecodeStatus decode(std::string& buffer, Message& out) {
         remaining -= length;
     }
 
+    // Remove the decoded frame. Any later frame stays in buffer.
     buffer.erase(0, 4 + size);
     out = std::move(message);
     return DecodeStatus::Ok;
 }
 
 const char* typeName(MsgType type) {
+    // Returning string literals is safe because they exist for the entire run
+    // of the program. The caller does not need to free them.
     switch (type) {
         case MsgType::Login: return "Login";
         case MsgType::Store: return "Store";
@@ -106,6 +129,8 @@ const char* typeName(MsgType type) {
 }
 
 std::string sanitizeName(const std::string& name) {
+    // Start by removing whitespace around the name, then apply the shared
+    // length limit before replacing characters that should not appear in it.
     std::string cleaned = trimWhitespace(name);
     if (cleaned.size() > kMaxNameLength) {
         cleaned.resize(kMaxNameLength);
@@ -121,6 +146,8 @@ std::string sanitizeName(const std::string& name) {
 }
 
 std::string sanitizeBody(const std::string& body) {
+    // Messages may contain normal spaces, but terminal control characters
+    // could damage the display. Replace those characters with plain spaces.
     std::string cleaned = body;
     for (char& character : cleaned) {
         const unsigned char value = static_cast<unsigned char>(character);
@@ -138,12 +165,14 @@ std::string sanitizeBody(const std::string& body) {
 }
 
 bool parseInt64(const std::string& text, std::int64_t& out) {
+    // Reject input that is empty or too long before doing any arithmetic.
     if (text.empty() || text.size() > 19) {
         return false;
     }
     std::size_t index = 0;
     bool negative = false;
     if (text[0] == '-' || text[0] == '+') {
+        // A sign is allowed only when at least one digit follows it.
         negative = text[0] == '-';
         index = 1;
         if (index >= text.size()) {
@@ -153,6 +182,8 @@ bool parseInt64(const std::string& text, std::int64_t& out) {
     std::int64_t value = 0;
     std::size_t digits = 0;
     for (; index < text.size(); ++index, ++digits) {
+        // Limiting the digit count keeps value * 10 inside int64_t. This parser
+        // intentionally accepts fewer digits than the type's absolute maximum.
         if (digits >= 18 || text[index] < '0' || text[index] > '9') {
             return false;
         }
@@ -163,6 +194,8 @@ bool parseInt64(const std::string& text, std::int64_t& out) {
 }
 
 bool parsePort(const std::string& text, std::uint16_t& out, bool allowZero) {
+    // Normal connections use ports 1 through 65535. A listening socket may
+    // use port 0 to ask the operating system to choose an available port.
     std::int64_t value = 0;
     const std::int64_t minimum = allowZero ? 0 : 1;
     if (!parseInt64(text, value) || value < minimum || value > 65535) {

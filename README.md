@@ -85,6 +85,60 @@ Start the server (it creates the database on first run):
 ./build/server --port 9000 --db chat.db
 ```
 
+### C++ client library
+
+Link the `disquisition::client` CMake target and include
+`<disquisition/client.h>`. This first version sends messages through a relay
+or through direct peer connections.
+
+```cpp
+#include <iostream>
+#include <string>
+#include <disquisition/client.h>
+
+void showMessage(std::string sender, std::string message);
+
+disquisition::Client client("relay.mmatt.net:3333", disquisition::Client::RELAY);
+client.onMessage(showMessage);
+client.connect();
+client.setName("matt");
+client.sendMessage("what's up");
+client.setColor(20);
+client.disconnect();
+```
+
+The message function can be an ordinary function that accepts the sender and
+message text:
+
+```cpp
+void showMessage(std::string sender, std::string message)
+{
+    std::cout << sender << ": " << message << std::endl;
+}
+```
+
+`RELAY` is the default, so the second constructor argument may be left out.
+Use `DIRECT` with the central server address to join the peer-to-peer network
+without a relay:
+
+```cpp
+disquisition::Client client("relay.mmatt.net:9000", disquisition::Client::DIRECT);
+```
+
+The methods throw an exception when an address, name, message, color, or
+network connection is invalid.
+
+The [basic client example](examples/basic_client.cpp) asks for the connection
+settings and then sends each line you type. It is kept separate from the CMake
+build so it can be copied into a small class project. Build it from its own
+folder:
+
+```sh
+cd examples
+make
+./basic_client
+```
+
 Then connect one client per person:
 
 ```sh

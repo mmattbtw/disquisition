@@ -6,20 +6,38 @@
 
 namespace chat {
 
-// Every message travels as: [uint32 payload size][uint8 type][field]*
-// where each field is [uint32 length][bytes]. Lengths are big endian and the
-// payload size never includes the four prefix bytes.
+// This file defines the language spoken by the server, relay, and clients.
+// Each program uses the same message types and the same frame layout. If one
+// program encoded a message differently, the program on the other end would
+// not know how to read it.
+//
+// A frame is one complete message sent over a TCP connection:
+//
+//     [payload size][message type][field length][field text]...
+//
+// The payload size and each field length use four bytes. The message type uses
+// one byte. A Login message for "matt" contains three fields, so its payload
+// can be pictured like this:
+//
+//     [Login][4][matt][1][0][0][]
+//
+// The actual lengths occupy four bytes even though the example shows them as
+// ordinary numbers. Lengths use big-endian byte order, which puts the largest
+// part of a number first. Network protocols use this order so computers with
+// different processors agree on how to read a number.
 //
 // The server handles sign-in, peer discovery and message storage, but live
-// chat never passes through it: peers open raw TCP connections to each other
-// and exchange frames directly.
+// chat does not pass through it. Peers exchange live chat frames directly, or
+// a relay exchanges those frames for clients that cannot accept connections.
 enum class MsgType : std::uint8_t {
-    // client -> server
+    // Messages a client sends to the central server.
     Login = 1,         // [name, peer port, advertised host (may be empty)]
-    Store = 10,        // [timestamp, body, color] archive a message already sent p2p
+    // Store saves a message that was already delivered live. This is what
+    // makes the message appear when another client requests chat history.
+    Store = 10,        // [timestamp, body, color]
     FetchHistory = 11, // []
 
-    // server -> client
+    // Messages the central server sends to a client.
     LoginOk = 3,    // [assigned name, welcome text]
     Error = 4,      // [reason]
     History = 6,    // [timestamp, sender, body, color]
@@ -30,25 +48,25 @@ enum class MsgType : std::uint8_t {
     PeerJoined = 13, // [name, host, port, advertised (0|1)]
     PeerLeft = 14,  // [name]
 
-    // peer -> peer
-    // [sender, target] sent once by whichever side dialled. The receiver
-    // learns the remote from `sender`; `target` names the peer being dialled,
-    // which a relay uses to route a connection to the right hosted user when
-    // many users share one public port.
+    // Messages sent over a direct peer connection.
+    //
+    // Hello introduces the peer that opened the connection. The sender field
+    // says who called. The target field says who they meant to call. Relays
+    // need the target because several users can share one relay port.
     Hello = 15,
     HelloOk = 17, // [target] confirms that the requested peer accepted the link
-    // Chat frames carry the sender's name so that anything reading
-    // them without a per-peer connection can still attribute them. That is the
-    // case for a client that reaches the mesh through a relay: every peer
-    // arrives over the one relay socket, so the connection cannot identify the
-    // sender the way a direct link can.
+    // PeerChat includes the sender's name because a relayed client receives
+    // every user's messages through one socket. The socket alone cannot tell
+    // that client who wrote a message.
     PeerChat = 16  // [sender, timestamp, body, color]
 };
 
-// Hard cap on a single frame so a hostile client cannot make us allocate.
+// Rejecting larger frames prevents a broken or hostile client from making the
+// receiver reserve an unreasonable amount of memory.
 constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
 
-// Limits shared by the server and every peer so both ends agree on them.
+// Every program uses the same limits so a client cannot create a name or
+// message that the server refuses to handle.
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
 
@@ -60,9 +78,13 @@ constexpr const char* kColorNames[] = {
 constexpr std::size_t kColorCount = sizeof(kColorNames) / sizeof(kColorNames[0]);
 
 inline bool parseColorIndex(const std::string& color, int& index) {
+    // A color index contains one to three decimal digits.
     if (color.empty() || color.size() > 3) {
         return false;
     }
+
+    // Build the number one digit at a time. For "123", the value changes from
+    // 0 to 1, then 12, then 123.
     int value = 0;
     for (const char character : color) {
         if (character < '0' || character > '9') {
@@ -78,10 +100,14 @@ inline bool parseColorIndex(const std::string& color, int& index) {
 }
 
 inline bool isReservedSystemColor(int index) {
+    // The interface uses these colors for errors, notices, and other text that
+    // should remain visually different from user messages.
     return index == 1 || index == 2 || index == 250;
 }
 
 inline bool isValidColor(const std::string& color) {
+    // A color may be one of the friendly names above or an available numeric
+    // xterm-256 color.
     for (std::size_t index = 0; index < kColorCount; ++index) {
         if (color == kColorNames[index]) {
             return true;
@@ -92,22 +118,29 @@ inline bool isValidColor(const std::string& color) {
 }
 
 struct Message {
+    // type explains the purpose of the message. fields contains its data in
+    // the order documented beside that message type above.
     MsgType type = MsgType::Error;
     std::vector<std::string> fields;
 };
 
-// Serializes a message into a complete, length prefixed frame.
+// Converts a Message object into the bytes sent through a socket.
 std::string encode(const Message& message);
 
+// TCP may deliver half a frame or several frames in one read. decode reports
+// which of those cases it found so the caller knows whether to wait, use a
+// message, or close a bad connection.
 enum class DecodeStatus {
     Ok,          // `out` holds one message and it was removed from `buffer`
     Incomplete,  // `buffer` holds a partial frame, call again after more data
     Malformed    // `buffer` is unusable and the connection should be dropped
 };
 
-// Pulls a single frame off the front of `buffer`.
+// Reads one frame from the front of buffer. A successful call removes only
+// that frame, leaving any later frame in buffer for the next call.
 DecodeStatus decode(std::string& buffer, Message& out);
 
+// Returns a readable name for logs, such as "Login" or "PeerChat".
 const char* typeName(MsgType type);
 
 // Name rules: surrounding whitespace trimmed, spaces become underscores,
