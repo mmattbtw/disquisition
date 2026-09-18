@@ -1,0 +1,44 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: disquisition-linux-x64
+            deps: |
+              sudo apt-get update
+              sudo apt-get install -y libncurses-dev libsqlite3-dev
+          - os: macos-latest
+            artifact: disquisition-macos-arm64
+            deps: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        if: ${{ matrix.deps != '' }}
+        run: ${{ matrix.deps }}
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/client
+            build/server
+            build/relay
