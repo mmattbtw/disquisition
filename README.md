@@ -100,10 +100,11 @@ Despite its hostname, this is the chat server, not the relay service. When you
 pass other arguments without `--name`, the chat screen asks for your name.
 Duplicate names get a `-2` suffix. `--p2p-port` pins the peer listener to a fixed port (handy
 through a firewall); by default the OS picks a free one and the client reports
-it. Messages start pink. Pick another candy shade with `/color mint` (also
-`butter`, `periwinkle`, `lilac`, `aqua`, or `peach`), or use any unreserved
-xterm-256 index with `/color 123`. Each message stores the color it was sent
-with, and the last 50 messages are replayed to everyone who joins.
+it. Each connection starts on a random candy shade. Pick another with
+`/color mint` (also `pink`, `butter`, `periwinkle`, `lilac`, `aqua`, or
+`peach`), or use any unreserved xterm-256 index with `/color 123`. Each
+message stores the color it was sent with, and the last 50 messages are
+replayed to everyone who joins. Your own messages always show in white.
 
 To join through a relay instead of accepting direct connections (no port
 forward), pass `--relay` with the relay's host and port:

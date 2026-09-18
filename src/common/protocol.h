@@ -16,13 +16,13 @@ namespace chat {
 enum class MsgType : std::uint8_t {
     // client -> server
     Login = 1,         // [name, peer port, advertised host (may be empty)]
-    Store = 10,        // [timestamp, body, colour] archive a message already sent p2p
+    Store = 10,        // [timestamp, body, color] archive a message already sent p2p
     FetchHistory = 11, // []
 
     // server -> client
     LoginOk = 3,    // [assigned name, welcome text]
     Error = 4,      // [reason]
-    History = 6,    // [timestamp, sender, body, colour]
+    History = 6,    // [timestamp, sender, body, color]
     System = 7,     // [text]
     Users = 8,      // [name]*
     HistoryEnd = 9, // []
@@ -42,7 +42,7 @@ enum class MsgType : std::uint8_t {
     // case for a client that reaches the mesh through a relay: every peer
     // arrives over the one relay socket, so the connection cannot identify the
     // sender the way a direct link can.
-    PeerChat = 16  // [sender, timestamp, body, colour]
+    PeerChat = 16  // [sender, timestamp, body, color]
 };
 
 // Hard cap on a single frame so a hostile client cannot make us allocate.
@@ -52,24 +52,19 @@ constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
 
-// Display colours shared by the server and every client. Named candy shades
+// Display colors shared by the server and every client. Named candy shades
 // and custom xterm-256 indexes travel with each message as strings; clients
-// map them onto ncurses colour pairs.
+// map them onto ncurses color pairs.
 constexpr const char* kColorNames[] = {
     "pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 constexpr std::size_t kColorCount = sizeof(kColorNames) / sizeof(kColorNames[0]);
 
-// Keep accepting the old command names as aliases. Each renders as the candy
-// shade in the same position.
-constexpr const char* kLegacyColorNames[] = {
-    "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
-
-inline bool parseColorIndex(const std::string& colour, int& index) {
-    if (colour.empty() || colour.size() > 3) {
+inline bool parseColorIndex(const std::string& color, int& index) {
+    if (color.empty() || color.size() > 3) {
         return false;
     }
     int value = 0;
-    for (const char character : colour) {
+    for (const char character : color) {
         if (character < '0' || character > '9') {
             return false;
         }
@@ -86,14 +81,14 @@ inline bool isReservedSystemColor(int index) {
     return index == 1 || index == 2 || index == 250;
 }
 
-inline bool isValidColor(const std::string& colour) {
+inline bool isValidColor(const std::string& color) {
     for (std::size_t index = 0; index < kColorCount; ++index) {
-        if (colour == kColorNames[index] || colour == kLegacyColorNames[index]) {
+        if (color == kColorNames[index]) {
             return true;
         }
     }
     int index = 0;
-    return parseColorIndex(colour, index) && !isReservedSystemColor(index);
+    return parseColorIndex(color, index) && !isReservedSystemColor(index);
 }
 
 struct Message {

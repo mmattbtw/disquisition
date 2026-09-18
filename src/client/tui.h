@@ -32,12 +32,12 @@ private:
     struct Entry {
         std::string prefix;
         std::string body;
-        int colour = 0;
+        int color = 0;
     };
 
     struct Row {
         std::string text;
-        int colour = 0;
+        int color = 0;
     };
 
     bool start();
@@ -48,12 +48,12 @@ private:
     void drawMessages();
     void drawInput();
 
-    void append(const std::string& prefix, const std::string& body, int colour);
-    void appendSystem(const std::string& text, int colour = 3);
+    void append(const std::string& prefix, const std::string& body, int color);
+    void appendSystem(const std::string& text, int color = 3);
     void rebuildRows();
     std::size_t maxScroll() const;
     const char* prompt() const;
-    int pairFor(const std::string& colour) const;
+    int pairFor(const std::string& color) const;
 
     void drainIncoming();
     void drainPeers();
@@ -92,17 +92,17 @@ private:
     std::string name_;
     std::vector<std::string> users_;
     std::vector<std::string> pending_;
-    std::string colour_ = "pink";
-    // Numeric xterm-256 choices get a colour pair only when someone uses one.
-    mutable std::map<std::string, int> customColourPairs_;
-    mutable int nextCustomColourPair_ = 27;
+    std::string color_;
+    // Numeric xterm-256 choices get a color pair only when someone uses one.
+    mutable std::map<std::string, int> customColorPairs_;
+    mutable int nextCustomColorPair_ = 27;
 
     // (sender, timestamp, body) triples already shown, so a message arriving
     // both through history and over the mesh is only displayed once.
     std::set<std::string> seen_;
 
     std::string status_ = "connecting";
-    int statusColour_ = 3;
+    int statusColor_ = 3;
 
     bool signedIn_ = false;
     bool loginSent_ = false;

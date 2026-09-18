@@ -390,13 +390,13 @@ void Server::handleStore(Connection& connection, const Message& message) {
     if (body.empty()) {
         return;
     }
-    const std::string colour = sanitizeBody(message.fields[2]);
-    if (!isValidColor(colour)) {
+    const std::string color = sanitizeBody(message.fields[2]);
+    if (!isValidColor(color)) {
         reject(connection, "invalid message color");
         return;
     }
 
-    database_.add(timestamp, connection.name, body, colour);
+    database_.add(timestamp, connection.name, body, color);
     log(connection.name + " (stored): " + body);
 }
 
@@ -413,7 +413,7 @@ void Server::sendHistory(Connection& connection) {
     for (const StoredMessage& stored : history) {
         send(connection, Message {MsgType::History,
                                   {std::to_string(stored.timestamp), stored.sender, stored.body,
-                                   stored.colour}});
+                                   stored.color}});
     }
     send(connection, Message {MsgType::HistoryEnd, {}});
 }

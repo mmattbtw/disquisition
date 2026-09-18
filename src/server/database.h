@@ -13,7 +13,7 @@ struct StoredMessage {
     std::int64_t timestamp = 0;
     std::string sender;
     std::string body;
-    std::string colour;
+    std::string color;
 };
 
 // Thin wrapper around the handful of SQLite calls the server needs. The
@@ -27,7 +27,7 @@ public:
     ~Database();
 
     void add(std::int64_t timestamp, const std::string& sender, const std::string& body,
-             const std::string& colour);
+             const std::string& color);
 
     // Most recent `limit` messages, oldest first (ready to replay to a client).
     std::vector<StoredMessage> recent(std::size_t limit);

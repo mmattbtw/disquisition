@@ -28,7 +28,7 @@ public:
         std::int64_t timestamp = 0;
         std::string name;
         std::string body;
-        std::string colour;
+        std::string color;
     };
 
     PeerNetwork() = default;
@@ -87,7 +87,7 @@ public:
 
     // Delivers one frame to every connected peer. A peer that died mid-send
     // surfaces as a Leave event on the next poll().
-    void sendChat(std::int64_t timestamp, const std::string& body, const std::string& colour);
+    void sendChat(std::int64_t timestamp, const std::string& body, const std::string& color);
 
     // Pops one event if there is one. New inbound connections are identified
     // and dead peers reaped along the way.
@@ -109,7 +109,7 @@ private:
     void drainPeers();
     void enqueueDial(const std::string& name);
     void pushEvent(Event::Kind kind, const std::string& name, const std::string& body,
-                   std::int64_t timestamp, const std::string& colour = "");
+                   std::int64_t timestamp, const std::string& color = "");
     bool shouldDial(const Peer& peer) const;
     void scanPeersForDialsLocked();
 

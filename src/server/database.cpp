@@ -63,17 +63,17 @@ Database::Database(const std::string& path) {
          "  timestamp INTEGER NOT NULL,"
          "  sender TEXT NOT NULL,"
          "  body TEXT NOT NULL,"
-         "  colour TEXT NOT NULL DEFAULT 'pink')");
-    if (!hasColumn(db_, "messages", "colour")) {
-        exec(db_, "ALTER TABLE messages ADD COLUMN colour TEXT NOT NULL DEFAULT 'pink'");
+         "  color TEXT NOT NULL DEFAULT 'pink')");
+    if (!hasColumn(db_, "messages", "color")) {
+        exec(db_, "ALTER TABLE messages ADD COLUMN color TEXT NOT NULL DEFAULT 'pink'");
     }
 
-    if (sqlite3_prepare_v2(db_, "INSERT INTO messages (timestamp, sender, body, colour) VALUES (?, ?, ?, ?)", -1,
+    if (sqlite3_prepare_v2(db_, "INSERT INTO messages (timestamp, sender, body, color) VALUES (?, ?, ?, ?)", -1,
                            &insert_, nullptr) != SQLITE_OK) {
         fail(db_, "cannot prepare insert");
     }
     if (sqlite3_prepare_v2(db_,
-                           "SELECT timestamp, sender, body, colour FROM messages ORDER BY id DESC LIMIT ?", -1,
+                           "SELECT timestamp, sender, body, color FROM messages ORDER BY id DESC LIMIT ?", -1,
                            &select_, nullptr) != SQLITE_OK) {
         fail(db_, "cannot prepare select");
     }
@@ -92,13 +92,13 @@ Database::~Database() {
 }
 
 void Database::add(std::int64_t timestamp, const std::string& sender, const std::string& body,
-                   const std::string& colour) {
+                   const std::string& color) {
     sqlite3_reset(insert_);
     sqlite3_clear_bindings(insert_);
     sqlite3_bind_int64(insert_, 1, timestamp);
     sqlite3_bind_text(insert_, 2, sender.c_str(), static_cast<int>(sender.size()), SQLITE_STATIC);
     sqlite3_bind_text(insert_, 3, body.c_str(), static_cast<int>(body.size()), SQLITE_STATIC);
-    sqlite3_bind_text(insert_, 4, colour.c_str(), static_cast<int>(colour.size()), SQLITE_STATIC);
+    sqlite3_bind_text(insert_, 4, color.c_str(), static_cast<int>(color.size()), SQLITE_STATIC);
     if (sqlite3_step(insert_) != SQLITE_DONE) {
         fail(db_, "cannot store message");
     }
@@ -120,10 +120,10 @@ std::vector<StoredMessage> Database::recent(std::size_t limit) {
         message.timestamp = sqlite3_column_int64(select_, 0);
         const auto* sender = reinterpret_cast<const char*>(sqlite3_column_text(select_, 1));
         const auto* body = reinterpret_cast<const char*>(sqlite3_column_text(select_, 2));
-        const auto* colour = reinterpret_cast<const char*>(sqlite3_column_text(select_, 3));
+        const auto* color = reinterpret_cast<const char*>(sqlite3_column_text(select_, 3));
         message.sender = sender != nullptr ? sender : "";
         message.body = body != nullptr ? body : "";
-        message.colour = colour != nullptr ? colour : "pink";
+        message.color = color != nullptr ? color : "pink";
         messages.push_back(std::move(message));
     }
     if (rc != SQLITE_DONE) {

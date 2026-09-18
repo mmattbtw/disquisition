@@ -414,10 +414,10 @@ void Relay::handleClientMessage(User& user, const Message& message) {
             if (message.fields.size() >= 4) {
                 std::int64_t timestamp = 0;
                 const std::string body = sanitizeBody(message.fields[2]);
-                const std::string colour = sanitizeBody(message.fields[3]);
+                const std::string color = sanitizeBody(message.fields[3]);
                 if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty() &&
-                    isValidColor(colour)) {
-                    user.peers.sendChat(timestamp, body, colour);
+                    isValidColor(color)) {
+                    user.peers.sendChat(timestamp, body, color);
                 }
             }
             break;
@@ -435,7 +435,7 @@ void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
             // frame can.
             sendToClient(user, Message {MsgType::PeerChat,
                                         {event.name, std::to_string(event.timestamp), event.body,
-                                         event.colour}});
+                                         event.color}});
             break;
         case PeerNetwork::Event::Kind::Join:
             log(user.requestedName + ": mesh link up with " + event.name);

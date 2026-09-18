@@ -6,6 +6,7 @@
 #include <cstring>
 #include <ctime>
 #include <chrono>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -20,26 +21,31 @@ constexpr std::size_t kMaxSeen = 2000;
 constexpr int kReconnectIntervalMs = 3000;
 constexpr int kReconnectTimeoutMs = 3000;
 
-// Colour pair numbers registered in Tui::start().
-constexpr int kColourOwn = 1;
-constexpr int kColourOther = 2;
-constexpr int kColourSystem = 3;
-constexpr int kColourHeader = 4;
-constexpr int kColourGood = 5;
-constexpr int kColourBad = 6;
-// First colour pair number used for per-user palette colours.
-constexpr int kFirstUserColour = 20;
+// Color pair numbers registered in Tui::start().
+constexpr int kColorOwn = 1;
+constexpr int kColorOther = 2;
+constexpr int kColorSystem = 3;
+constexpr int kColorHeader = 4;
+constexpr int kColorGood = 5;
+constexpr int kColorBad = 6;
+// Own messages always render in full white, independent of the chosen shade.
+constexpr int kColorSelf = 7;
+// First color pair number used for per-user palette colors.
+constexpr int kFirstUserColor = 20;
+
+// xterm-256 index for the brightest white; plain COLOR_WHITE on limited
+// terminals.
+constexpr int kSelfWhite = 231;
 
 // Maps a palette name to the basic ncurses foreground used on limited terminals.
 // Order must line up with kColorNames.
-constexpr int kBasicUserColourValues[] = {
+constexpr int kBasicUserColorValues[] = {
     COLOR_MAGENTA, COLOR_CYAN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_BLUE};
 
-// Soft xterm-256 colours keep names playful without borrowing the neutral used
-// for system notices. The command names stay familiar even though the rendered
-// shades are pink, mint, butter, periwinkle, lilac, aqua, and peach.
-constexpr int kCandyUserColourValues[] = {211, 121, 229, 111, 183, 159, 216};
-constexpr int kCandySystemColour = 250;
+// Soft xterm-256 colors keep the palette playful without borrowing the
+// neutral used for system notices. Order must line up with kColorNames.
+constexpr int kCandyUserColorValues[] = {211, 121, 229, 111, 183, 159, 216};
+constexpr int kCandySystemColor = 250;
 
 volatile std::sig_atomic_t gInterrupted = 0;
 
@@ -75,6 +81,26 @@ std::string trim(const std::string& text) {
     }
     const auto end = text.find_last_not_of(" \t\r\n");
     return text.substr(begin, end - begin + 1);
+}
+
+// Picks a random shade from the named palette. Every name maps to a soft
+// xterm-256 color, so a fresh connection never collides with the reserved
+// system colors.
+std::string randomColorName() {
+    static std::mt19937 engine(std::random_device {}());
+    std::uniform_int_distribution<std::size_t> pick(0, kColorCount - 1);
+    return kColorNames[pick(engine)];
+}
+
+std::string paletteList() {
+    std::string list;
+    for (std::size_t index = 0; index < kColorCount; ++index) {
+        if (index != 0) {
+            list += ", ";
+        }
+        list += kColorNames[index];
+    }
+    return list;
 }
 
 // Greedy word wrap with a hanging indent as deep as `prefix`, so a wrapped
@@ -163,16 +189,17 @@ bool Tui::start() {
         start_color();
         use_default_colors();
         const bool hasCandyPalette = COLORS >= 256;
-        init_pair(kColourOwn, COLOR_CYAN, -1);
-        init_pair(kColourOther, COLOR_MAGENTA, -1);
-        init_pair(kColourSystem, hasCandyPalette ? kCandySystemColour : COLOR_WHITE, -1);
-        init_pair(kColourHeader, COLOR_BLACK, COLOR_CYAN);
-        init_pair(kColourGood, COLOR_GREEN, -1);
-        init_pair(kColourBad, COLOR_RED, -1);
+        init_pair(kColorOwn, COLOR_CYAN, -1);
+        init_pair(kColorOther, COLOR_MAGENTA, -1);
+        init_pair(kColorSystem, hasCandyPalette ? kCandySystemColor : COLOR_WHITE, -1);
+        init_pair(kColorHeader, COLOR_BLACK, COLOR_CYAN);
+        init_pair(kColorGood, COLOR_GREEN, -1);
+        init_pair(kColorBad, COLOR_RED, -1);
+        init_pair(kColorSelf, hasCandyPalette ? kSelfWhite : COLOR_WHITE, -1);
         for (std::size_t index = 0; index < kColorCount; ++index) {
-            const int colour = hasCandyPalette ? kCandyUserColourValues[index]
-                                               : kBasicUserColourValues[index];
-            init_pair(kFirstUserColour + static_cast<int>(index), colour, -1);
+            const int color = hasCandyPalette ? kCandyUserColorValues[index]
+                                               : kBasicUserColorValues[index];
+            init_pair(kFirstUserColor + static_cast<int>(index), color, -1);
         }
     }
 
@@ -210,6 +237,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     advertiseHost_ = advertiseHost;
     useRelay_ = useRelay;
     name_ = trim(initialName);
+    color_ = randomColorName();
 
     if (!start()) {
         std::fprintf(stderr, "cannot initialise terminal\n");
@@ -236,7 +264,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     if (!name_.empty() && !useRelay_) {
         greeting += " as " + name_;
     }
-    appendSystem(greeting, kColourGood);
+    appendSystem(greeting, kColorGood);
 
     if (!name_.empty() && !connection_.failed()) {
         loginGen_ = transportGen_.load();
@@ -267,10 +295,10 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
             serverLost_ = true;
             serverReady_ = false;
             status_ = "server offline";
-            statusColour_ = kColourBad;
+            statusColor_ = kColorBad;
             appendSystem(useRelay_ ? "relay connection lost; reconnecting"
                                    : "server connection lost; peer-to-peer chat still works",
-                         kColourBad);
+                         kColorBad);
             dirty_ = true;
         }
 
@@ -286,11 +314,11 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
                 loginGen_ = transportGen_.load();
                 loginSent_ = true;
                 status_ = "signing in";
-                statusColour_ = kColourSystem;
+                statusColor_ = kColorSystem;
                 sendLogin();
             } else if (name_.empty()) {
                 status_ = "connecting";
-                statusColour_ = kColourSystem;
+                statusColor_ = kColorSystem;
             }
             dirty_ = true;
         }
@@ -394,7 +422,7 @@ void Tui::draw() {
 void Tui::drawHeader() {
     werase(header_);
     if (has_colors()) {
-        wbkgd(header_, COLOR_PAIR(kColourHeader));
+        wbkgd(header_, COLOR_PAIR(kColorHeader));
     }
 
     std::string left = " disquisition";
@@ -410,11 +438,11 @@ void Tui::drawHeader() {
     const int start = width_ - static_cast<int>(right.size()) - 1;
     if (start > static_cast<int>(left.size())) {
         if (has_colors()) {
-            wattron(header_, COLOR_PAIR(statusColour_));
+            wattron(header_, COLOR_PAIR(statusColor_));
         }
         mvwaddstr(header_, 0, start, right.c_str());
         if (has_colors()) {
-            wattroff(header_, COLOR_PAIR(statusColour_));
+            wattroff(header_, COLOR_PAIR(statusColor_));
         }
     }
 }
@@ -437,11 +465,11 @@ void Tui::drawMessages() {
         }
         const Row& row = rows_[index];
         if (has_colors()) {
-            wattron(messages_, COLOR_PAIR(row.colour));
+            wattron(messages_, COLOR_PAIR(row.color));
         }
         mvwaddnstr(messages_, y, 0, row.text.c_str(), width_);
         if (has_colors()) {
-            wattroff(messages_, COLOR_PAIR(row.colour));
+            wattroff(messages_, COLOR_PAIR(row.color));
         }
         wclrtoeol(messages_);
     }
@@ -463,11 +491,11 @@ void Tui::drawInput() {
     }
     const std::string visible = text_.substr(start, static_cast<std::size_t>(available));
     if (has_colors()) {
-        wattron(input_, COLOR_PAIR(kColourOwn));
+        wattron(input_, COLOR_PAIR(kColorOwn));
     }
     mvwaddstr(input_, 0, labelLength, visible.c_str());
     if (has_colors()) {
-        wattroff(input_, COLOR_PAIR(kColourOwn));
+        wattroff(input_, COLOR_PAIR(kColorOwn));
     }
 
     const int cursorX = labelLength + static_cast<int>(cursor_ - start);
@@ -486,8 +514,8 @@ std::size_t Tui::maxScroll() const {
     return rows_.size() > height ? rows_.size() - height : 0;
 }
 
-void Tui::append(const std::string& prefix, const std::string& body, int colour) {
-    entries_.push_back(Entry {prefix, body, colour});
+void Tui::append(const std::string& prefix, const std::string& body, int color) {
+    entries_.push_back(Entry {prefix, body, color});
 
     if (entries_.size() > kMaxEntries) {
         entries_.erase(entries_.begin(), entries_.begin() + static_cast<std::ptrdiff_t>(200));
@@ -498,7 +526,7 @@ void Tui::append(const std::string& prefix, const std::string& body, int colour)
     const std::vector<std::string> wrapped = wrapText(prefix, body, width_);
     const std::size_t added = wrapped.size();
     for (const std::string& line : wrapped) {
-        rows_.push_back(Row {line, colour});
+        rows_.push_back(Row {line, color});
     }
     // Keep the viewport anchored when the user is reading scrollback.
     if (scroll_ > 0) {
@@ -506,34 +534,34 @@ void Tui::append(const std::string& prefix, const std::string& body, int colour)
     }
 }
 
-void Tui::appendSystem(const std::string& text, int colour) {
-    append("", "* " + text, colour);
+void Tui::appendSystem(const std::string& text, int color) {
+    append("", "* " + text, color);
 }
 
-int Tui::pairFor(const std::string& colour) const {
+int Tui::pairFor(const std::string& color) const {
     for (std::size_t index = 0; index < kColorCount; ++index) {
-        if (colour == kColorNames[index] || colour == kLegacyColorNames[index]) {
-            return kFirstUserColour + static_cast<int>(index);
+        if (color == kColorNames[index]) {
+            return kFirstUserColor + static_cast<int>(index);
         }
     }
 
-    int colourIndex = 0;
-    if (!parseColorIndex(colour, colourIndex) || isReservedSystemColor(colourIndex) ||
-        !has_colors() || COLORS < 256 || colourIndex >= COLORS) {
-        return kColourOther;
+    int colorIndex = 0;
+    if (!parseColorIndex(color, colorIndex) || isReservedSystemColor(colorIndex) ||
+        !has_colors() || COLORS < 256 || colorIndex >= COLORS) {
+        return kColorOther;
     }
-    const auto existing = customColourPairs_.find(colour);
-    if (existing != customColourPairs_.end()) {
+    const auto existing = customColorPairs_.find(color);
+    if (existing != customColorPairs_.end()) {
         return existing->second;
     }
-    if (nextCustomColourPair_ >= COLOR_PAIRS) {
-        return kColourOther;
+    if (nextCustomColorPair_ >= COLOR_PAIRS) {
+        return kColorOther;
     }
-    const int pair = nextCustomColourPair_++;
-    if (init_pair(static_cast<short>(pair), static_cast<short>(colourIndex), -1) == ERR) {
-        return kColourOther;
+    const int pair = nextCustomColorPair_++;
+    if (init_pair(static_cast<short>(pair), static_cast<short>(colorIndex), -1) == ERR) {
+        return kColorOther;
     }
-    customColourPairs_[colour] = pair;
+    customColorPairs_[color] = pair;
     return pair;
 }
 
@@ -541,7 +569,7 @@ void Tui::rebuildRows() {
     rows_.clear();
     for (const Entry& entry : entries_) {
         for (const std::string& line : wrapText(entry.prefix, entry.body, width_)) {
-            rows_.push_back(Row {line, entry.colour});
+            rows_.push_back(Row {line, entry.color});
         }
     }
 }
@@ -563,8 +591,8 @@ void Tui::drainIncoming() {
                 serverReady_ = true;
                 serverLost_ = false;
                 status_ = "online";
-                statusColour_ = kColourGood;
-                appendSystem("you are signed in as " + name_, kColourGood);
+                statusColor_ = kColorGood;
+                appendSystem("you are signed in as " + name_, kColorGood);
                 if (!pending_.empty()) {
                     const std::size_t queued = pending_.size();
                     for (const std::string& line : pending_) {
@@ -649,7 +677,7 @@ void Tui::drainIncoming() {
                 break;
             }
             case MsgType::Error:
-                appendSystem(message.fields.empty() ? "server error" : message.fields[0], kColourBad);
+                appendSystem(message.fields.empty() ? "server error" : message.fields[0], kColorBad);
                 break;
             default:
                 break;
@@ -666,17 +694,17 @@ void Tui::drainPeers() {
             case PeerNetwork::Event::Kind::Chat:
                 if (remember(event.name, std::to_string(event.timestamp), event.body)) {
                     append(formatTime(std::to_string(event.timestamp)) + " " + event.name + ": ",
-                           event.body, pairFor(event.colour));
+                           event.body, pairFor(event.color));
                 }
                 break;
             case PeerNetwork::Event::Kind::Join:
-                appendSystem("direct link to " + event.name + " is up", kColourGood);
+                appendSystem("direct link to " + event.name + " is up", kColorGood);
                 break;
             case PeerNetwork::Event::Kind::Leave:
-                appendSystem("direct link to " + event.name + " is down", kColourBad);
+                appendSystem("direct link to " + event.name + " is down", kColorBad);
                 break;
             case PeerNetwork::Event::Kind::Note:
-                appendSystem(event.body, kColourBad);
+                appendSystem(event.body, kColorBad);
                 break;
         }
     }
@@ -702,15 +730,15 @@ void Tui::deliver(const std::string& line) {
     const std::int64_t timestamp = nowSeconds();
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
-    append(formatTime(stamp) + " you: ", body, pairFor(colour_));
+    append(formatTime(stamp) + " you: ", body, kColorSelf);
     if (useRelay_) {
         // The relay fans this out to the mesh on our behalf.
-        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body, colour_}});
+        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body, color_}});
     } else {
-        peers_.sendChat(timestamp, body, colour_);
+        peers_.sendChat(timestamp, body, color_);
     }
     if (serverReady_ && !connection_.failed()) {
-        connection_.send(Message {MsgType::Store, {stamp, body, colour_}});
+        connection_.send(Message {MsgType::Store, {stamp, body, color_}});
     }
 }
 
@@ -827,7 +855,7 @@ void Tui::submit() {
         name_ = line;
         loginSent_ = true;
         status_ = "signing in";
-        statusColour_ = kColourSystem;
+        statusColor_ = kColorSystem;
         if (!connection_.failed() && loginGen_ != transportGen_.load()) {
             loginGen_ = transportGen_.load();
             sendLogin();
@@ -875,30 +903,29 @@ void Tui::runCommand(const std::string& command) {
         }
         appendSystem(listing);
     } else if (name == "/color") {
-        std::string colour;
-        stream >> colour;
-        if (colour.empty()) {
-            appendSystem("usage: /color <pink|mint|butter|periwinkle|lilac|aqua|peach|0-255>");
+        std::string color;
+        stream >> color;
+        if (color.empty()) {
+            appendSystem("usage: /color <" + paletteList() + "|0-255>");
             return;
         }
         int customIndex = 0;
-        const bool customColour = parseColorIndex(colour, customIndex);
-        if (customColour && (!has_colors() || COLORS < 256)) {
-            appendSystem("custom colors need a 256-color terminal", kColourBad);
+        const bool customColor = parseColorIndex(color, customIndex);
+        if (customColor && (!has_colors() || COLORS < 256)) {
+            appendSystem("custom colors need a 256-color terminal", kColorBad);
             return;
         }
-        if (customColour && isReservedSystemColor(customIndex)) {
-            appendSystem("color " + colour + " is reserved for system messages", kColourBad);
+        if (customColor && isReservedSystemColor(customIndex)) {
+            appendSystem("color " + color + " is reserved for system messages", kColorBad);
             return;
         }
-        if (!isValidColor(colour)) {
-            appendSystem("unknown color: " + colour +
-                             " (try pink, mint, butter, periwinkle, lilac, aqua, peach, or 0-255)",
-                         kColourBad);
+        if (!isValidColor(color)) {
+            appendSystem("unknown color: " + color + " (try " + paletteList() + ", or 0-255)",
+                         kColorBad);
             return;
         }
-        colour_ = colour;
-        appendSystem("you chose color " + colour);
+        color_ = color;
+        appendSystem("you chose color " + color);
     } else if (name == "/help") {
         appendSystem("/help           show this list");
         appendSystem("/users          list everyone online");
@@ -906,7 +933,7 @@ void Tui::runCommand(const std::string& command) {
         appendSystem("/clear          clear the message pane");
         appendSystem("/quit, /exit    leave the chat");
     } else {
-        appendSystem("unknown command: " + name, kColourBad);
+        appendSystem("unknown command: " + name, kColorBad);
     }
 }
 
