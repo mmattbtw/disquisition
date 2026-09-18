@@ -31,6 +31,8 @@ void printUsage(std::FILE* out) {
                  "                       accepting direct connections. Your traffic and\n"
                  "                       everyone else's is tunnelled through it, so no\n"
                  "                       port forward is needed (default port 42069)\n"
+                 "      --leak-my-ip     if the relay drops, fall back to a direct connection\n"
+                 "                       while continuing to retry the relay\n"
                  "  -h, --help           show this message\n");
 }
 
@@ -136,6 +138,8 @@ int main(int argc, char** argv) {
     std::string advertise;
     std::string name;
     std::string relayText;
+    bool leakMyIp = false;
+    bool hostExplicit = false;
 
     if (argc == 1 && !promptForConnection(host, port, name)) {
         std::fprintf(stderr, "setup cancelled before connecting\n");
@@ -151,6 +155,7 @@ int main(int argc, char** argv) {
                     throw std::runtime_error("missing value for " + argument);
                 }
                 host = argv[++index];
+                hostExplicit = true;
             } else if (argument == "-p" || argument == "--port") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
@@ -175,6 +180,8 @@ int main(int argc, char** argv) {
                     throw std::runtime_error("missing value for " + argument);
                 }
                 relayText = argv[++index];
+            } else if (argument == "--leak-my-ip") {
+                leakMyIp = true;
             } else if (argument == "-n" || argument == "--name") {
                 if (!hasValue) {
                     throw std::runtime_error("missing value for " + argument);
@@ -198,6 +205,10 @@ int main(int argc, char** argv) {
     std::signal(SIGPIPE, SIG_IGN);
 
     const bool useRelay = !relayText.empty();
+    if (leakMyIp && !useRelay) {
+        std::fprintf(stderr, "invalid arguments: --leak-my-ip requires --relay\n");
+        return 1;
+    }
     std::string relayHost;
     std::uint16_t relayPort = 0;
     if (useRelay) {
@@ -210,12 +221,18 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    // A relay commonly runs beside the chat server. If the user did not name
+    // a separate server, use the relay host for direct fallback instead of
+    // silently trying localhost.
+    if (useRelay && leakMyIp && !hostExplicit) {
+        host = relayHost;
+    }
 
     // The peer listener must be up before we announce its port to the server.
     // Through a relay we never listen: the relay is our public peer address.
     chat::PeerNetwork peers;
     std::string error;
-    if (useRelay) {
+    if (useRelay && !leakMyIp) {
         peers.setPassive(true);
     } else if (!peers.start(peerPort, error)) {
         std::fprintf(stderr, "cannot listen for peers on port %u: %s\n", peerPort, error.c_str());
@@ -224,7 +241,7 @@ int main(int argc, char** argv) {
 
     const std::string connectHost = useRelay ? relayHost : host;
     const std::uint16_t connectPort = useRelay ? relayPort : port;
-    const std::string advertiseHost = useRelay ? "" : advertise;
+    const std::string advertiseHost = useRelay && !leakMyIp ? "" : advertise;
 
     chat::Connection connection;
     if (!connection.connectTo(connectHost, connectPort, 5000, error)) {
@@ -235,5 +252,5 @@ int main(int argc, char** argv) {
     }
 
     chat::Tui tui(connection, peers);
-    return tui.run(name, connectHost, connectPort, advertiseHost, useRelay);
+    return tui.run(name, host, port, advertiseHost, useRelay, relayHost, relayPort, leakMyIp);
 }

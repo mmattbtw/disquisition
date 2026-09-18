@@ -143,6 +143,15 @@ void PeerNetwork::setMyAdvertised(bool advertised) {
 void PeerNetwork::setPassive(bool passive) {
     std::lock_guard<std::mutex> lock(mutex_);
     passive_ = passive;
+    if (passive_) {
+        dialQueue_.clear();
+        for (auto& entry : peers_) {
+            entry.second.dialing = false;
+            entry.second.connection.reset();
+        }
+    } else {
+        scanPeersForDialsLocked();
+    }
 }
 
 bool PeerNetwork::startDetached(std::string& error) {
@@ -373,7 +382,7 @@ void PeerNetwork::dialLoop() {
                     waitForHelloOk(*candidate, target)) {
                     std::lock_guard<std::mutex> lock(mutex_);
                     const auto it = peers_.find(target);
-                    if (it != peers_.end()) {
+                    if (it != peers_.end() && !passive_) {
                         if (it->second.connection == nullptr) {
                             it->second.connection = std::move(candidate);
                             pushEvent(Event::Kind::Join, target, "", 0);

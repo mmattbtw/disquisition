@@ -26,7 +26,9 @@ public:
     ~Tui();
 
     int run(const std::string& initialName, const std::string& host, std::uint16_t port,
-            const std::string& advertiseHost, bool useRelay = false);
+            const std::string& advertiseHost, bool useRelay = false,
+            const std::string& relayHost = "", std::uint16_t relayPort = 0,
+            bool leakMyIp = false);
 
 private:
     struct Entry {
@@ -66,14 +68,21 @@ private:
     void runCommand(const std::string& command);
 
     Connection& connection_;
+    Connection directConnection_;
+    std::atomic<Connection*> activeConnection_ {nullptr};
     PeerNetwork& peers_;
     std::string host_;
     std::uint16_t port_ = 0;
+    std::string relayHost_;
+    std::uint16_t relayPort_ = 0;
     std::string advertiseHost_;
     // True when this client reaches the mesh through a relay: the relay owns
     // the peer connections, so chat arrives on connection_ (carrying a sender)
     // rather than as PeerNetwork events, and the local mesh stays passive.
     bool useRelay_ = false;
+    bool leakMyIp_ = false;
+    std::atomic<bool> relayActive_ {false};
+    std::atomic<bool> transportChanged_ {false};
 
     WINDOW* header_ = nullptr;
     WINDOW* messages_ = nullptr;
@@ -90,6 +99,7 @@ private:
     std::size_t cursor_ = 0;
 
     std::string name_;
+    std::string relayRequestedName_;
     std::vector<std::string> users_;
     std::vector<std::string> pending_;
     std::string color_;

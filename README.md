@@ -116,6 +116,16 @@ forward), pass `--relay` with the relay's host and port:
 The name you pass is what the relay signs in as, so any number of users can
 share one relay.
 
+Pass `--leak-my-ip` to fall back to the server and direct peer connections when
+the relay is unavailable. The client keeps retrying the relay and switches back
+when it returns. The fallback server defaults to the relay host on port 9000;
+use `--host` and `--port` when the relay connects to a different server. This
+exposes your IP address to the server and other peers:
+
+```sh
+./build/client --relay relay.mmatt.net:3333 --leak-my-ip --name matt
+```
+
 ### Client keys
 
 | Key                                                   | Action                  |

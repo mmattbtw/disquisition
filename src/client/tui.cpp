@@ -231,12 +231,22 @@ void Tui::stop() {
 }
 
 int Tui::run(const std::string& initialName, const std::string& host, std::uint16_t port,
-             const std::string& advertiseHost, bool useRelay) {
+             const std::string& advertiseHost, bool useRelay, const std::string& relayHost,
+             std::uint16_t relayPort, bool leakMyIp) {
     host_ = host;
     port_ = port;
+    relayHost_ = relayHost;
+    relayPort_ = relayPort;
     advertiseHost_ = advertiseHost;
     useRelay_ = useRelay;
+    leakMyIp_ = leakMyIp;
+    relayActive_.store(useRelay);
+    activeConnection_.store(&connection_);
+    if (useRelay_) {
+        peers_.setPassive(true);
+    }
     name_ = trim(initialName);
+    relayRequestedName_ = name_;
     color_ = randomColorName();
 
     if (!start()) {
@@ -248,7 +258,8 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
 
     layout();
 
-    const std::string endpoint = host_ + ":" + std::to_string(port_);
+    const std::string endpoint = useRelay_ ? relayHost_ + ":" + std::to_string(relayPort_)
+                                           : host_ + ":" + std::to_string(port_);
     std::string greeting;
     if (connection_.failed()) {
         greeting = (useRelay_ ? "relay " : "server ") + endpoint + " is unreachable; retrying";
@@ -288,15 +299,16 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
         // the roster, users and history from scratch. Losing the server only
         // costs discovery, storage and history: the mesh keeps working and
         // the monitor keeps retrying, so this is not fatal.
-        if (connection_.failed() && !serverLost_) {
+        Connection* active = activeConnection_.load();
+        if (active->failed() && !serverLost_) {
             Message stale;
-            while (connection_.poll(stale)) {
+            while (active->poll(stale)) {
             }
             serverLost_ = true;
             serverReady_ = false;
             status_ = "server offline";
             statusColor_ = kColorBad;
-            appendSystem(useRelay_ ? "relay connection lost; reconnecting"
+            appendSystem(relayActive_.load() ? "relay connection lost; reconnecting"
                                    : "server connection lost; peer-to-peer chat still works",
                          kColorBad);
             dirty_ = true;
@@ -308,8 +320,15 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
         // The monitor re-established the transport; sign in on it from here,
         // where all the UI state lives. The generation check sends exactly
         // one Login per transport no matter which thread observes it first.
-        if (serverBack_.exchange(false) && !connection_.failed()) {
+        active = activeConnection_.load();
+        if (serverBack_.exchange(false) && !active->failed()) {
             serverLost_ = false;
+            if (transportChanged_.exchange(false)) {
+                appendSystem(relayActive_.load() ? "relay connection restored"
+                                                 : "relay unavailable; connected directly to " +
+                                                       host_ + ":" + std::to_string(port_),
+                             kColorGood);
+            }
             if (!name_.empty() && loginGen_ != transportGen_.load()) {
                 loginGen_ = transportGen_.load();
                 loginSent_ = true;
@@ -328,7 +347,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
         // live stream. Anything arriving through both is deduplicated.
         if (historyPending_ && serverReady_ && peers_.settled()) {
             historyPending_ = false;
-            connection_.send(Message {MsgType::FetchHistory, {}});
+            activeConnection_.load()->send(Message {MsgType::FetchHistory, {}});
         }
 
         if (dirty_) {
@@ -351,7 +370,7 @@ int Tui::run(const std::string& initialName, const std::string& host, std::uint1
     monitor.join();
 
     stop();
-    return connection_.failed() && !signedIn_ ? 1 : 0;
+    return activeConnection_.load()->failed() && !signedIn_ ? 1 : 0;
 }
 
 void Tui::monitorServer() {
@@ -363,11 +382,45 @@ void Tui::monitorServer() {
                 return;
             }
         }
-        if (connection_.failed()) {
+        Connection* active = activeConnection_.load();
+        if (active->failed()) {
+            active->stop();
+            std::string error;
+            Connection* next = active;
+            std::string nextHost = relayActive_.load() ? relayHost_ : host_;
+            std::uint16_t nextPort = relayActive_.load() ? relayPort_ : port_;
+
+            if (useRelay_ && leakMyIp_ && relayActive_.load()) {
+                next = &directConnection_;
+                nextHost = host_;
+                nextPort = port_;
+            }
+            if (next->connectTo(nextHost, nextPort, kReconnectTimeoutMs, error)) {
+                next->startReader();
+                if (next != active) {
+                    activeConnection_.store(next);
+                    relayActive_.store(false);
+                    peers_.setPassive(false);
+                    transportChanged_.store(true);
+                }
+                transportGen_.fetch_add(1);
+                serverBack_.store(true);
+            } else if (useRelay_ && leakMyIp_ && relayActive_.load() &&
+                       connection_.connectTo(relayHost_, relayPort_, kReconnectTimeoutMs, error)) {
+                connection_.startReader();
+                transportGen_.fetch_add(1);
+                serverBack_.store(true);
+            }
+        } else if (useRelay_ && leakMyIp_ && !relayActive_.load()) {
             connection_.stop();
             std::string error;
-            if (connection_.connectTo(host_, port_, kReconnectTimeoutMs, error)) {
+            if (connection_.connectTo(relayHost_, relayPort_, kReconnectTimeoutMs, error)) {
                 connection_.startReader();
+                activeConnection_.store(&connection_);
+                relayActive_.store(true);
+                peers_.setPassive(true);
+                directConnection_.stop();
+                transportChanged_.store(true);
                 transportGen_.fetch_add(1);
                 serverBack_.store(true);
             }
@@ -576,7 +629,7 @@ void Tui::rebuildRows() {
 
 void Tui::drainIncoming() {
     Message message;
-    while (connection_.poll(message)) {
+    while (activeConnection_.load()->poll(message)) {
         dirty_ = true;
 
         switch (message.type) {
@@ -666,7 +719,8 @@ void Tui::drainIncoming() {
             // chat is attributed from the frame's sender field instead of the
             // connection it came in on.
             case MsgType::PeerChat: {
-                if (!useRelay_ || message.fields.size() < 4 || !isValidColor(message.fields[3])) {
+                if (!relayActive_.load() || message.fields.size() < 4 ||
+                    !isValidColor(message.fields[3])) {
                     break;
                 }
                 const std::string& sender = message.fields[0];
@@ -718,8 +772,14 @@ bool Tui::remember(const std::string& sender, const std::string& timestamp, cons
 }
 
 void Tui::sendLogin() {
-    connection_.send(Message {MsgType::Login,
-                              {name_, std::to_string(peers_.port()), advertiseHost_}});
+    const bool throughRelay = relayActive_.load();
+    if (throughRelay && relayRequestedName_.empty()) {
+        relayRequestedName_ = name_;
+    }
+    activeConnection_.load()->send(
+        Message {MsgType::Login,
+                 {throughRelay ? relayRequestedName_ : name_, std::to_string(peers_.port()),
+                  throughRelay ? "" : advertiseHost_}});
 }
 
 void Tui::deliver(const std::string& line) {
@@ -731,14 +791,15 @@ void Tui::deliver(const std::string& line) {
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
     append(formatTime(stamp) + " you: ", body, kColorSelf);
-    if (useRelay_) {
+    Connection* active = activeConnection_.load();
+    if (relayActive_.load()) {
         // The relay fans this out to the mesh on our behalf.
-        connection_.send(Message {MsgType::PeerChat, {name_, stamp, body, color_}});
+        active->send(Message {MsgType::PeerChat, {name_, stamp, body, color_}});
     } else {
         peers_.sendChat(timestamp, body, color_);
     }
-    if (serverReady_ && !connection_.failed()) {
-        connection_.send(Message {MsgType::Store, {stamp, body, color_}});
+    if (serverReady_ && !active->failed()) {
+        active->send(Message {MsgType::Store, {stamp, body, color_}});
     }
 }
 
@@ -856,10 +917,11 @@ void Tui::submit() {
         loginSent_ = true;
         status_ = "signing in";
         statusColor_ = kColorSystem;
-        if (!connection_.failed() && loginGen_ != transportGen_.load()) {
+        Connection* active = activeConnection_.load();
+        if (!active->failed() && loginGen_ != transportGen_.load()) {
             loginGen_ = transportGen_.load();
             sendLogin();
-        } else if (connection_.failed()) {
+        } else if (active->failed()) {
             appendSystem("server unreachable; signing in as soon as it is back");
             monitorCv_.notify_all();
         }
