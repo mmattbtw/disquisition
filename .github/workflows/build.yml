@@ -19,7 +19,7 @@ jobs:
               sudo apt-get install -y libncurses-dev libsqlite3-dev
           - os: macos-latest
             artifact: disquisition-macos-arm64
-            deps: ""
+            deps: brew install sqlite ncurses
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -28,11 +28,8 @@ jobs:
         if: ${{ matrix.deps != '' }}
         run: ${{ matrix.deps }}
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-
       - name: Build
-        run: cmake --build build --parallel
+        run: make
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
