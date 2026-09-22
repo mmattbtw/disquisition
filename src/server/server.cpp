@@ -348,6 +348,14 @@ void Server::handleLogin(Connection& connection, const Message& message) {
     connection.name = uniqueName(requested);
     connection.peerPort = static_cast<std::uint16_t>(peerPort);
     connection.advertisedHost = sanitizeHost(message.fields.size() >= 3 ? message.fields[2] : "");
+    if (message.fields.size() >= 4 && !message.fields[3].empty()) {
+        std::int64_t voicePort = 0;
+        if (!parseInt64(message.fields[3], voicePort) || voicePort < 1 || voicePort > 65535) {
+            reject(connection, "invalid voice port");
+            return;
+        }
+        connection.voicePort = static_cast<std::uint16_t>(voicePort);
+    }
     connection.authenticated = true;
 
     send(connection, Message {MsgType::LoginOk, {connection.name, "welcome, " + connection.name}});
@@ -358,14 +366,16 @@ void Server::handleLogin(Connection& connection, const Message& message) {
         if (&other != &connection && other.authenticated) {
             send(connection, Message {MsgType::Peer,
                                       {other.name, hostFor(other), std::to_string(other.peerPort),
-                                       other.advertisedHost.empty() ? "0" : "1"}});
+                                       other.advertisedHost.empty() ? "0" : "1",
+                                       std::to_string(other.voicePort)}});
         }
     }
 
     log(connection.name + " joined from " + hostFor(connection));
     broadcast(Message {MsgType::PeerJoined,
                        {connection.name, hostFor(connection), std::to_string(connection.peerPort),
-                        connection.advertisedHost.empty() ? "0" : "1"}},
+                        connection.advertisedHost.empty() ? "0" : "1",
+                        std::to_string(connection.voicePort)}},
               &connection);
     broadcastUsers();
 }

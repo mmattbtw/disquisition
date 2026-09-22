@@ -31,7 +31,7 @@ namespace chat {
 // a relay exchanges those frames for clients that cannot accept connections.
 enum class MsgType : std::uint8_t {
     // Messages a client sends to the central server.
-    Login = 1,         // [name, peer port, advertised host (may be empty)]
+    Login = 1,         // [name, chat port, advertised host, voice SIP port (optional)]
     // Store saves a message that was already delivered live. This is what
     // makes the message appear when another client requests chat history.
     Store = 10,        // [timestamp, body, color]
@@ -44,8 +44,8 @@ enum class MsgType : std::uint8_t {
     System = 7,     // [text]
     Users = 8,      // [name]*
     HistoryEnd = 9, // []
-    Peer = 12,      // [name, host, port, advertised (0|1)] one roster entry
-    PeerJoined = 13, // [name, host, port, advertised (0|1)]
+    Peer = 12,      // [name, host, chat port, advertised (0|1), voice SIP port]
+    PeerJoined = 13, // [name, host, chat port, advertised (0|1), voice SIP port]
     PeerLeft = 14,  // [name]
 
     // Messages sent over a direct peer connection.
@@ -58,7 +58,8 @@ enum class MsgType : std::uint8_t {
     // PeerChat includes the sender's name because a relayed client receives
     // every user's messages through one socket. The socket alone cannot tell
     // that client who wrote a message.
-    PeerChat = 16  // [sender, timestamp, body, color]
+    PeerChat = 16, // [sender, timestamp, body, color]
+    VoiceState = 18 // [sender, muted (0|1), deafened (0|1)]
 };
 
 // Rejecting larger frames prevents a broken or hostile client from making the

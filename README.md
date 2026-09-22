@@ -2,12 +2,13 @@
 
 Disquisition is a small C++17 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and stores recent messages in SQLite. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
 
-The repository builds four pieces:
+The repository builds five pieces:
 
 - `server`, the discovery and history service
 - `client`, an ncurses terminal client
 - `relay`, a shared gateway for clients that cannot accept inbound connections
 - `disquisition::client`, a static C++ client library
+- `disquisition-desktop`, a Qt 6 desktop client with text chat and baresip voice
 
 This is a plain TCP protocol. It does not provide encryption, authentication, private rooms, or access control. Use it only on networks and hosts you trust.
 
@@ -25,6 +26,57 @@ This is a plain TCP protocol. It does not provide encryption, authentication, pr
 make
 ctest --test-dir build --output-on-failure
 ```
+
+The desktop app is built when Qt 6.4 or newer is available. It also expects the
+`baresip` executable on `PATH` at runtime. Build it explicitly with:
+
+```sh
+cmake -S . -B build -DBUILD_DESKTOP_APP=ON
+cmake --build build --target disquisition-desktop
+```
+
+On Windows, CMake builds only the portable desktop pieces by default because
+the existing server, relay, terminal client, and library use POSIX sockets.
+Run the server on Linux or macOS, then build the Windows app with Qt 6 and:
+
+```powershell
+cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+cmake --build build --config Release --target disquisition-desktop
+```
+
+Install a baresip build that includes `menu`, `mixminus`, `vumeter`, `ctrl_tcp`,
+`g711`, and the platform audio module (`coreaudio`, `wasapi`, or `alsa`). The app
+creates a small isolated baresip profile in the platform application-data
+directory.
+
+## Desktop voice chat
+
+Start the normal server, then open `disquisition-desktop` on each computer.
+Enter the server address, a name, and a SIP port. Use a different SIP port for
+each client running on the same machine. If peers cannot directly reach the
+address seen by the server, enter a reachable DNS name or IP in the public host
+field and forward both the automatically chosen TCP chat port and the chosen
+SIP/RTP ports.
+
+After sign-in, the app uses the server roster to form one direct SIP call per
+pair of users. Baresip's `mixminus` module combines those calls locally, so the
+server never carries microphone audio. The name ordering rule makes only one
+side dial each pair, while the other side auto-answers.
+
+The member list reports voice state from baresip itself. `·` means text-only,
+`○` means the SIP call is connected, and a green `●` means the microphone or
+that peer's received audio is above the speaking threshold. The `vumeter`
+module supplies audio levels and `ctrl_tcp` supplies call identity and state.
+
+On macOS the app requests microphone access when its window first opens. Choose
+the microphone and speaker from the `mic` and `out` dropdowns before joining;
+the dropdowns refresh after permission is granted.
+
+This first version is deliberately small. It works well on a LAN or between
+publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP
+port forwarding, authentication, or media encryption. Use it only with people
+and networks you trust. A production internet deployment should add TURN and
+DTLS-SRTP before treating the call as private.
 
 The build creates `build/server`, `build/client`, `build/relay`, and the static client library. `make clean` removes the `build` directory.
 

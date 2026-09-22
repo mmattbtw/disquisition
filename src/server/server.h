@@ -42,6 +42,7 @@ private:
         std::string host;
         std::string advertisedHost;
         std::uint16_t peerPort = 0;
+        std::uint16_t voicePort = 0;
         bool authenticated = false;
         bool closing = false;
     };
