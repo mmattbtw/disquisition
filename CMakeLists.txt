@@ -22,6 +22,39 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # Cygwin/MSYS2 whose strict C++ mode would otherwise hide them.
 add_compile_definitions(_GNU_SOURCE)
 
+# Homebrew's SQLite is keg-only, so CMake can otherwise pick the older macOS SDK
+# copy. Use installed Homebrew dependencies when present, including on Intel Macs.
+if(APPLE)
+  find_program(HOMEBREW_EXECUTABLE brew)
+  if(HOMEBREW_EXECUTABLE)
+    execute_process(
+      COMMAND "${HOMEBREW_EXECUTABLE}" --prefix sqlite
+      OUTPUT_VARIABLE HOMEBREW_SQLITE_PREFIX
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if((NOT DEFINED SQLite3_LIBRARY OR
+        SQLite3_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
+       EXISTS "${HOMEBREW_SQLITE_PREFIX}/include/sqlite3.h" AND
+       EXISTS "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib")
+      set(SQLite3_INCLUDE_DIR "${HOMEBREW_SQLITE_PREFIX}/include" CACHE PATH "SQLite3 headers" FORCE)
+      set(SQLite3_LIBRARY "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib" CACHE FILEPATH "SQLite3 library" FORCE)
+    endif()
+
+    execute_process(
+      COMMAND "${HOMEBREW_EXECUTABLE}" --prefix ncurses
+      OUTPUT_VARIABLE HOMEBREW_NCURSES_PREFIX
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if((NOT DEFINED CURSES_NCURSES_LIBRARY OR
+        CURSES_NCURSES_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
+       EXISTS "${HOMEBREW_NCURSES_PREFIX}/include/ncurses.h" AND
+       EXISTS "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib")
+      set(CURSES_NCURSES_LIBRARY "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib" CACHE FILEPATH "ncurses library" FORCE)
+      set(CURSES_INCLUDE_PATH "${HOMEBREW_NCURSES_PREFIX}/include" CACHE PATH "ncurses headers" FORCE)
+    endif()
+  endif()
+endif()
+
 find_package(Threads REQUIRED)
 find_package(SQLite3 3.24 REQUIRED)
 
