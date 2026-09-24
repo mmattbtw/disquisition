@@ -63,6 +63,9 @@ voice SIP port in Preferences for each client running on the same machine. If
 peers cannot directly reach the address seen by the server, enter a reachable
 DNS name or IP as the public host and forward both the automatically chosen TCP
 chat port and the chosen SIP/RTP ports when connecting directly.
+For clients on the same LAN, select "Advertise local IP automatically" in
+Preferences to announce the local IPv4 address. This takes precedence over the
+saved public host while selected. It also applies during direct relay fallback.
 
 To keep your IP hidden from other users, set the relay address and port in
 Preferences before joining. The desktop app then connects only to the relay;

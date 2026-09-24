@@ -95,6 +95,34 @@ QString voiceReachableHost(QString host) {
     return host;
 }
 
+QString localAdvertiseHost(const QHostAddress& routeAddress) {
+    if (routeAddress.protocol() == QAbstractSocket::IPv4Protocol &&
+        !routeAddress.isLoopback() && !routeAddress.isLinkLocal() && !routeAddress.isNull()) {
+        return routeAddress.toString();
+    }
+
+    // A server on this machine gives us a loopback route. Prefer an active
+    // LAN interface over a point-to-point tunnel in that case.
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const QNetworkInterface& interface : interfaces) {
+            const auto flags = interface.flags();
+            if (!(flags & QNetworkInterface::IsUp) || (flags & QNetworkInterface::IsLoopBack) ||
+                (pass == 0 && !(flags & QNetworkInterface::CanBroadcast))) {
+                continue;
+            }
+            for (const QNetworkAddressEntry& entry : interface.addressEntries()) {
+                const QHostAddress address = entry.ip();
+                if (address.protocol() == QAbstractSocket::IPv4Protocol &&
+                    !address.isLoopback() && !address.isLinkLocal() && !address.isNull()) {
+                    return address.toString();
+                }
+            }
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
@@ -102,6 +130,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     serverHost_ = settings.value("server/host", serverHost_).toString();
     serverPort_ = static_cast<quint16>(qBound(1, settings.value("server/port", 9000).toInt(), 65535));
     advertiseHost_ = settings.value("server/advertisedHost").toString();
+    advertiseLocal_ = settings.value("server/advertiseLocal", false).toBool();
     preferredVoicePort_ = static_cast<quint16>(
         qBound(1, settings.value("voice/sipPort", 5060).toInt(), 65534));
     relayHost_ = settings.value("relay/host").toString();
@@ -153,6 +182,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             });
 
     connect(&server_, &QTcpSocket::connected, this, [this] {
+        const QString advertised = usingRelay_ ? QString() :
+                                   advertiseLocal_ ? localAdvertiseHost(server_.localAddress()) :
+                                                     advertiseHost_;
+        if (!usingRelay_ && advertiseLocal_ && advertised.isEmpty()) {
+            QMessageBox::critical(this, "Cannot join",
+                                  "No active non-loopback IPv4 address is available to advertise.");
+            disconnectAll();
+            return;
+        }
         if (!usingRelay_ && !peerServer_.listen(QHostAddress::Any, 0)) {
             QMessageBox::critical(this, "Cannot join", peerServer_.errorString());
             server_.disconnectFromHost();
@@ -164,7 +202,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         sendFrame(&server_, chat::Message {
                                 chat::MsgType::Login,
                                 {s(name_->text()), std::to_string(usingRelay_ ? 0 : peerServer_.serverPort()),
-                                 s(advertiseHost_)}});
+                                 s(advertised)}});
     });
     connect(&server_, &QTcpSocket::readyRead, this, &MainWindow::readServer);
     connect(&server_, &QTcpSocket::disconnected, this, &MainWindow::handleTransportClosed);
@@ -565,6 +603,10 @@ void MainWindow::showPreferences() {
     port->setValue(serverPort_);
     auto* advertisedHost = new QLineEdit(advertiseHost_, &dialog);
     advertisedHost->setPlaceholderText("optional public DNS name or IP");
+    auto* advertiseLocal = new QCheckBox("Advertise local IP automatically", &dialog);
+    advertiseLocal->setChecked(advertiseLocal_);
+    advertisedHost->setEnabled(!advertiseLocal_);
+    connect(advertiseLocal, &QCheckBox::toggled, advertisedHost, &QWidget::setDisabled);
     auto* sipPort = new QSpinBox(&dialog);
     sipPort->setRange(1, 65534);
     sipPort->setValue(preferredVoicePort_);
@@ -578,6 +620,7 @@ void MainWindow::showPreferences() {
     form->addRow("server address", host);
     form->addRow("server port", port);
     form->addRow("public host", advertisedHost);
+    form->addRow("", advertiseLocal);
     form->addRow("voice SIP port", sipPort);
     form->addRow("relay address", relayHost);
     form->addRow("relay port", relayPort);
@@ -597,6 +640,7 @@ void MainWindow::showPreferences() {
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
+    advertiseLocal_ = advertiseLocal->isChecked();
     preferredVoicePort_ = static_cast<quint16>(sipPort->value());
     relayHost_ = relayHost->text().trimmed();
     relayPort_ = static_cast<quint16>(relayPort->value());
@@ -605,6 +649,7 @@ void MainWindow::showPreferences() {
     settings.setValue("server/host", serverHost_);
     settings.setValue("server/port", serverPort_);
     settings.setValue("server/advertisedHost", advertiseHost_);
+    settings.setValue("server/advertiseLocal", advertiseLocal_);
     settings.setValue("voice/sipPort", preferredVoicePort_);
     settings.setValue("relay/host", relayHost_);
     settings.setValue("relay/port", relayPort_);
