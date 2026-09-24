@@ -215,12 +215,21 @@ bool parsePeerAddress(const Message& message, PeerAddress& out) {
     out.host = message.fields[1];
     out.port = port;
     out.advertised = message.fields[3] == "1";
+    out.voicePort = 0;
+    if (message.fields.size() >= 5 &&
+        !parsePort(message.fields[4], out.voicePort, true)) {
+        return false;
+    }
     return true;
 }
 
 Message peerMessage(MsgType type, const PeerAddress& peer) {
-    return Message{type,
-                   {peer.name, peer.host, std::to_string(peer.port), peer.advertised ? "1" : "0"}};
+    Message message{type,
+                    {peer.name, peer.host, std::to_string(peer.port), peer.advertised ? "1" : "0"}};
+    if (peer.voicePort != 0) {
+        message.fields.push_back(std::to_string(peer.voicePort));
+    }
+    return message;
 }
 
 } // namespace chat

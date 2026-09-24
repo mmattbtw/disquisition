@@ -261,6 +261,15 @@ bool Server::handleFrames(Client& client) {
             case MsgType::FetchHistory:
                 handleFetchHistory(client);
                 break;
+            case MsgType::VoicePort:
+                handleVoicePort(client, message);
+                break;
+            case MsgType::VoiceAudio:
+                handleVoiceAudio(client, message);
+                break;
+            case MsgType::VoiceState:
+                handleVoiceState(client, message);
+                break;
             default:
                 reject(client, "unexpected message");
                 break;
@@ -294,6 +303,11 @@ void Server::handleLogin(Client& client, const Message& message) {
     client.name = uniqueName(requested);
     client.peerPort = peerPort;
     client.advertisedHost = sanitizeHost(message.fields.size() >= 3 ? message.fields[2] : "");
+    if (message.fields.size() >= 4 && !message.fields[3].empty() &&
+        !parsePort(message.fields[3], client.voicePort, false)) {
+        reject(client, "invalid voice port");
+        return;
+    }
     client.authenticated = true;
     send(client, Message{MsgType::LoginOk, {client.name, "welcome, " + client.name}});
 
@@ -350,6 +364,45 @@ void Server::handleFetchHistory(Client& client) {
     send(client, Message{MsgType::HistoryEnd, {}});
 }
 
+void Server::handleVoicePort(Client& client, const Message& message) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
+        return;
+    }
+    std::uint16_t port = 0;
+    if (message.fields.size() != 1 || !parsePort(message.fields[0], port, true)) {
+        reject(client, "invalid voice port");
+        return;
+    }
+    if (client.voicePort == port) return;
+    client.voicePort = port;
+    broadcast(Message{MsgType::VoicePort, {client.name, std::to_string(port)}}, &client);
+}
+
+void Server::handleVoiceAudio(Client& client, const Message& message) {
+    if (!client.authenticated || client.voicePort == 0 || message.fields.size() != 1 ||
+        message.fields[0].size() != 640) {
+        return;
+    }
+    const Message audio{MsgType::VoiceAudio, {client.name, message.fields[0]}};
+    for (Client& recipient : clients_) {
+        if (&recipient != &client && recipient.authenticated && recipient.voicePort != 0 &&
+            recipient.out.size() < 256 * 1024) {
+            send(recipient, audio);
+        }
+    }
+}
+
+void Server::handleVoiceState(Client& client, const Message& message) {
+    if (!client.authenticated || message.fields.size() != 3 ||
+        (message.fields[1] != "0" && message.fields[1] != "1") ||
+        (message.fields[2] != "0" && message.fields[2] != "1")) {
+        return;
+    }
+    broadcast(Message{MsgType::VoiceState,
+                      {client.name, message.fields[1], message.fields[2]}}, &client);
+}
+
 // Sends the reason and closes once it is flushed. Closing straight away could
 // reset the connection and discard the message.
 void Server::reject(Client& client, const std::string& reason) {
@@ -403,7 +456,7 @@ std::string Server::uniqueName(const std::string& requested) const {
 PeerAddress Server::addressOf(const Client& client) const {
     const bool advertised = !client.advertisedHost.empty();
     return PeerAddress{client.name, advertised ? client.advertisedHost : client.host,
-                       client.peerPort, advertised};
+                       client.peerPort, advertised, client.voicePort};
 }
 
 void Server::dropClient(std::size_t index) {
