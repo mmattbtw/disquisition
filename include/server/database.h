@@ -16,9 +16,7 @@ struct StoredMessage {
     std::string color;
 };
 
-// Thin wrapper around the handful of SQLite calls the server needs. The
-// connection is opened in full-mutex mode so it is safe to hand to other
-// threads later if the server ever grows one.
+// Message history in SQLite.
 class Database {
 public:
     explicit Database(const std::string& path);
@@ -29,7 +27,7 @@ public:
     void add(std::int64_t timestamp, const std::string& sender, const std::string& body,
              const std::string& color);
 
-    // Most recent `limit` messages, oldest first (ready to replay to a client).
+    // The most recent `limit` messages, oldest first.
     std::vector<StoredMessage> recent(std::size_t limit);
 
 private:
@@ -38,4 +36,4 @@ private:
     sqlite3_stmt* select_ = nullptr;
 };
 
-}  // namespace chat
+} // namespace chat
