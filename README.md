@@ -70,9 +70,12 @@ relayed participants. This means relayed voice is not end-to-end encrypted and
 the relay and server can hear it. Use only a trusted relay and server.
 
 "Connect directly if relay fails (reveals your IP)" is off by default. If
-enabled, a lost relay connection falls back to the server address and port in
-Preferences. This reveals your address to the server and direct peers until
-you leave and rejoin through the relay.
+the relay is unavailable, the desktop client retries it every three seconds
+without connecting directly. If direct fallback is enabled, a lost relay
+connection uses the server address and port in Preferences. This reveals your
+address to the server and direct peers while fallback is active. The client
+checks the relay every three seconds and switches back when it returns. If
+you were in voice, it rejoins voice after the chat connection is restored.
 
 For direct participants, the app uses the server roster to form one SIP call
 per pair of users. Baresip's `mixminus` module combines those calls locally.

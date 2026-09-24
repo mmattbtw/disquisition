@@ -111,6 +111,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     setWindowTitle("Disquisition");
     resize(980, 680);
 
+    reconnectTimer_.setSingleShot(true);
+    reconnectTimer_.setInterval(3000);
+    connect(&reconnectTimer_, &QTimer::timeout, this, &MainWindow::retryConnection);
+    relayProbeTimer_.setInterval(3000);
+    connect(&relayProbeTimer_, &QTimer::timeout, this, &MainWindow::probeRelay);
+    loginTimer_.setSingleShot(true);
+    loginTimer_.setInterval(8000);
+    connect(&loginTimer_, &QTimer::timeout, this, [this] {
+        if (desiredConnected_ && awaitingLogin_) server_.abort();
+    });
+    connect(&relayProbe_, &QTcpSocket::connected, this, [this] {
+        relayProbe_.abort();
+        if (!desiredConnected_ || usingRelay_ || !leakMyIp_) return;
+        relayProbeTimer_.stop();
+        reconnectTimer_.stop();
+        connectionLabel_->setText("Relay restored; reconnecting privately");
+        if (server_.state() == QAbstractSocket::UnconnectedState) {
+            startTransport(true);
+        } else {
+            switchingToRelay_ = true;
+            server_.abort();
+        }
+    });
+    connect(&relayProbe_, &QTcpSocket::errorOccurred, this,
+            [this](QAbstractSocket::SocketError) { relayProbe_.abort(); });
+
     connect(&server_, &QTcpSocket::connected, this, [this] {
         if (!usingRelay_ && !peerServer_.listen(QHostAddress::Any, 0)) {
             QMessageBox::critical(this, "Cannot join", peerServer_.errorString());
@@ -118,47 +144,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             return;
         }
         connectionLabel_->setText("Signing in");
+        awaitingLogin_ = true;
+        loginTimer_.start();
         sendFrame(&server_, chat::Message {
                                 chat::MsgType::Login,
                                 {s(name_->text()), std::to_string(usingRelay_ ? 0 : peerServer_.serverPort()),
                                  s(advertiseHost_)}});
     });
     connect(&server_, &QTcpSocket::readyRead, this, &MainWindow::readServer);
-    connect(&server_, &QTcpSocket::disconnected, this, [this] {
-        const bool fallback = usingRelay_ && leakMyIp_ && !intentionalDisconnect_;
-        leaveVoice();
-        peerServer_.close();
-        for (const Peer& peer : std::as_const(peers_)) {
-            if (peer.socket) peer.socket->abort();
-        }
-        peers_.clear();
-        myName_.clear();
-        refreshMembers();
-        connectionLabel_->setText("Disconnected");
-        connectButton_->setText("Join");
-        name_->setEnabled(true);
-        voiceButton_->setEnabled(false);
-        composer_->setEnabled(false);
-        sendButton_->setEnabled(false);
-        if (fallback) {
-            usingRelay_ = false;
-            connectionLabel_->setText("Relay unavailable; connecting directly (IP visible)");
-            QTimer::singleShot(0, this, [this] {
-                if (!intentionalDisconnect_ && server_.state() == QAbstractSocket::UnconnectedState) {
-                    server_.connectToHost(serverHost_, serverPort_);
-                }
-            });
-        }
-    });
+    connect(&server_, &QTcpSocket::disconnected, this, &MainWindow::handleTransportClosed);
     connect(&server_, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
         connectionLabel_->setText(server_.errorString());
+        QTimer::singleShot(0, this, [this] {
+            if (server_.state() == QAbstractSocket::UnconnectedState) handleTransportClosed();
+        });
     });
     connect(&peerServer_, &QTcpServer::newConnection, this, &MainWindow::acceptPeer);
     connect(connectButton_, &QPushButton::clicked, this, [this] {
-        if (server_.state() == QAbstractSocket::UnconnectedState) {
-            startJoining();
-        } else {
+        if (desiredConnected_) {
             disconnectAll();
+        } else {
+            startJoining();
         }
     });
     connect(voiceButton_, &QPushButton::clicked, this, [this] {
@@ -576,13 +582,86 @@ void MainWindow::connectToServer() {
     connectionLabel_->setText("Connecting");
     connectButton_->setText("Leave");
     intentionalDisconnect_ = false;
-    usingRelay_ = !relayHost_.isEmpty();
-    server_.connectToHost(usingRelay_ ? relayHost_ : serverHost_,
-                          usingRelay_ ? relayPort_ : serverPort_);
+    desiredConnected_ = true;
+    startTransport(!relayHost_.isEmpty());
+}
+
+void MainWindow::startTransport(bool relay) {
+    if (!desiredConnected_ || server_.state() != QAbstractSocket::UnconnectedState) return;
+    usingRelay_ = relay;
+    transportClosedHandled_ = false;
+    awaitingLogin_ = false;
+    connectionLabel_->setText(relay ? "Connecting to relay" : "Connecting directly (IP visible)");
+    server_.connectToHost(relay ? relayHost_ : serverHost_, relay ? relayPort_ : serverPort_);
+    if (!relay && !relayHost_.isEmpty() && leakMyIp_) relayProbeTimer_.start();
+    if (relay) relayProbeTimer_.stop();
+}
+
+void MainWindow::retryConnection() {
+    if (desiredConnected_ && server_.state() == QAbstractSocket::UnconnectedState) {
+        startTransport(usingRelay_);
+    }
+}
+
+void MainWindow::probeRelay() {
+    if (!desiredConnected_ || usingRelay_ || relayHost_.isEmpty() || !leakMyIp_ ||
+        relayProbe_.state() != QAbstractSocket::UnconnectedState) return;
+    relayProbe_.connectToHost(relayHost_, relayPort_);
+    QTimer::singleShot(2500, this, [this] {
+        if (relayProbe_.state() == QAbstractSocket::ConnectingState) relayProbe_.abort();
+    });
+}
+
+void MainWindow::handleTransportClosed() {
+    if (transportClosedHandled_) return;
+    transportClosedHandled_ = true;
+    loginTimer_.stop();
+    awaitingLogin_ = false;
+    if (voiceWanted_) resumeVoice_ = true;
+    leaveVoice();
+    peerServer_.close();
+    for (const Peer& peer : std::as_const(peers_)) {
+        if (peer.socket) peer.socket->abort();
+    }
+    peers_.clear();
+    peerBuffers_.clear();
+    serverBuffer_.clear();
+    myName_.clear();
+    refreshMembers();
+    voiceButton_->setEnabled(false);
+    composer_->setEnabled(false);
+    sendButton_->setEnabled(false);
+
+    if (!desiredConnected_ || intentionalDisconnect_) {
+        connectionLabel_->setText("Disconnected");
+        connectButton_->setText("Join");
+        name_->setEnabled(true);
+        return;
+    }
+    if (switchingToRelay_) {
+        switchingToRelay_ = false;
+        connectionLabel_->setText("Relay restored; reconnecting");
+        QTimer::singleShot(0, this, [this] { startTransport(true); });
+    } else if (usingRelay_ && leakMyIp_) {
+        connectionLabel_->setText("Relay unavailable; connecting directly (IP visible)");
+        QTimer::singleShot(0, this, [this] { startTransport(false); });
+    } else {
+        connectionLabel_->setText(usingRelay_ ? "Relay unavailable; retrying" :
+                                                "Server unavailable; retrying");
+        reconnectTimer_.start();
+    }
 }
 
 void MainWindow::disconnectAll() {
     intentionalDisconnect_ = true;
+    desiredConnected_ = false;
+    switchingToRelay_ = false;
+    resumeVoice_ = false;
+    awaitingLogin_ = false;
+    reconnectTimer_.stop();
+    relayProbeTimer_.stop();
+    loginTimer_.stop();
+    relayProbe_.abort();
     // Notify the room first; stopping the audio process must not delay Leave.
     server_.abort();
     leaveVoice();
@@ -597,6 +676,12 @@ void MainWindow::disconnectAll() {
     serverBuffer_.clear();
     myName_.clear();
     localSpeaking_ = false;
+    connectButton_->setText("Join");
+    name_->setEnabled(true);
+    voiceButton_->setEnabled(false);
+    composer_->setEnabled(false);
+    sendButton_->setEnabled(false);
+    connectionLabel_->setText("Disconnected");
     refreshMembers();
 }
 
@@ -632,6 +717,8 @@ void MainWindow::readServer() {
 
 void MainWindow::handleServerMessage(const chat::Message& message) {
     if (message.type == chat::MsgType::LoginOk && !message.fields.empty()) {
+        awaitingLogin_ = false;
+        loginTimer_.stop();
         myName_ = q(message.fields[0]);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
@@ -645,6 +732,12 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         sendButton_->setEnabled(true);
         sendFrame(&server_, chat::Message {chat::MsgType::FetchHistory, {}});
         refreshMembers();
+        if (resumeVoice_) {
+            resumeVoice_ = false;
+            QTimer::singleShot(0, this, [this] {
+                if (desiredConnected_ && !voiceWanted_) joinVoice();
+            });
+        }
     } else if ((message.type == chat::MsgType::Peer ||
                 message.type == chat::MsgType::PeerJoined) && message.fields.size() >= 4) {
         addPeer(message);

@@ -64,6 +64,10 @@ private:
     void joinVoice();
     void leaveVoice();
     void showPreferences();
+    void startTransport(bool relay);
+    void handleTransportClosed();
+    void retryConnection();
+    void probeRelay();
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -82,6 +86,7 @@ private:
     QMediaDevices* mediaDevices_ = nullptr;
 
     QTcpSocket server_;
+    QTcpSocket relayProbe_;
     QTcpServer peerServer_;
     QByteArray serverBuffer_;
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
@@ -96,6 +101,11 @@ private:
     bool leakMyIp_ = false;
     bool usingRelay_ = false;
     bool intentionalDisconnect_ = false;
+    bool desiredConnected_ = false;
+    bool transportClosedHandled_ = true;
+    bool switchingToRelay_ = false;
+    bool resumeVoice_ = false;
+    bool awaitingLogin_ = false;
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
     QString messageColor_ = "mint";
@@ -106,4 +116,7 @@ private:
     VoiceEngine voice_;
     RelayAudio relayAudio_;
     QTimer speakingExpiry_;
+    QTimer reconnectTimer_;
+    QTimer relayProbeTimer_;
+    QTimer loginTimer_;
 };
