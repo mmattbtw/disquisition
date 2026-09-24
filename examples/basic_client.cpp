@@ -1,12 +1,11 @@
+#include <client/client.h>
+
 #include <iostream>
 #include <limits>
 #include <string>
 
-#include <disquisition/client.h>
-
 // Client calls this function whenever another user sends a message.
-void showMessage(std::string sender, std::string message)
-{
+void showMessage(std::string sender, std::string message) {
     std::cout << std::endl;
     std::cout << sender << ": " << message << std::endl;
     std::cout << "> " << std::flush;
@@ -14,8 +13,7 @@ void showMessage(std::string sender, std::string message)
 
 // Run `make` from the examples folder to build this program. The Makefile
 // tells g++ where the library headers and source files are located.
-int main()
-{
+int main() {
     std::string address;
     std::string name;
     std::string message;
@@ -40,17 +38,14 @@ int main()
 
     disquisition::Client::ConnectionType connectionType;
 
-    if (connectionChoice == 'y' || connectionChoice == 'Y')
-    {
+    if (connectionChoice == 'y' || connectionChoice == 'Y') {
         connectionType = disquisition::Client::RELAY;
     }
-    else
-    {
+    else {
         connectionType = disquisition::Client::DIRECT;
     }
 
-    try
-    {
+    try {
         disquisition::Client client(address, connectionType);
 
         client.onMessage(showMessage);
@@ -60,26 +55,22 @@ int main()
 
         std::cout << "Connected. Type /quit to leave." << std::endl;
 
-        while (true)
-        {
+        while (true) {
             std::cout << "> ";
             std::getline(std::cin, message);
 
-            if (message == "/quit")
-            {
+            if (message == "/quit") {
                 break;
             }
 
-            if (!message.empty())
-            {
+            if (!message.empty()) {
                 client.sendMessage(message);
             }
         }
 
         client.disconnect();
     }
-    catch (const std::exception& error)
-    {
+    catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << std::endl;
         return 1;
     }

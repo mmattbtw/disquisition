@@ -1,58 +1,33 @@
 #include "server/server.h"
 
-#include <arpa/inet.h>
-#include <fcntl.h>
 #include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <csignal>
-#include <cstdio>
+#include <cerrno>
 #include <cstring>
+#include <exception>
 #include <stdexcept>
 #include <utility>
+
+#include "common/net.h"
+#include "util/log.h"
 
 namespace chat {
 namespace {
 
-volatile std::sig_atomic_t gStopRequested = 0;
+constexpr int kPollTimeoutMs = 500;
+constexpr std::size_t kMaxHostLength = 253;
 
-void handleStopSignal(int) {
-    gStopRequested = 1;
-}
-
-void installSignalHandlers() {
-    struct sigaction action {};
-    action.sa_handler = handleStopSignal;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGINT, &action, nullptr);
-    sigaction(SIGTERM, &action, nullptr);
-
-    // A client vanishing mid-write must not kill the whole server.
-    std::signal(SIGPIPE, SIG_IGN);
-}
-
-std::string trim(const std::string& text) {
-    const auto begin = text.find_first_not_of(" \t\r\n");
-    if (begin == std::string::npos) {
-        return "";
-    }
-    const auto end = text.find_last_not_of(" \t\r\n");
-    return text.substr(begin, end - begin + 1);
-}
-
-// A peer's advertised address is just relayed to whoever wants to dial it, so
-// we only clean it enough that it cannot smuggle stray bytes into a frame.
+// Advertised hosts are passed on verbatim, so only strip what could corrupt
+// a frame or a terminal.
 std::string sanitizeHost(const std::string& host) {
     std::string cleaned = trim(host);
-    constexpr std::size_t kMaxHostLength = 253;
     if (cleaned.size() > kMaxHostLength) {
         cleaned.resize(kMaxHostLength);
     }
     for (char& character : cleaned) {
-        const unsigned char value = static_cast<unsigned char>(character);
+        const auto value = static_cast<unsigned char>(character);
         if (value < 0x20 || value == 0x7F) {
             character = '?';
         }
@@ -60,15 +35,15 @@ std::string sanitizeHost(const std::string& host) {
     return cleaned;
 }
 
-std::string numericHost(const sockaddr_storage& address) {
-    char host[NI_MAXHOST] = {0};
-    if (getnameinfo(reinterpret_cast<const sockaddr*>(&address), sizeof(address), host, sizeof(host),
+// `length` must be the one accept() returned; macOS rejects any other.
+std::string numericHost(const sockaddr_storage& address, socklen_t length) {
+    char host[NI_MAXHOST] = {};
+    if (getnameinfo(reinterpret_cast<const sockaddr*>(&address), length, host, sizeof(host),
                     nullptr, 0, NI_NUMERICHOST) != 0) {
         return "unknown";
     }
+    // Report IPv4 clients of a dual-stack socket as plain IPv4.
     std::string result = host;
-    // Dual-stack listeners report IPv4 peers as ::ffff:1.2.3.4; dialling the
-    // bare IPv4 address avoids surprising anyone parsing the announcement.
     const std::string mapped = "::ffff:";
     if (result.rfind(mapped, 0) == 0 && result.find(':', mapped.size()) == std::string::npos) {
         result.erase(0, mapped.size());
@@ -76,151 +51,118 @@ std::string numericHost(const sockaddr_storage& address) {
     return result;
 }
 
-std::string describePeer(const sockaddr_storage& address) {
-    char service[NI_MAXSERV] = {0};
-    if (getnameinfo(reinterpret_cast<const sockaddr*>(&address), sizeof(address), nullptr, 0, service,
+std::string describePeer(const sockaddr_storage& address, socklen_t length) {
+    char service[NI_MAXSERV] = {};
+    if (getnameinfo(reinterpret_cast<const sockaddr*>(&address), length, nullptr, 0, service,
                     sizeof(service), NI_NUMERICSERV) != 0) {
         return "unknown";
     }
-    return numericHost(address) + ":" + service;
+    return numericHost(address, length) + ":" + service;
 }
 
-bool setNonBlocking(int fd) {
-    const int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        return false;
+bool wouldBlock() {
+    return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+}
+
+} // namespace
+
+int runServer(const ServerOptions& options) {
+    logToConsole("server");
+    try {
+        Database database(options.databasePath);
+        Server server(options, database);
+        server.listen();
+        server.run();
+        return 0;
     }
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+    catch (const std::exception& error) {
+        LOG_ERR("server error: {}", error.what());
+        return 1;
+    }
 }
 
-}  // namespace
+Server::Server(ServerOptions options, Database& database) :
+    options_(std::move(options)), database_(database) {
+}
 
-Server::Server(ServerOptions options, Database& database)
-    : options_(std::move(options)), database_(database) {}
+Server::~Server() {
+    for (const Client& client : clients_) {
+        ::close(client.fd);
+    }
+    if (listenFd_ >= 0) {
+        ::close(listenFd_);
+    }
+}
 
 void Server::listen() {
-    installSignalHandlers();
+    ignoreSigpipe();
+    installShutdownHandlers();
 
-    addrinfo hints {};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
-    const std::string service = std::to_string(options_.port);
-    addrinfo* results = nullptr;
-    const int rc = getaddrinfo(nullptr, service.c_str(), &hints, &results);
-    if (rc != 0) {
-        throw std::runtime_error(std::string("cannot resolve bind address: ") + gai_strerror(rc));
-    }
-
-    for (addrinfo* entry = results; entry != nullptr; entry = entry->ai_next) {
-        const int fd = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
-        if (fd < 0) {
-            continue;
-        }
-
-        const int enable = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
-
-        if (bind(fd, entry->ai_addr, entry->ai_addrlen) == 0 && ::listen(fd, SOMAXCONN) == 0) {
-            listenFd_ = fd;
-            break;
-        }
-
-        ::close(fd);
-    }
-    freeaddrinfo(results);
-
+    std::string error;
+    listenFd_ = listenTcp(options_.port, error);
     if (listenFd_ < 0) {
-        throw std::runtime_error("cannot bind port " + service);
+        throw std::runtime_error("cannot listen on port " + std::to_string(options_.port) + ": " +
+                                 error);
     }
-    if (!setNonBlocking(listenFd_)) {
+    if (!setBlocking(listenFd_, false)) {
         throw std::runtime_error("cannot make listening socket non-blocking");
     }
-
-    sockaddr_storage address {};
-    socklen_t length = sizeof(address);
-    if (getsockname(listenFd_, reinterpret_cast<sockaddr*>(&address), &length) == 0) {
-        if (address.ss_family == AF_INET6) {
-            boundPort_ = ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
-        } else if (address.ss_family == AF_INET) {
-            boundPort_ = ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port);
-        }
-    }
+    boundPort_ = localPort(listenFd_);
     if (boundPort_ == 0) {
         boundPort_ = options_.port;
     }
 }
 
 void Server::run() {
-    log("listening on port " + std::to_string(boundPort_));
+    LOG_INFO("listening on port {}", boundPort_);
 
-    while (gStopRequested == 0) {
-        std::vector<pollfd> fds;
-        fds.reserve(connections_.size() + 1);
-        fds.push_back(pollfd {listenFd_, POLLIN, 0});
-        for (const Connection& connection : connections_) {
-            short events = connection.closing ? 0 : POLLIN;
-            if (!connection.out.empty()) {
-                events |= POLLOUT;
-            }
-            fds.push_back(pollfd {connection.fd, events, 0});
-        }
-
-        const int ready = poll(fds.data(), static_cast<nfds_t>(fds.size()), 500);
-        if (ready < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+    while (!shutdownRequested()) {
+        std::vector<pollfd> fds = pollSet();
+        const int ready = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), kPollTimeoutMs);
+        if (ready < 0 && errno != EINTR) {
             throw std::runtime_error(std::string("poll failed: ") + std::strerror(errno));
         }
-        if (ready == 0) {
+        if (ready <= 0) {
             continue;
         }
 
         if ((fds[0].revents & POLLIN) != 0) {
             acceptClients();
         }
-
-        // Walk backwards so erasing a connection cannot invalidate the loop.
-        for (std::size_t index = connections_.size(); index-- > 0;) {
-            if (index + 1 >= fds.size()) {
-                continue;
-            }
+        // fds[i + 1] belongs to clients_[i]. Newly accepted clients were not
+        // polled, and walking backwards keeps indexes valid across drops.
+        const std::size_t polled = fds.size() - 1;
+        for (std::size_t index = polled; index-- > 0;) {
             const short revents = fds[index + 1].revents;
-            if (revents == 0) {
-                continue;
-            }
-
-            bool alive = true;
-            if ((revents & (POLLIN | POLLHUP)) != 0 && !connections_[index].closing) {
-                alive = readFrom(connections_[index]) && handleFrames(connections_[index]);
-            }
-            if (alive && !connections_[index].out.empty() && (revents & POLLOUT) != 0) {
-                alive = writeTo(connections_[index]);
-            }
-            if (alive && (revents & (POLLERR | POLLNVAL)) != 0) {
-                alive = false;
-            }
-            // A connection asked to close is dropped once its last words are out.
-            if (alive && connections_[index].closing && connections_[index].out.empty()) {
-                alive = false;
-            }
-            if (!alive) {
-                dropConnection(index);
+            if (revents != 0 && !service(clients_[index], revents)) {
+                dropClient(index);
             }
         }
     }
 
-    log("shutting down");
-    for (std::size_t index = connections_.size(); index-- > 0;) {
-        dropConnection(index);
+    LOG_INFO("shutting down");
+    while (!clients_.empty()) {
+        dropClient(clients_.size() - 1);
     }
+}
+
+std::vector<pollfd> Server::pollSet() const {
+    std::vector<pollfd> fds;
+    fds.reserve(clients_.size() + 1);
+    fds.push_back(pollfd{listenFd_, POLLIN, 0});
+    for (const Client& client : clients_) {
+        short events = client.closing ? 0 : POLLIN;
+        if (!client.out.empty()) {
+            events |= POLLOUT;
+        }
+        fds.push_back(pollfd{client.fd, events, 0});
+    }
+    return fds;
 }
 
 void Server::acceptClients() {
     for (;;) {
-        sockaddr_storage address {};
+        sockaddr_storage address{};
         socklen_t length = sizeof(address);
         const int fd = accept(listenFd_, reinterpret_cast<sockaddr*>(&address), &length);
         if (fd < 0) {
@@ -229,275 +171,255 @@ void Server::acceptClients() {
             }
             return;
         }
-
-        if (!setNonBlocking(fd)) {
+        if (!setBlocking(fd, false)) {
             ::close(fd);
             continue;
         }
 
-        Connection connection;
-        connection.fd = fd;
-        connection.host = numericHost(address);
-        if (connections_.size() >= options_.maxClients) {
-            // Queue the rejection so the event loop can flush it and close.
-            connection.out = encode(Message {MsgType::Error, {"server is full"}});
-            connection.closing = true;
-            log("rejected " + describePeer(address) + ": server is full");
-            connections_.push_back(std::move(connection));
-            continue;
+        Client client;
+        client.fd = fd;
+        client.host = numericHost(address, length);
+        LOG_INFO("connection from {}", describePeer(address, length));
+        if (clients_.size() >= options_.maxClients) {
+            reject(client, "server is full");
         }
-
-        connections_.push_back(std::move(connection));
-        log("connection from " + describePeer(address));
+        clients_.push_back(std::move(client));
     }
 }
 
-bool Server::readFrom(Connection& connection) {
-    // One recv per poll event: partial frames are drained by handleFrames and
-    // level-triggered poll brings us straight back for whatever is left.
+// Returns false when the client should be dropped.
+bool Server::service(Client& client, short revents) {
+    if ((revents & (POLLIN | POLLHUP)) != 0 && !client.closing) {
+        if (!readFrom(client) || !handleFrames(client)) {
+            return false;
+        }
+    }
+    if ((revents & POLLOUT) != 0 && !client.out.empty() && !writeTo(client)) {
+        return false;
+    }
+    if ((revents & (POLLERR | POLLNVAL)) != 0) {
+        return false;
+    }
+    return !(client.closing && client.out.empty());
+}
+
+bool Server::readFrom(Client& client) {
     char buffer[4096];
-    const ssize_t bytes = recv(connection.fd, buffer, sizeof(buffer), 0);
+    const ssize_t bytes = recv(client.fd, buffer, sizeof(buffer), 0);
     if (bytes > 0) {
-        connection.in.append(buffer, static_cast<std::size_t>(bytes));
+        client.in.append(buffer, static_cast<std::size_t>(bytes));
         return true;
     }
     if (bytes == 0) {
-        // The peer may have half-closed its write side after sending a request.
-        // Keep the socket long enough to flush any response handleFrames queues.
-        connection.closing = true;
+        // Half-closed: still answer what was already sent, then drop.
+        client.closing = true;
         return true;
     }
-    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
-        return true;
-    }
-    return false;
+    return wouldBlock();
 }
 
-bool Server::writeTo(Connection& connection) {
-    while (!connection.out.empty()) {
-        const ssize_t bytes = ::send(connection.fd, connection.out.data(), connection.out.size(), 0);
+bool Server::writeTo(Client& client) {
+    while (!client.out.empty()) {
+        const ssize_t bytes = ::send(client.fd, client.out.data(), client.out.size(), 0);
         if (bytes > 0) {
-            connection.out.erase(0, static_cast<std::size_t>(bytes));
+            client.out.erase(0, static_cast<std::size_t>(bytes));
             continue;
         }
         if (bytes < 0 && errno == EINTR) {
             continue;
         }
-        if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            return true;
-        }
-        return false;
+        // A full socket buffer is fine: poll() reports when it drains.
+        return bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
     }
     return true;
 }
 
-bool Server::handleFrames(Connection& connection) {
+bool Server::handleFrames(Client& client) {
     for (;;) {
         Message message;
-        const DecodeStatus status = decode(connection.in, message);
+        const DecodeStatus status = decode(client.in, message);
         if (status == DecodeStatus::Incomplete) {
-            // A peer dribbling bytes towards a frame that never lands gets cut.
-            return connection.in.size() <= kMaxFrameSize * 2;
+            // Cut off clients that trickle bytes without ever completing a frame.
+            if (client.in.size() > kMaxFrameSize * 2) {
+                LOG_WARN("dropping {}: frame never completed", describe(client));
+                return false;
+            }
+            return true;
         }
         if (status == DecodeStatus::Malformed) {
+            LOG_WARN("dropping {}: malformed frame", describe(client));
             return false;
         }
 
         switch (message.type) {
             case MsgType::Login:
-                handleLogin(connection, message);
+                handleLogin(client, message);
                 break;
             case MsgType::Store:
-                handleStore(connection, message);
+                handleStore(client, message);
                 break;
             case MsgType::FetchHistory:
-                handleFetchHistory(connection);
+                handleFetchHistory(client);
                 break;
             default:
-                reject(connection, "unexpected message");
+                reject(client, "unexpected message");
                 break;
         }
-        if (connection.closing) {
+        if (client.closing) {
             return true;
         }
     }
 }
 
-void Server::handleLogin(Connection& connection, const Message& message) {
-    if (connection.authenticated) {
-        reject(connection, "already signed in");
+void Server::handleLogin(Client& client, const Message& message) {
+    if (client.authenticated) {
+        reject(client, "already signed in");
         return;
     }
     if (message.fields.size() < 2) {
-        reject(connection, "login needs a name and a peer port");
+        reject(client, "login needs a name and a peer port");
         return;
     }
-
-    std::int64_t peerPort = 0;
-    if (!parseInt64(message.fields[1], peerPort) || peerPort < 1 || peerPort > 65535) {
-        reject(connection, "invalid peer port");
+    std::uint16_t peerPort = 0;
+    if (!parsePort(message.fields[1], peerPort, false)) {
+        reject(client, "invalid peer port");
         return;
     }
-
     const std::string requested = sanitizeName(message.fields[0]);
     if (requested.empty()) {
-        reject(connection, "please pick a name");
+        reject(client, "please pick a name");
         return;
     }
 
-    connection.name = uniqueName(requested);
-    connection.peerPort = static_cast<std::uint16_t>(peerPort);
-    connection.advertisedHost = sanitizeHost(message.fields.size() >= 3 ? message.fields[2] : "");
-    connection.authenticated = true;
+    client.name = uniqueName(requested);
+    client.peerPort = peerPort;
+    client.advertisedHost = sanitizeHost(message.fields.size() >= 3 ? message.fields[2] : "");
+    client.authenticated = true;
+    send(client, Message{MsgType::LoginOk, {client.name, "welcome, " + client.name}});
 
-    send(connection, Message {MsgType::LoginOk, {connection.name, "welcome, " + connection.name}});
-
-    // The new peer learns every on-line peer first so it can dial out; the
-    // others then learn about the new arrival.
-    for (const Connection& other : connections_) {
-        if (&other != &connection && other.authenticated) {
-            send(connection, Message {MsgType::Peer,
-                                      {other.name, hostFor(other), std::to_string(other.peerPort),
-                                       other.advertisedHost.empty() ? "0" : "1"}});
+    // The newcomer learns the roster first, then everyone learns about it.
+    for (const Client& other : clients_) {
+        if (&other != &client && other.authenticated) {
+            send(client, peerMessage(MsgType::Peer, addressOf(other)));
         }
     }
-
-    log(connection.name + " joined from " + hostFor(connection));
-    broadcast(Message {MsgType::PeerJoined,
-                       {connection.name, hostFor(connection), std::to_string(connection.peerPort),
-                        connection.advertisedHost.empty() ? "0" : "1"}},
-              &connection);
+    const PeerAddress address = addressOf(client);
+    LOG_INFO("{} joined from {}", client.name, address.host);
+    broadcast(peerMessage(MsgType::PeerJoined, address), &client);
     broadcastUsers();
 }
 
-void Server::handleStore(Connection& connection, const Message& message) {
-    if (!connection.authenticated) {
-        reject(connection, "sign in first");
+void Server::handleStore(Client& client, const Message& message) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
         return;
     }
     if (message.fields.size() < 3) {
-        reject(connection, "store needs a timestamp, body, and color");
+        reject(client, "store needs a timestamp, body, and color");
         return;
     }
-
     std::int64_t timestamp = 0;
     if (!parseInt64(message.fields[0], timestamp) || timestamp <= 0) {
-        reject(connection, "invalid timestamp");
+        reject(client, "invalid timestamp");
         return;
     }
-
     const std::string body = sanitizeBody(message.fields[1]);
     if (body.empty()) {
         return;
     }
     const std::string color = sanitizeBody(message.fields[2]);
     if (!isValidColor(color)) {
-        reject(connection, "invalid message color");
+        reject(client, "invalid message color");
         return;
     }
 
-    database_.add(timestamp, connection.name, body, color);
-    log(connection.name + " (stored): " + body);
+    database_.add(timestamp, client.name, body, color);
+    LOG_DEBUG("{} (stored): {}", client.name, body);
 }
 
-void Server::handleFetchHistory(Connection& connection) {
-    if (!connection.authenticated) {
-        reject(connection, "sign in first");
+void Server::handleFetchHistory(Client& client) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
         return;
     }
-    sendHistory(connection);
-}
-
-void Server::sendHistory(Connection& connection) {
-    const std::vector<StoredMessage> history = database_.recent(options_.historyLimit);
-    for (const StoredMessage& stored : history) {
-        send(connection, Message {MsgType::History,
-                                  {std::to_string(stored.timestamp), stored.sender, stored.body,
-                                   stored.color}});
+    for (const StoredMessage& stored : database_.recent(options_.historyLimit)) {
+        send(client,
+             Message{MsgType::History,
+                     {std::to_string(stored.timestamp), stored.sender, stored.body, stored.color}});
     }
-    send(connection, Message {MsgType::HistoryEnd, {}});
+    send(client, Message{MsgType::HistoryEnd, {}});
 }
 
-void Server::reject(Connection& connection, const std::string& reason) {
-    // Queue the reason and stop reading. Closing immediately could turn into a
-    // TCP reset that throws away the very bytes we want the client to see.
-    send(connection, Message {MsgType::Error, {reason}});
-    connection.closing = true;
+// Sends the reason and closes once it is flushed. Closing straight away could
+// reset the connection and discard the message.
+void Server::reject(Client& client, const std::string& reason) {
+    LOG_WARN("rejected {}: {}", describe(client), reason);
+    send(client, Message{MsgType::Error, {reason}});
+    client.closing = true;
 }
 
-void Server::send(Connection& connection, const Message& message) {
-    connection.out.append(encode(message));
+void Server::send(Client& client, const Message& message) {
+    client.out.append(encode(message));
 }
 
-void Server::broadcast(const Message& message, const Connection* except) {
+void Server::broadcast(const Message& message, const Client* except) {
     const std::string frame = encode(message);
-    for (Connection& connection : connections_) {
-        if (!connection.authenticated || &connection == except) {
-            continue;
+    for (Client& client : clients_) {
+        if (client.authenticated && &client != except) {
+            client.out.append(frame);
         }
-        connection.out.append(frame);
     }
 }
 
 void Server::broadcastUsers() {
-    Message message {MsgType::Users, {}};
-    for (const Connection& connection : connections_) {
-        if (connection.authenticated) {
-            message.fields.push_back(connection.name);
+    Message message{MsgType::Users, {}};
+    for (const Client& client : clients_) {
+        if (client.authenticated) {
+            message.fields.push_back(client.name);
         }
     }
     broadcast(message);
 }
 
+// Appends "-2", "-3", ... to a taken name, shortening it to stay in bounds.
 std::string Server::uniqueName(const std::string& requested) const {
-    auto taken = [this](const std::string& candidate) {
-        for (const Connection& connection : connections_) {
-            if (connection.authenticated && connection.name == candidate) {
+    const auto taken = [this](const std::string& candidate) {
+        for (const Client& client : clients_) {
+            if (client.authenticated && client.name == candidate) {
                 return true;
             }
         }
         return false;
     };
 
-    if (!taken(requested)) {
-        return requested;
-    }
-    for (std::size_t suffix = 2;; ++suffix) {
+    std::string candidate = requested;
+    for (std::size_t suffix = 2; taken(candidate); ++suffix) {
         const std::string ending = "-" + std::to_string(suffix);
-        const std::string candidate = ending.size() >= kMaxNameLength
-                                          ? ending.substr(ending.size() - kMaxNameLength)
-                                          : requested.substr(0, kMaxNameLength - ending.size()) +
-                                                ending;
-        if (!taken(candidate)) {
-            return candidate;
-        }
+        candidate = requested.substr(0, kMaxNameLength - ending.size()) + ending;
     }
+    return candidate;
 }
 
-const std::string& Server::hostFor(const Connection& connection) const {
-    return connection.advertisedHost.empty() ? connection.host : connection.advertisedHost;
+PeerAddress Server::addressOf(const Client& client) const {
+    const bool advertised = !client.advertisedHost.empty();
+    return PeerAddress{client.name, advertised ? client.advertisedHost : client.host,
+                       client.peerPort, advertised};
 }
 
-void Server::dropConnection(std::size_t index) {
-    Connection& connection = connections_[index];
-    const std::string name = connection.name;
-    const bool wasAuthenticated = connection.authenticated;
+void Server::dropClient(std::size_t index) {
+    const Client client = std::move(clients_[index]);
+    clients_.erase(clients_.begin() + static_cast<std::ptrdiff_t>(index));
+    ::close(client.fd);
 
-    if (connection.fd >= 0) {
-        ::close(connection.fd);
-    }
-    connections_.erase(connections_.begin() + static_cast<std::ptrdiff_t>(index));
-
-    if (wasAuthenticated) {
-        log(name + " left");
-        broadcast(Message {MsgType::PeerLeft, {name}});
+    if (client.authenticated) {
+        LOG_INFO("{} left", client.name);
+        broadcast(Message{MsgType::PeerLeft, {client.name}});
         broadcastUsers();
     }
 }
 
-void Server::log(const std::string& text) const {
-    std::printf("[server] %s\n", text.c_str());
-    std::fflush(stdout);
+std::string Server::describe(const Client& client) {
+    return client.authenticated ? client.name : client.host;
 }
 
-}  // namespace chat
+} // namespace chat
