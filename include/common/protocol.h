@@ -103,7 +103,7 @@ struct PeerAddress {
     std::string name;
     std::string host;
     std::uint16_t port = 0;
-    bool advertised = false; // the peer can accept connections from the internet
+    bool advertised = false; // the peer supplied an address for direct connections
     std::uint16_t voicePort = 0;
 };
 

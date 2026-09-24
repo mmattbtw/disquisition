@@ -49,7 +49,7 @@ public:
     // The server-assigned name. Call it before adding peers: it decides who
     // dials whom.
     void setMyName(const std::string& name);
-    // Whether this user advertised a publicly reachable address.
+    // Whether this user advertised an address peers can dial.
     void setMyAdvertised(bool advertised);
     // Tracks the roster but never dials. Used while a relay owns the links.
     void setPassive(bool passive);

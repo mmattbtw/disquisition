@@ -134,6 +134,8 @@ Open another terminal for each client:
 
 Each direct client opens a peer listener on an automatically selected port. On a LAN, the server announces the source address it sees. Across routed networks, pass a reachable address with `--advertise` and forward the chosen `--p2p-port` through the firewall or router.
 
+Pass `--local` to announce the client's local IPv4 address automatically. This is useful when the server sees a different address, such as when it runs on the same machine. The selected address appears in the client's greeting. Use `--advertise` instead when peers need a public address. With `--relay`, `--local` applies only during direct fallback enabled by `--leak-my-ip`.
+
 ```sh
 ./build/client \
   --host chat.example.net \
@@ -223,6 +225,7 @@ Passing port `0` asks the operating system to select a free server port.
 -n, --name <name>          Name to request at sign-in
     --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
     --advertise <host>     Reachable address announced to peers
+    --local                Automatically announce your local IPv4 address
     --relay <host[:port]>  Use a relay. Default relay port: 3333
     --leak-my-ip           Fall back to direct mode if the relay is unavailable
     --log <file>           Write a debug log to this file. Default: no log

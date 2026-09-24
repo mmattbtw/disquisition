@@ -22,6 +22,7 @@ constexpr const char* kUsage = R"(usage: client [options]
                        the address the server sees you connect from. Use
                        your public IP or hostname to accept peers over the
                        internet (pair with --p2p-port + a port forward)
+      --local          automatically advertise your local IPv4 address
       --relay <host[:port]>  reach the mesh through a relay instead of
                        accepting direct connections. Your traffic and
                        everyone else's is tunnelled through it, so no
@@ -119,6 +120,8 @@ ClientOptions parseClientOptions(int argc, char** argv) {
 
     std::string relay;
     bool hostGiven = false;
+    bool localGiven = false;
+    bool advertiseGiven = false;
     CommandLine args(argc, argv, kUsage);
     while (args.next()) {
         if (args.is("-H", "--host")) {
@@ -136,6 +139,10 @@ ClientOptions parseClientOptions(int argc, char** argv) {
         }
         else if (args.is("--advertise")) {
             options.advertiseHost = args.value();
+            advertiseGiven = true;
+        }
+        else if (args.is("--local")) {
+            localGiven = true;
         }
         else if (args.is("--relay")) {
             relay = args.value();
@@ -153,7 +160,16 @@ ClientOptions parseClientOptions(int argc, char** argv) {
             args.rejectOption();
         }
     }
+    if (localGiven && advertiseGiven) {
+        args.fail("--local and --advertise cannot be used together");
+    }
     resolveRelay(args, options, relay, hostGiven);
+    if (localGiven && (!options.useRelay || options.leakMyIp)) {
+        options.advertiseHost = localIpAddress(options.host, options.port);
+        if (options.advertiseHost.empty()) {
+            args.fail("--local could not find an active non-loopback IPv4 address");
+        }
+    }
     return options;
 }
 
