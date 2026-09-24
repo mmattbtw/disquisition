@@ -20,6 +20,9 @@ This is a plain TCP protocol. It does not provide encryption, authentication, pr
 - ncurses, including development headers
 - POSIX sockets and `poll`
 
+On macOS with Homebrew, install the dependencies with `brew install cmake sqlite ncurses`.
+Plain `make` then uses the Homebrew libraries when they are installed.
+
 ## Build and test
 
 ```sh
