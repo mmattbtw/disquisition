@@ -191,6 +191,10 @@ void Relay::dispatchInbound() {
                 if (user != nullptr && !sender.empty()) {
                     user->peers.adoptInbound(sender, std::move(pending[index]));
                 }
+            } else if (first.type == MsgType::RelayProbe && first.fields.empty()) {
+                if (!healthServer_.failed()) {
+                    connection.send(Message {MsgType::RelayReady, {}});
+                }
             }
         } else if (connection.failed()) {
             handled = true;
@@ -520,6 +524,17 @@ void Relay::serviceUsers() {
     }
 }
 
+void Relay::serviceHealth() {
+    if (!healthServer_.failed()) return;
+    if (std::chrono::steady_clock::now() < nextHealthAttempt_) return;
+    healthServer_.stop();
+    std::string error;
+    if (healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error)) {
+        healthServer_.startReader();
+    }
+    nextHealthAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+}
+
 void Relay::log(const std::string& text) const {
     std::printf("[relay] %s\n", text.c_str());
     std::fflush(stdout);
@@ -540,7 +555,14 @@ int Relay::run() {
     log("listening on port " + std::to_string(boundPort_) +
         (options_.advertiseHost.empty() ? "" : ", advertising " + options_.advertiseHost));
 
+    // One anonymous server connection checks availability without creating
+    // room members or interrupting clients already using direct links.
+    healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error);
+    if (!healthServer_.failed()) healthServer_.startReader();
+    nextHealthAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+
     while (gStopRequested == 0) {
+        serviceHealth();
         dispatchInbound();
         serviceUsers();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

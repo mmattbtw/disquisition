@@ -74,8 +74,14 @@ the relay is unavailable, the desktop client retries it every three seconds
 without connecting directly. If direct fallback is enabled, a lost relay
 connection uses the server address and port in Preferences. This reveals your
 address to the server and direct peers while fallback is active. The client
-checks the relay every three seconds and switches back when it returns. If
-you were in voice, it rejoins voice after the chat connection is restored.
+checks the relay every three seconds without leaving the direct connection.
+It switches back only after the relay confirms it can reach the chat server.
+If you were in voice, it starts direct baresip voice during fallback and
+switches back to relayed voice after that check succeeds. This reveals your IP to other
+direct voice participants while fallback is active. Mute and deafen settings
+carry over both transitions. The desktop health check requires a relay built
+from the same version of this repository. Rebuild and restart both `server`
+and `relay` after updating voice support; older servers reject voice messages.
 
 For direct participants, the app uses the server roster to form one SIP call
 per pair of users. Baresip's `mixminus` module combines those calls locally.

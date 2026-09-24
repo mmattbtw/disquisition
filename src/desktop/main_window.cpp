@@ -122,11 +122,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         if (desiredConnected_ && awaitingLogin_) server_.abort();
     });
     connect(&relayProbe_, &QTcpSocket::connected, this, [this] {
+        sendFrame(&relayProbe_, chat::Message {chat::MsgType::RelayProbe, {}});
+    });
+    connect(&relayProbe_, &QTcpSocket::readyRead, this, [this] {
+        relayProbeBuffer_ += relayProbe_.readAll();
+        std::string buffer(relayProbeBuffer_.constData(),
+                           static_cast<std::size_t>(relayProbeBuffer_.size()));
+        chat::Message response;
+        const auto status = chat::decode(buffer, response);
+        relayProbeBuffer_ = QByteArray(buffer.data(), static_cast<qsizetype>(buffer.size()));
+        if (status == chat::DecodeStatus::Incomplete) return;
         relayProbe_.abort();
-        if (!desiredConnected_ || usingRelay_ || !leakMyIp_) return;
+        relayProbeBuffer_.clear();
+        if (status != chat::DecodeStatus::Ok || response.type != chat::MsgType::RelayReady ||
+            !response.fields.empty() || !desiredConnected_ || usingRelay_ || !leakMyIp_) return;
         relayProbeTimer_.stop();
         reconnectTimer_.stop();
-        connectionLabel_->setText("Relay restored; reconnecting privately");
+        connectionLabel_->setText("Relay ready; switching privately");
         if (server_.state() == QAbstractSocket::UnconnectedState) {
             startTransport(true);
         } else {
@@ -135,7 +147,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
     });
     connect(&relayProbe_, &QTcpSocket::errorOccurred, this,
-            [this](QAbstractSocket::SocketError) { relayProbe_.abort(); });
+            [this](QAbstractSocket::SocketError) {
+                relayProbe_.abort();
+                relayProbeBuffer_.clear();
+            });
 
     connect(&server_, &QTcpSocket::connected, this, [this] {
         if (!usingRelay_ && !peerServer_.listen(QHostAddress::Any, 0)) {
@@ -170,6 +185,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(voiceButton_, &QPushButton::clicked, this, [this] {
         if (voiceWanted_) {
             leaveVoice();
+        } else if (resumeVoice_) {
+            resumeVoice_ = false;
+            voiceButton_->setText("join voice");
+            voiceLabel_->setText("voice: off");
         } else {
             joinVoice();
         }
@@ -189,19 +208,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         deafened_ = !deafened_;
         if (deafened_) {
             mutedBeforeDeafen_ = muted_;
+            muted_ = true;
+        } else {
+            muted_ = mutedBeforeDeafen_;
         }
         voice_.setDeafened(deafened_);
         relayAudio_.setDeafened(deafened_);
-        relayAudio_.setMuted(deafened_ || muted_);
+        relayAudio_.setMuted(muted_);
         deafenButton_->setChecked(deafened_);
         deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
         if (deafened_) {
-            muted_ = true;
             muteButton_->setChecked(true);
             muteButton_->setText("unmute");
             muteButton_->setEnabled(false);
         } else {
-            muted_ = mutedBeforeDeafen_;
             muteButton_->setChecked(muted_);
             muteButton_->setText(muted_ ? "unmute" : "mute");
             muteButton_->setEnabled(true);
@@ -434,15 +454,17 @@ void MainWindow::joinVoice() {
             return;
         }
         if (usingRelay_) {
+            restoreVoiceState();
             voiceWanted_ = true;
             activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
             sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
             voiceButton_->setText("leave voice");
             voiceLabel_->setText("voice: relayed");
-            muteButton_->setEnabled(true);
+            muteButton_->setEnabled(!deafened_);
             deafenButton_->setEnabled(true);
             inputDevice_->setEnabled(false);
             outputDevice_->setEnabled(false);
+            sendVoiceState();
             refreshMembers();
             return;
         }
@@ -472,13 +494,32 @@ void MainWindow::joinVoice() {
             voiceLabel_->setText(error);
             return;
         }
+        restoreVoiceState();
+        if (deafened_) voice_.setDeafened(true);
+        else if (muted_) voice_.setMuted(true);
         voiceButton_->setText("leave voice");
-        muteButton_->setEnabled(true);
+        muteButton_->setEnabled(!deafened_);
         deafenButton_->setEnabled(true);
         inputDevice_->setEnabled(false);
         outputDevice_->setEnabled(false);
+        sendVoiceState();
         refreshMembers();
     });
+}
+
+void MainWindow::restoreVoiceState() {
+    if (!resumeVoice_) return;
+    muted_ = resumeMuted_;
+    deafened_ = resumeDeafened_;
+    mutedBeforeDeafen_ = resumeMutedBeforeDeafen_;
+    relayAudio_.setMuted(muted_);
+    relayAudio_.setDeafened(deafened_);
+    muteButton_->setChecked(muted_);
+    muteButton_->setText(muted_ ? "unmute" : "mute");
+    muteButton_->setEnabled(!deafened_);
+    deafenButton_->setChecked(deafened_);
+    deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
+    resumeVoice_ = false;
 }
 
 void MainWindow::leaveVoice() {
@@ -606,9 +647,13 @@ void MainWindow::retryConnection() {
 void MainWindow::probeRelay() {
     if (!desiredConnected_ || usingRelay_ || relayHost_.isEmpty() || !leakMyIp_ ||
         relayProbe_.state() != QAbstractSocket::UnconnectedState) return;
+    relayProbeBuffer_.clear();
     relayProbe_.connectToHost(relayHost_, relayPort_);
     QTimer::singleShot(2500, this, [this] {
-        if (relayProbe_.state() == QAbstractSocket::ConnectingState) relayProbe_.abort();
+        if (relayProbe_.state() != QAbstractSocket::UnconnectedState) {
+            relayProbe_.abort();
+            relayProbeBuffer_.clear();
+        }
     });
 }
 
@@ -617,7 +662,12 @@ void MainWindow::handleTransportClosed() {
     transportClosedHandled_ = true;
     loginTimer_.stop();
     awaitingLogin_ = false;
-    if (voiceWanted_) resumeVoice_ = true;
+    if (voiceWanted_) {
+        resumeVoice_ = true;
+        resumeMuted_ = muted_;
+        resumeDeafened_ = deafened_;
+        resumeMutedBeforeDeafen_ = mutedBeforeDeafen_;
+    }
     leaveVoice();
     peerServer_.close();
     for (const Peer& peer : std::as_const(peers_)) {
@@ -657,11 +707,15 @@ void MainWindow::disconnectAll() {
     desiredConnected_ = false;
     switchingToRelay_ = false;
     resumeVoice_ = false;
+    resumeMuted_ = false;
+    resumeDeafened_ = false;
+    resumeMutedBeforeDeafen_ = false;
     awaitingLogin_ = false;
     reconnectTimer_.stop();
     relayProbeTimer_.stop();
     loginTimer_.stop();
     relayProbe_.abort();
+    relayProbeBuffer_.clear();
     // Notify the room first; stopping the audio process must not delay Leave.
     server_.abort();
     leaveVoice();
@@ -733,9 +787,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         sendFrame(&server_, chat::Message {chat::MsgType::FetchHistory, {}});
         refreshMembers();
         if (resumeVoice_) {
-            resumeVoice_ = false;
             QTimer::singleShot(0, this, [this] {
-                if (desiredConnected_ && !voiceWanted_) joinVoice();
+                if (desiredConnected_ && resumeVoice_ && !voiceWanted_) joinVoice();
             });
         }
     } else if ((message.type == chat::MsgType::Peer ||

@@ -127,6 +127,8 @@ const char* typeName(MsgType type) {
         case MsgType::VoiceState: return "VoiceState";
         case MsgType::VoicePort: return "VoicePort";
         case MsgType::VoiceAudio: return "VoiceAudio";
+        case MsgType::RelayProbe: return "RelayProbe";
+        case MsgType::RelayReady: return "RelayReady";
     }
     return "Unknown";
 }

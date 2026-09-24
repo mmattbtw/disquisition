@@ -43,6 +43,7 @@ private:
     QByteArray controlBuffer_;
     QString profilePath_;
     QString lastOutput_;
+    QString outputBuffer_;
     QSet<QString> dialed_;
     QSet<QString> pendingCalls_;
     QSet<QString> callIds_;

@@ -78,6 +78,7 @@ private:
     void acceptLoop();
     void dispatchInbound();
     void serviceUsers();
+    void serviceHealth();
 
     User* findUser(const std::string& name);
     void attachClient(const std::string& requestedName, std::unique_ptr<Connection> client);
@@ -97,6 +98,8 @@ private:
     std::uint16_t boundPort_ = 0;
 
     std::map<std::string, std::unique_ptr<User>> users_;
+    Connection healthServer_;
+    std::chrono::steady_clock::time_point nextHealthAttempt_ {};
     // Accepted sockets whose first frame has not been classified yet.
     std::deque<std::unique_ptr<Connection>> awaiting_;
 

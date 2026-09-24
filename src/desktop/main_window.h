@@ -63,6 +63,7 @@ private:
     void startJoining();
     void joinVoice();
     void leaveVoice();
+    void restoreVoiceState();
     void showPreferences();
     void startTransport(bool relay);
     void handleTransportClosed();
@@ -87,6 +88,7 @@ private:
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;
+    QByteArray relayProbeBuffer_;
     QTcpServer peerServer_;
     QByteArray serverBuffer_;
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
@@ -105,6 +107,9 @@ private:
     bool transportClosedHandled_ = true;
     bool switchingToRelay_ = false;
     bool resumeVoice_ = false;
+    bool resumeMuted_ = false;
+    bool resumeDeafened_ = false;
+    bool resumeMutedBeforeDeafen_ = false;
     bool awaitingLogin_ = false;
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;

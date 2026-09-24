@@ -24,11 +24,14 @@ VoiceEngine::VoiceEngine(QObject* parent) : QObject(parent) {
     });
     process_.setProcessChannelMode(QProcess::MergedChannels);
     connect(&process_, &QProcess::readyReadStandardOutput, this, [this] {
-        const QString output = QString::fromUtf8(process_.readAllStandardOutput());
-        for (const QString& line : output.split('\n', Qt::SkipEmptyParts)) {
+        outputBuffer_ += QString::fromUtf8(process_.readAllStandardOutput());
+        qsizetype newline = 0;
+        while ((newline = outputBuffer_.indexOf('\n')) >= 0) {
+            const QString line = outputBuffer_.left(newline);
+            outputBuffer_.remove(0, newline + 1);
             lastOutput_ = line.trimmed();
             emit logMessage(lastOutput_);
-            if (line.contains("baresip is ready", Qt::CaseInsensitive)) {
+            if (!initialized_ && line.contains("baresip is ready", Qt::CaseInsensitive)) {
                 initialized_ = true;
                 emit statusChanged("voice: ready");
                 emit ready();
@@ -162,6 +165,7 @@ bool VoiceEngine::start(const QString& name, quint16 sipPort, const QString& inp
                         const QString& outputDevice, QString& error) {
     stop();
     lastOutput_.clear();
+    outputBuffer_.clear();
     QTcpServer portProbe;
     if (!portProbe.listen(QHostAddress::LocalHost, 0)) {
         error = "Cannot reserve a local baresip control port";
@@ -289,6 +293,7 @@ void VoiceEngine::stop() {
     deafened_ = false;
     mutedBeforeDeafen_ = false;
     initialized_ = false;
+    outputBuffer_.clear();
 }
 
 bool VoiceEngine::running() const {

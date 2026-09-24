@@ -38,6 +38,8 @@ enum class MsgType : std::uint8_t {
     FetchHistory = 11, // []
     VoicePort = 19,    // client: [SIP port, 0 to leave]; server: [name, SIP port]
     VoiceAudio = 20,   // client: [16 kHz mono signed-16 PCM]; server: [sender, PCM]
+    RelayProbe = 21,  // client to relay: [] health check without signing in
+    RelayReady = 22,  // relay to client: [] server connection is available
 
     // Messages the central server sends to a client.
     LoginOk = 3,    // [assigned name, welcome text]
