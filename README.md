@@ -1,6 +1,6 @@
 # disquisition
 
-Disquisition is a small C++17 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and stores recent messages in SQLite. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
+Disquisition is a small C++20 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and stores recent messages in SQLite. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
 
 The repository builds five pieces:
 
@@ -15,9 +15,10 @@ This is a plain TCP protocol. It does not provide encryption, authentication, pr
 ## Requirements
 
 - CMake 3.16 or newer
-- a C++17 compiler
+- a C++20 compiler
 - SQLite 3.24 or newer, including development headers
 - ncurses, including development headers
+- Git and network access the first time CMake configures, to download spdlog
 - POSIX sockets and `poll`
 
 On macOS with Homebrew, install the dependencies with `brew install cmake sqlite ncurses`.
@@ -30,7 +31,7 @@ make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app is built when Qt 6.4 or newer is available. It also expects the
+The desktop app is built when Qt 6.5 or newer is available. It also expects the
 `baresip` executable on `PATH` at runtime. Build it explicitly with:
 
 ```sh
@@ -223,7 +224,8 @@ Passing port `0` asks the operating system to select a free server port.
     --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
     --advertise <host>     Reachable address announced to peers
     --relay <host[:port]>  Use a relay. Default relay port: 3333
-    --leak-my-ip            Fall back to direct mode if the relay is unavailable
+    --leak-my-ip           Fall back to direct mode if the relay is unavailable
+    --log <file>           Write a debug log to this file. Default: no log
 -h, --help                 Show help
 ```
 
@@ -238,6 +240,16 @@ Passing port `0` asks the operating system to select a free server port.
 ```
 
 For normal remote use, set `--advertise` to the relay's public DNS name or IP address.
+
+### Logging
+
+The server and relay log to stdout, one timestamped line per event, for example:
+
+```text
+[2026-09-24 01:36:07.247] [server] [info] alice joined from 127.0.0.1
+```
+
+The terminal client writes nothing to the console while its interface is open, so it logs only when given `--log <file>`. That file also includes debug detail from the networking code, such as every dial and reconnect attempt. The C++ library logs at debug level through spdlog's default logger, which is silent unless the host program enables debug output.
 
 ## Terminal client controls
 
@@ -264,7 +276,7 @@ Names are trimmed, limited to 20 bytes, and have spaces changed to underscores. 
 CMake exposes the static library as `disquisition::client`. Include its public header with:
 
 ```cpp
-#include <disquisition/client.h>
+#include <client/client.h>
 ```
 
 A direct connection to the central server is the default:
@@ -273,7 +285,7 @@ A direct connection to the central server is the default:
 #include <iostream>
 #include <string>
 
-#include <disquisition/client.h>
+#include <client/client.h>
 
 void showMessage(std::string sender, std::string body)
 {
@@ -303,7 +315,7 @@ disquisition::Client client(
 
 The current library is smaller than the terminal client. It supports live send and receive, direct or relay mode, and history storage for sent messages. It does not request stored history, reconnect after a connection failure, expose the user roster, or report the final suffixed name. The message callback runs on the library's background service thread, so callback code must be thread-safe. The API throws standard exceptions for invalid values, invalid call order, and connection failures.
 
-See [`examples/basic_client.cpp`](examples/basic_client.cpp) for an interactive example. It uses its own Makefile and compiles the required project sources directly:
+See [`examples/basic_client.cpp`](examples/basic_client.cpp) for an interactive example. It uses its own Makefile and compiles the required project sources directly. Build the main project once first, so CMake has downloaded spdlog:
 
 ```sh
 cd examples
@@ -314,13 +326,13 @@ make
 ## Repository layout
 
 ```text
-include/disquisition/client.h  Public C++ library API
-src/lib/                       Client library implementation
-src/common/                    Shared framed wire protocol
+include/client/client.h        Public C++ library API
+include/                       Headers, one folder per component below
+src/common/                    Wire protocol, socket helpers and command-line parsing
 src/server/                    Discovery and SQLite history server
-src/client/                    Terminal UI, connection code, and peer mesh
+src/client/                    Client library, terminal UI, connection and peer mesh
 src/relay/                     Multi-user relay
-test/                          Client library test
+test/                          Unit and end-to-end tests (run with ctest)
 examples/                      Standalone library example
 docs/                          Contributor notes
 ```

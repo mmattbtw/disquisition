@@ -8,6 +8,12 @@
 namespace chat {
 namespace {
 
+constexpr const char* kInsertSql =
+    "INSERT INTO messages (timestamp, sender, body, color) VALUES (?, ?, ?, ?)";
+constexpr const char* kSelectRecentSql =
+    "SELECT timestamp, sender, body, color FROM messages ORDER BY id DESC "
+    "LIMIT ?";
+
 [[noreturn]] void fail(sqlite3* db, const std::string& what) {
     const char* detail = db != nullptr ? sqlite3_errmsg(db) : "unknown error";
     throw std::runtime_error(what + ": " + detail);
@@ -40,7 +46,7 @@ bool hasColumn(sqlite3* db, const char* table, const char* column) {
     return found;
 }
 
-}  // namespace
+} // namespace
 
 Database::Database(const std::string& path) {
     if (sqlite3_open_v2(path.c_str(), &db_,
@@ -57,24 +63,20 @@ Database::Database(const std::string& path) {
     sqlite3_busy_timeout(db_, 5000);
     exec(db_, "PRAGMA journal_mode = WAL");
     exec(db_, "PRAGMA synchronous = NORMAL");
-    exec(db_,
-         "CREATE TABLE IF NOT EXISTS messages ("
-         "  id INTEGER PRIMARY KEY,"
-         "  timestamp INTEGER NOT NULL,"
-         "  sender TEXT NOT NULL,"
-         "  body TEXT NOT NULL,"
-         "  color TEXT NOT NULL DEFAULT 'pink')");
+    exec(db_, "CREATE TABLE IF NOT EXISTS messages ("
+              "  id INTEGER PRIMARY KEY,"
+              "  timestamp INTEGER NOT NULL,"
+              "  sender TEXT NOT NULL,"
+              "  body TEXT NOT NULL,"
+              "  color TEXT NOT NULL DEFAULT 'pink')");
     if (!hasColumn(db_, "messages", "color")) {
         exec(db_, "ALTER TABLE messages ADD COLUMN color TEXT NOT NULL DEFAULT 'pink'");
     }
 
-    if (sqlite3_prepare_v2(db_, "INSERT INTO messages (timestamp, sender, body, color) VALUES (?, ?, ?, ?)", -1,
-                           &insert_, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db_, kInsertSql, -1, &insert_, nullptr) != SQLITE_OK) {
         fail(db_, "cannot prepare insert");
     }
-    if (sqlite3_prepare_v2(db_,
-                           "SELECT timestamp, sender, body, color FROM messages ORDER BY id DESC LIMIT ?", -1,
-                           &select_, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db_, kSelectRecentSql, -1, &select_, nullptr) != SQLITE_OK) {
         fail(db_, "cannot prepare select");
     }
 }
@@ -134,4 +136,4 @@ std::vector<StoredMessage> Database::recent(std::size_t limit) {
     return messages;
 }
 
-}  // namespace chat
+} // namespace chat

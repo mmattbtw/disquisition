@@ -1,0 +1,74 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            deps: |
+              sudo apt-get update
+              sudo apt-get install -y libncurses-dev libsqlite3-dev
+          - os: macos-latest
+            deps: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        if: ${{ matrix.deps != '' }}
+        run: ${{ matrix.deps }}
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # AddressSanitizer and UndefinedBehaviorSanitizer turn silent memory bugs
+  # (use-after-free, overflows, leaks, undefined behavior) into test failures.
+  sanitizers:
+    name: sanitizers (address, undefined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SANITIZE: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+      UBSAN_OPTIONS: print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libncurses-dev libsqlite3-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          "-DCMAKE_CXX_FLAGS=$SANITIZE"
+          "-DCMAKE_EXE_LINKER_FLAGS=$SANITIZE"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

@@ -1,54 +1,90 @@
 #include "relay/relay.h"
 
-#include <netdb.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <csignal>
-#include <cstdio>
-#include <cstring>
-#include <thread>
+#include <iterator>
 #include <utility>
+#include <vector>
+
+#include "common/net.h"
+#include "util/log.h"
 
 namespace chat {
 namespace {
 
-volatile std::sig_atomic_t gStopRequested = 0;
+using Clock = std::chrono::steady_clock;
 
-void handleStopSignal(int) {
-    gStopRequested = 1;
+constexpr int kServerConnectTimeoutMs = 3000;
+constexpr auto kServerRetryInterval = std::chrono::seconds(3);
+constexpr auto kTickInterval = std::chrono::milliseconds(50);
+
+void eraseName(std::vector<std::string>& names, const std::string& name) {
+    names.erase(std::remove(names.begin(), names.end(), name), names.end());
 }
 
-void installSignalHandlers() {
-    struct sigaction action {};
-    action.sa_handler = handleStopSignal;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGINT, &action, nullptr);
-    sigaction(SIGTERM, &action, nullptr);
-
-    // A peer vanishing mid-write must not take the relay down.
-    std::signal(SIGPIPE, SIG_IGN);
-}
-
-std::string trimWhitespace(const std::string& text) {
-    const auto begin = text.find_first_not_of(" \t\r\n");
-    if (begin == std::string::npos) {
-        return "";
-    }
-    const auto end = text.find_last_not_of(" \t\r\n");
-    return text.substr(begin, end - begin + 1);
-}
-
-}  // namespace
+} // namespace
 
 Relay::Relay(RelayOptions options) : options_(std::move(options)) {
-    options_.advertiseHost = trimWhitespace(options_.advertiseHost);
+    options_.advertiseHost = trim(options_.advertiseHost);
 }
 
 Relay::~Relay() {
+    shutdown();
+}
+
+int Relay::run() {
+    logToConsole("relay");
+    ignoreSigpipe();
+    installShutdownHandlers();
+
+    std::string error;
+    if (!listen(error)) {
+        LOG_ERR("cannot listen on port {}: {}", options_.port, error);
+        return 1;
+    }
+    running_.store(true);
+    acceptThread_ = std::thread([this] { acceptLoop(); });
+    if (options_.advertiseHost.empty()) {
+        LOG_INFO("listening on port {}", boundPort_);
+        LOG_WARN("no --advertise host: clients that cannot accept connections will not dial "
+                 "users hosted here");
+    }
+    else {
+        LOG_INFO("listening on port {}, advertising {}", boundPort_, options_.advertiseHost);
+    }
+
+    // Keep one anonymous server connection for health probes. It never joins
+    // the room, so checking the relay cannot churn a user's session.
+    healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error);
+    if (!healthServer_.failed()) healthServer_.startReader();
+    nextHealthAttempt_ = Clock::now() + kServerRetryInterval;
+
+    while (!shutdownRequested()) {
+        serviceHealth();
+        dispatchInbound();
+        serviceUsers();
+        std::this_thread::sleep_for(kTickInterval);
+    }
+
+    LOG_INFO("shutting down");
+    shutdown();
+    return 0;
+}
+
+bool Relay::listen(std::string& error) {
+    listenFd_ = listenTcp(options_.port, error);
+    if (listenFd_ < 0) {
+        return false;
+    }
+    boundPort_ = localPort(listenFd_);
+    if (boundPort_ == 0) {
+        boundPort_ = options_.port;
+    }
+    return true;
+}
+
+void Relay::shutdown() {
     running_.store(false);
     if (acceptThread_.joinable()) {
         acceptThread_.join();
@@ -58,105 +94,21 @@ Relay::~Relay() {
         listenFd_ = -1;
     }
     users_.clear();
-}
-
-bool Relay::listen(std::string& error) {
-    addrinfo hints {};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
-    const std::string service = std::to_string(options_.port);
-    addrinfo* results = nullptr;
-    const int rc = getaddrinfo(nullptr, service.c_str(), &hints, &results);
-    if (rc != 0) {
-        error = gai_strerror(rc);
-        return false;
-    }
-
-    for (addrinfo* entry = results; entry != nullptr; entry = entry->ai_next) {
-        const int fd = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
-        if (fd < 0) {
-            error = std::strerror(errno);
-            continue;
-        }
-        const int enable = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
-        if (bind(fd, entry->ai_addr, entry->ai_addrlen) == 0 && ::listen(fd, SOMAXCONN) == 0) {
-            listenFd_ = fd;
-            error.clear();
-            break;
-        }
-        error = std::strerror(errno);
-        ::close(fd);
-    }
-    freeaddrinfo(results);
-
-    if (listenFd_ < 0) {
-        if (error.empty()) {
-            error = "cannot bind port " + service;
-        }
-        return false;
-    }
-
-    sockaddr_storage address {};
-    socklen_t length = sizeof(address);
-    if (getsockname(listenFd_, reinterpret_cast<sockaddr*>(&address), &length) == 0) {
-        if (address.ss_family == AF_INET6) {
-            boundPort_ = ntohs(reinterpret_cast<sockaddr_in6*>(&address)->sin6_port);
-        } else if (address.ss_family == AF_INET) {
-            boundPort_ = ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port);
-        }
-    }
-    if (boundPort_ == 0) {
-        boundPort_ = options_.port;
-    }
-    return true;
+    awaiting_.clear();
+    healthServer_.stop();
 }
 
 void Relay::acceptLoop() {
-    while (running_.load()) {
-        pollfd watched {listenFd_, POLLIN, 0};
-        const int ready = ::poll(&watched, 1, 200);
-        if (ready <= 0) {
-            continue;
+    acceptConnections(listenFd_, running_, [this](int fd) {
+        if (auto connection = Connection::fromAccepted(fd)) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            awaiting_.push_back(std::move(connection));
         }
-        if ((watched.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return;
-        }
-        if ((watched.revents & POLLIN) == 0) {
-            continue;
-        }
-
-        sockaddr_storage address {};
-        socklen_t length = sizeof(address);
-        const int fd = accept(listenFd_, reinterpret_cast<sockaddr*>(&address), &length);
-        if (fd < 0) {
-            continue;
-        }
-
-        auto connection = std::make_unique<Connection>();
-        if (!connection->adopt(fd)) {
-            ::close(fd);
-            continue;
-        }
-        connection->startReader();
-
-        std::lock_guard<std::mutex> lock(mutex_);
-        awaiting_.push_back(std::move(connection));
-    }
+    });
 }
 
-Relay::User* Relay::findUser(const std::string& name) {
-    for (auto& entry : users_) {
-        User& user = *entry.second;
-        if (user.assignedName == name ||
-            (user.assignedName.empty() && user.requestedName == name)) {
-            return &user;
-        }
-    }
-    return nullptr;
-}
+// ---------------------------------------------------------------------------
+// Inbound connections
 
 void Relay::dispatchInbound() {
     std::deque<std::unique_ptr<Connection>> pending;
@@ -165,55 +117,58 @@ void Relay::dispatchInbound() {
         pending.swap(awaiting_);
     }
 
-    for (std::size_t index = pending.size(); index-- > 0;) {
-        Connection& connection = *pending[index];
+    std::deque<std::unique_ptr<Connection>> undecided;
+    for (std::unique_ptr<Connection>& connection : pending) {
         Message first;
-        bool handled = false;
-
-        if (connection.poll(first)) {
-            handled = true;
-            if (first.type == MsgType::Login) {
-                const std::string requested =
-                    first.fields.empty() ? "" : sanitizeName(first.fields[0]);
-                if (!requested.empty()) {
-                    if (users_.size() >= options_.maxUsers && users_.find(requested) == users_.end()) {
-                        connection.send(Message {MsgType::Error, {"relay is full"}});
-                    } else {
-                        attachClient(requested, std::move(pending[index]));
-                    }
-                }
-            } else if (first.type == MsgType::Hello && first.fields.size() >= 2) {
-                // A peer or another relay dialling one of our users: the Hello
-                // names both the caller and the user it is looking for.
-                const std::string sender = sanitizeName(first.fields[0]);
-                const std::string target = sanitizeName(first.fields[1]);
-                User* user = findUser(target);
-                if (user != nullptr && !sender.empty()) {
-                    user->peers.adoptInbound(sender, std::move(pending[index]));
-                }
-            } else if (first.type == MsgType::RelayProbe && first.fields.empty()) {
-                if (!healthServer_.failed()) {
-                    connection.send(Message {MsgType::RelayReady, {}});
-                }
-            }
-        } else if (connection.failed()) {
-            handled = true;
+        if (connection->poll(first)) {
+            route(std::move(connection), first);
         }
-
-        if (handled) {
-            pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(index));
+        else if (!connection->failed()) {
+            undecided.push_back(std::move(connection));
         }
     }
 
-    if (!pending.empty()) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Older, partially received connections stay ahead of newly accepted
-        // ones without sharing the deque while it is being inspected.
-        while (!pending.empty()) {
-            awaiting_.push_front(std::move(pending.back()));
-            pending.pop_back();
+    // Put the undecided ones back ahead of anything accepted meanwhile.
+    std::lock_guard<std::mutex> lock(mutex_);
+    awaiting_.insert(awaiting_.begin(), std::make_move_iterator(undecided.begin()),
+                     std::make_move_iterator(undecided.end()));
+}
+
+// Anything that is not a valid Login or Hello is closed.
+void Relay::route(std::unique_ptr<Connection> connection, const Message& first) {
+    if (first.type == MsgType::Login) {
+        const std::string requested = first.fields.empty() ? "" : sanitizeName(first.fields[0]);
+        if (requested.empty()) {
+            return;
+        }
+        if (users_.size() >= options_.maxUsers && users_.count(requested) == 0) {
+            LOG_WARN("rejected {}: relay is full", requested);
+            connection->send(Message{MsgType::Error, {"relay is full"}});
+            return;
+        }
+        attachClient(requested, std::move(connection));
+    }
+    else if (first.type == MsgType::Hello && first.fields.size() >= 2) {
+        const std::string sender = sanitizeName(first.fields[0]);
+        User* target = findUser(sanitizeName(first.fields[1]));
+        if (target != nullptr && !sender.empty()) {
+            target->peers.adoptInbound(sender, std::move(connection));
         }
     }
+    else if (first.type == MsgType::RelayProbe && first.fields.empty() &&
+             !healthServer_.failed()) {
+        connection->send(Message{MsgType::RelayReady, {}});
+    }
+}
+
+Relay::User* Relay::findUser(const std::string& name) {
+    for (auto& [key, user] : users_) {
+        if (user->assignedName == name ||
+            (user->assignedName.empty() && user->requestedName == name)) {
+            return user.get();
+        }
+    }
+    return nullptr;
 }
 
 void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Connection> client) {
@@ -225,7 +180,7 @@ void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Conne
         }
         user.client = std::move(client);
         user.clientWaiting = true;
-        log(requestedName + " client reattached");
+        LOG_INFO("{} client reattached", requestedName);
         if (user.serverReady) {
             serveClientLogin(user);
         }
@@ -235,19 +190,18 @@ void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Conne
     auto user = std::make_unique<User>();
     user->requestedName = requestedName;
     user->client = std::move(client);
-    user->nextServerAttempt = std::chrono::steady_clock::now();
+    user->nextServerAttempt = Clock::now();
     user->peers.setMyName(requestedName);
     user->peers.setMyAdvertised(!options_.advertiseHost.empty());
     std::string error;
     if (!user->peers.startDetached(error)) {
-        log("cannot start mesh for " + requestedName + ": " + error);
+        LOG_ERR("cannot start mesh for {}: {}", requestedName, error);
         return;
     }
 
-    User* raw = user.get();
-    users_.emplace(requestedName, std::move(user));
-    log(requestedName + " client attached");
-    ensureServer(*raw);
+    User& added = *users_.emplace(requestedName, std::move(user)).first->second;
+    LOG_INFO("{} client attached", requestedName);
+    connectServer(added);
 }
 
 void Relay::dropUser(const std::string& key) {
@@ -261,32 +215,77 @@ void Relay::dropUser(const std::string& key) {
                                          : departing->second->assignedName;
     users_.erase(departing);
 
-    // The chat server normally broadcasts PeerLeft. During an outage the
-    // relay is the only process that knows one of its local clients left, so
-    // remove that stale route from every other hosted user's mesh immediately.
-    for (auto& entry : users_) {
-        User& user = *entry.second;
-        user.roster.erase(requestedName);
-        user.roster.erase(assignedName);
-        user.peers.removePeer(requestedName);
-        user.peers.removePeer(assignedName);
-
-        auto& visibleUsers = user.lastUsers.fields;
-        visibleUsers.erase(std::remove(visibleUsers.begin(), visibleUsers.end(), requestedName),
-                           visibleUsers.end());
-        visibleUsers.erase(std::remove(visibleUsers.begin(), visibleUsers.end(), assignedName),
-                           visibleUsers.end());
-        if (!user.serverReady) {
-            sendToClient(user, Message {MsgType::PeerLeft, {assignedName}});
-            sendToClient(user, user.lastUsers);
+    // The server announces departures, but while it is unreachable only the
+    // relay knows, so update the other hosted users directly.
+    for (auto& [otherKey, user] : users_) {
+        for (const std::string& name : {requestedName, assignedName}) {
+            user->roster.erase(name);
+            user->peers.removePeer(name);
+            eraseName(user->lastUsers.fields, name);
+        }
+        if (!user->serverReady) {
+            sendToClient(*user, Message{MsgType::PeerLeft, {assignedName}});
+            sendToClient(*user, user->lastUsers);
         }
     }
 }
 
-bool Relay::ensureServer(User& user) {
+// ---------------------------------------------------------------------------
+// Hosted users
+
+void Relay::serviceUsers() {
+    std::vector<std::string> departed;
+    for (auto& [key, user] : users_) {
+        if (!serviceUser(*user)) {
+            LOG_INFO("{} client disconnected", user->requestedName);
+            departed.push_back(key);
+        }
+    }
+    for (const std::string& key : departed) {
+        dropUser(key);
+    }
+}
+
+void Relay::serviceHealth() {
+    if (!healthServer_.failed() || Clock::now() < nextHealthAttempt_) return;
+    healthServer_.stop();
+    std::string error;
+    if (healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error)) {
+        healthServer_.startReader();
+    }
+    nextHealthAttempt_ = Clock::now() + kServerRetryInterval;
+}
+
+// Returns false once the user's client has disconnected.
+bool Relay::serviceUser(User& user) {
     if (user.server.failed()) {
-        // Discard anything the dead transport left behind so a re-login cannot
-        // be confused by frames from the previous connection.
+        user.serverReady = false;
+        if (Clock::now() >= user.nextServerAttempt) {
+            connectServer(user);
+            user.nextServerAttempt = Clock::now() + kServerRetryInterval;
+        }
+    }
+
+    PeerNetwork::Event event;
+    while (user.peers.poll(event)) {
+        handlePeerEvent(user, event);
+    }
+    Message message;
+    while (user.server.poll(message)) {
+        handleServerMessage(user, message);
+    }
+    if (user.client == nullptr) {
+        return true;
+    }
+    while (user.client->poll(message)) {
+        handleClientMessage(user, message);
+    }
+    return !user.client->failed();
+}
+
+void Relay::connectServer(User& user) {
+    if (user.server.failed()) {
+        // Frames from the dead connection must not confuse the new login.
         Message stale;
         while (user.server.poll(stale)) {
         }
@@ -295,18 +294,18 @@ bool Relay::ensureServer(User& user) {
     }
 
     std::string error;
-    if (!user.server.connectTo(options_.serverHost, options_.serverPort, 3000, error)) {
-        return false;
+    if (!user.server.connectTo(options_.serverHost, options_.serverPort, kServerConnectTimeoutMs,
+                               error)) {
+        LOG_DEBUG("{}: cannot reach server: {}", user.requestedName, error);
+        return;
     }
     user.server.startReader();
     user.serverReady = false;
-    user.server.send(Message {MsgType::Login,
-                              {user.requestedName, std::to_string(boundPort_),
-                               options_.advertiseHost}});
+    user.server.send(Message{
+        MsgType::Login, {user.requestedName, std::to_string(boundPort_), options_.advertiseHost}});
     if (user.client != nullptr) {
         user.clientWaiting = true;
     }
-    return true;
 }
 
 void Relay::serveClientLogin(User& user) {
@@ -314,27 +313,25 @@ void Relay::serveClientLogin(User& user) {
         return;
     }
     user.clientWaiting = false;
-    sendToClient(user, Message {MsgType::LoginOk, {user.assignedName, "welcome, " + user.assignedName}});
+    sendToClient(user,
+                 Message{MsgType::LoginOk, {user.assignedName, "welcome, " + user.assignedName}});
     replayRoster(user);
 }
 
 void Relay::replayRoster(User& user) {
-    for (const auto& entry : user.roster) {
-        sendToClient(user, Message {MsgType::Peer,
-                                    {entry.first, entry.second.host, std::to_string(entry.second.port),
-                                     entry.second.advertised ? "1" : "0",
-                                     std::to_string(entry.second.voicePort)}});
+    for (const auto& [name, peer] : user.roster) {
+        sendToClient(user, peerMessage(MsgType::Peer, peer));
     }
-    Message users {MsgType::Users, {}};
     if (!user.lastUsers.fields.empty()) {
-        users = user.lastUsers;
-    } else {
-        if (!user.assignedName.empty()) {
-            users.fields.push_back(user.assignedName);
-        }
-        for (const auto& entry : user.roster) {
-            users.fields.push_back(entry.first);
-        }
+        sendToClient(user, user.lastUsers);
+        return;
+    }
+    Message users{MsgType::Users, {}};
+    if (!user.assignedName.empty()) {
+        users.fields.push_back(user.assignedName);
+    }
+    for (const auto& [name, peer] : user.roster) {
+        users.fields.push_back(name);
     }
     sendToClient(user, users);
 }
@@ -347,32 +344,18 @@ void Relay::handleServerMessage(User& user, const Message& message) {
             }
             user.peers.setMyName(user.assignedName);
             user.serverReady = true;
-            log(user.requestedName + " signed in as '" + user.assignedName + "'");
+            LOG_INFO("{} signed in as '{}'", user.requestedName, user.assignedName);
             serveClientLogin(user);
             break;
 
         case MsgType::Peer:
         case MsgType::PeerJoined: {
-            if (message.fields.size() < 4) {
-                break;
+            PeerAddress peer;
+            if (parsePeerAddress(message, peer)) {
+                user.peers.addPeer(peer.name, peer.host, peer.port, peer.advertised);
+                user.roster[peer.name] = std::move(peer);
+                sendToClient(user, message);
             }
-            std::int64_t peerPort = 0;
-            if (!parseInt64(message.fields[2], peerPort) || peerPort < 1 || peerPort > 65535) {
-                break;
-            }
-            PeerInfo info;
-            info.host = message.fields[1];
-            info.port = static_cast<std::uint16_t>(peerPort);
-            info.advertised = message.fields[3] == "1";
-            if (message.fields.size() >= 5) {
-                std::int64_t voicePort = 0;
-                if (parseInt64(message.fields[4], voicePort) && voicePort >= 0 && voicePort <= 65535) {
-                    info.voicePort = static_cast<std::uint16_t>(voicePort);
-                }
-            }
-            user.roster[message.fields[0]] = info;
-            user.peers.addPeer(message.fields[0], info.host, info.port, info.advertised);
-            sendToClient(user, message);
             break;
         }
 
@@ -392,26 +375,25 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::History:
         case MsgType::HistoryEnd:
         case MsgType::System:
-        case MsgType::VoicePort:
-            if (message.type == MsgType::VoicePort && message.fields.size() == 2) {
-                auto peer = user.roster.find(message.fields[0]);
-                if (peer != user.roster.end()) {
-                    std::int64_t port = 0;
-                    if (parseInt64(message.fields[1], port) && port >= 0 && port <= 65535) {
-                        peer->second.voicePort = static_cast<std::uint16_t>(port);
-                    }
-                }
-            }
-            sendToClient(user, message);
-            break;
         case MsgType::VoiceAudio:
         case MsgType::VoiceState:
             sendToClient(user, message);
             break;
 
+        case MsgType::VoicePort:
+            if (message.fields.size() == 2) {
+                auto peer = user.roster.find(message.fields[0]);
+                std::uint16_t port = 0;
+                if (peer != user.roster.end() && parsePort(message.fields[1], port, true)) {
+                    peer->second.voicePort = port;
+                }
+            }
+            sendToClient(user, message);
+            break;
+
         case MsgType::Error:
-            log(user.requestedName + " server error: " +
-                (message.fields.empty() ? std::string("unknown") : message.fields[0]));
+            LOG_WARN("{} server error: {}", user.requestedName,
+                     message.fields.empty() ? "unknown" : message.fields[0]);
             sendToClient(user, message);
             break;
 
@@ -438,17 +420,14 @@ void Relay::handleClientMessage(User& user, const Message& message) {
             }
             break;
 
-        case MsgType::PeerChat:
-            if (message.fields.size() >= 4) {
-                std::int64_t timestamp = 0;
-                const std::string body = sanitizeBody(message.fields[2]);
-                const std::string color = sanitizeBody(message.fields[3]);
-                if (parseInt64(message.fields[1], timestamp) && timestamp > 0 && !body.empty() &&
-                    isValidColor(color)) {
-                    user.peers.sendChat(timestamp, body, color);
-                }
+        case MsgType::PeerChat: {
+            // The mesh stamps the user's own name on outgoing chat.
+            ChatPayload payload;
+            if (parsePeerChat(message, payload)) {
+                user.peers.sendChat(payload.timestamp, payload.body, payload.color);
             }
             break;
+        }
 
         default:
             break;
@@ -458,21 +437,18 @@ void Relay::handleClientMessage(User& user, const Message& message) {
 void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
     switch (event.kind) {
         case PeerNetwork::Event::Kind::Chat:
-            // Re-tag with the name we learned from that peer's own connection:
-            // a direct link identifies its sender far more reliably than the
-            // frame can.
-            sendToClient(user, Message {MsgType::PeerChat,
-                                        {event.name, std::to_string(event.timestamp), event.body,
-                                         event.color}});
+            sendToClient(user, Message{MsgType::PeerChat,
+                                       {event.name, std::to_string(event.timestamp), event.body,
+                                        event.color}});
             break;
         case PeerNetwork::Event::Kind::Join:
-            log(user.requestedName + ": mesh link up with " + event.name);
+            LOG_INFO("{}: mesh link up with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Leave:
-            log(user.requestedName + ": mesh link down with " + event.name);
+            LOG_INFO("{}: mesh link down with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Note:
-            log(user.requestedName + ": " + event.body);
+            LOG_WARN("{}: {}", user.requestedName, event.body);
             break;
     }
 }
@@ -483,102 +459,4 @@ void Relay::sendToClient(User& user, const Message& message) {
     }
 }
 
-void Relay::serviceUsers() {
-    std::vector<std::string> dead;
-    for (auto& entry : users_) {
-        User& user = *entry.second;
-
-        if (user.server.failed()) {
-            user.serverReady = false;
-            if (std::chrono::steady_clock::now() >= user.nextServerAttempt) {
-                ensureServer(user);
-                user.nextServerAttempt =
-                    std::chrono::steady_clock::now() + std::chrono::seconds(3);
-            }
-        }
-
-        PeerNetwork::Event event;
-        while (user.peers.poll(event)) {
-            handlePeerEvent(user, event);
-        }
-
-        Message message;
-        while (user.server.poll(message)) {
-            handleServerMessage(user, message);
-        }
-
-        if (user.client != nullptr) {
-            Message incoming;
-            while (user.client->poll(incoming)) {
-                handleClientMessage(user, incoming);
-            }
-            if (user.client->failed()) {
-                log(user.requestedName + " client disconnected");
-                dead.push_back(entry.first);
-            }
-        }
-    }
-
-    for (const std::string& key : dead) {
-        dropUser(key);
-    }
-}
-
-void Relay::serviceHealth() {
-    if (!healthServer_.failed()) return;
-    if (std::chrono::steady_clock::now() < nextHealthAttempt_) return;
-    healthServer_.stop();
-    std::string error;
-    if (healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error)) {
-        healthServer_.startReader();
-    }
-    nextHealthAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-}
-
-void Relay::log(const std::string& text) const {
-    std::printf("[relay] %s\n", text.c_str());
-    std::fflush(stdout);
-}
-
-int Relay::run() {
-    installSignalHandlers();
-
-    std::string error;
-    if (!listen(error)) {
-        std::fprintf(stderr, "[relay] cannot listen on port %u: %s\n", options_.port, error.c_str());
-        return 1;
-    }
-
-    running_.store(true);
-    acceptThread_ = std::thread([this] { acceptLoop(); });
-
-    log("listening on port " + std::to_string(boundPort_) +
-        (options_.advertiseHost.empty() ? "" : ", advertising " + options_.advertiseHost));
-
-    // One anonymous server connection checks availability without creating
-    // room members or interrupting clients already using direct links.
-    healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error);
-    if (!healthServer_.failed()) healthServer_.startReader();
-    nextHealthAttempt_ = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-
-    while (gStopRequested == 0) {
-        serviceHealth();
-        dispatchInbound();
-        serviceUsers();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    log("shutting down");
-    running_.store(false);
-    if (acceptThread_.joinable()) {
-        acceptThread_.join();
-    }
-    if (listenFd_ >= 0) {
-        ::close(listenFd_);
-        listenFd_ = -1;
-    }
-    users_.clear();
-    return 0;
-}
-
-}  // namespace chat
+} // namespace chat
