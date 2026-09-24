@@ -55,6 +55,7 @@ private:
         std::string host;
         std::uint16_t port = 0;
         bool advertised = false;
+        std::uint16_t voicePort = 0;
     };
 
     // One hosted user: a private server session, its own peer mesh, and the

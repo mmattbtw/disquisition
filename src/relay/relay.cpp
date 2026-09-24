@@ -318,7 +318,8 @@ void Relay::replayRoster(User& user) {
     for (const auto& entry : user.roster) {
         sendToClient(user, Message {MsgType::Peer,
                                     {entry.first, entry.second.host, std::to_string(entry.second.port),
-                                     entry.second.advertised ? "1" : "0"}});
+                                     entry.second.advertised ? "1" : "0",
+                                     std::to_string(entry.second.voicePort)}});
     }
     Message users {MsgType::Users, {}};
     if (!user.lastUsers.fields.empty()) {
@@ -359,6 +360,12 @@ void Relay::handleServerMessage(User& user, const Message& message) {
             info.host = message.fields[1];
             info.port = static_cast<std::uint16_t>(peerPort);
             info.advertised = message.fields[3] == "1";
+            if (message.fields.size() >= 5) {
+                std::int64_t voicePort = 0;
+                if (parseInt64(message.fields[4], voicePort) && voicePort >= 0 && voicePort <= 65535) {
+                    info.voicePort = static_cast<std::uint16_t>(voicePort);
+                }
+            }
             user.roster[message.fields[0]] = info;
             user.peers.addPeer(message.fields[0], info.host, info.port, info.advertised);
             sendToClient(user, message);
@@ -381,6 +388,20 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::History:
         case MsgType::HistoryEnd:
         case MsgType::System:
+        case MsgType::VoicePort:
+            if (message.type == MsgType::VoicePort && message.fields.size() == 2) {
+                auto peer = user.roster.find(message.fields[0]);
+                if (peer != user.roster.end()) {
+                    std::int64_t port = 0;
+                    if (parseInt64(message.fields[1], port) && port >= 0 && port <= 65535) {
+                        peer->second.voicePort = static_cast<std::uint16_t>(port);
+                    }
+                }
+            }
+            sendToClient(user, message);
+            break;
+        case MsgType::VoiceAudio:
+        case MsgType::VoiceState:
             sendToClient(user, message);
             break;
 
@@ -405,6 +426,9 @@ void Relay::handleClientMessage(User& user, const Message& message) {
 
         case MsgType::Store:
         case MsgType::FetchHistory:
+        case MsgType::VoicePort:
+        case MsgType::VoiceAudio:
+        case MsgType::VoiceState:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }
