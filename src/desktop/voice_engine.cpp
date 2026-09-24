@@ -31,6 +31,7 @@ VoiceEngine::VoiceEngine(QObject* parent) : QObject(parent) {
             if (line.contains("baresip is ready", Qt::CaseInsensitive)) {
                 initialized_ = true;
                 emit statusChanged("voice: ready");
+                emit ready();
                 const QSet<QString> calls = pendingCalls_;
                 pendingCalls_.clear();
                 for (const QString& uri : calls) {
@@ -55,6 +56,7 @@ VoiceEngine::VoiceEngine(QObject* parent) : QObject(parent) {
                     emit statusChanged("voice error: " +
                                        (lastOutput_.isEmpty() ? "baresip exited" : lastOutput_));
                 }
+                emit stopped();
             });
 }
 

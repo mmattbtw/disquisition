@@ -21,6 +21,8 @@ public:
     bool running() const;
 
 signals:
+    void ready();
+    void stopped();
     void statusChanged(const QString& status);
     void logMessage(const QString& line);
     void localSpeakingChanged(bool speaking);

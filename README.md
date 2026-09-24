@@ -52,25 +52,41 @@ directory.
 ## Desktop voice chat
 
 Start the normal server, then open `disquisition-desktop` on each computer.
-Enter the server address, a name, and a SIP port. Use a different SIP port for
-each client running on the same machine. If peers cannot directly reach the
-address seen by the server, enter a reachable DNS name or IP in the public host
-field and forward both the automatically chosen TCP chat port and the chosen
-SIP/RTP ports.
+Set the server address and port in Preferences (Cmd+, on macOS), enter a name,
+and choose Join to enter text chat. Voice stays off until you choose Join voice.
+Choose Leave voice to exit the call without leaving the server. Use a different
+voice SIP port in Preferences for each client running on the same machine. If
+peers cannot directly reach the address seen by the server, enter a reachable
+DNS name or IP as the public host and forward both the automatically chosen TCP
+chat port and the chosen SIP/RTP ports when connecting directly.
 
-After sign-in, the app uses the server roster to form one direct SIP call per
-pair of users. Baresip's `mixminus` module combines those calls locally, so the
-server never carries microphone audio. The name ordering rule makes only one
-side dial each pair, while the other side auto-answers.
+To keep your IP hidden from other users, set the relay address and port in
+Preferences before joining. The desktop app then connects only to the relay;
+it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
+mono PCM frames over that TCP connection. The relay passes those frames to the
+chat server, which fans them out to the room. Direct participants keep using
+baresip with other direct participants and send a second audio stream for
+relayed participants. This means relayed voice is not end-to-end encrypted and
+the relay and server can hear it. Use only a trusted relay and server.
+
+"Connect directly if relay fails (reveals your IP)" is off by default. If
+enabled, a lost relay connection falls back to the server address and port in
+Preferences. This reveals your address to the server and direct peers until
+you leave and rejoin through the relay.
+
+For direct participants, the app uses the server roster to form one SIP call
+per pair of users. Baresip's `mixminus` module combines those calls locally.
+The name ordering rule makes only one side dial each pair, while the other
+side auto-answers.
 
 The member list reports voice state from baresip itself. `·` means text-only,
 `○` means the SIP call is connected, and a green `●` means the microphone or
 that peer's received audio is above the speaking threshold. The `vumeter`
 module supplies audio levels and `ctrl_tcp` supplies call identity and state.
 
-On macOS the app requests microphone access when its window first opens. Choose
-the microphone and speaker from the `mic` and `out` dropdowns before joining;
-the dropdowns refresh after permission is granted.
+On macOS the app requests microphone access when you choose Join voice. Choose
+the microphone and speaker from the `mic` and `out` dropdowns before joining
+voice; the dropdowns refresh after permission is granted.
 
 This first version is deliberately small. It works well on a LAN or between
 publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP

@@ -4,9 +4,11 @@
 #include <QMainWindow>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 
 #include "common/protocol.h"
 #include "desktop/voice_engine.h"
+#include "desktop/relay_audio.h"
 
 class QLabel;
 class QComboBox;
@@ -35,6 +37,7 @@ private:
         bool speaking = false;
         bool muted = false;
         bool deafened = false;
+        qint64 lastAudioMs = 0;
     };
 
     void buildUi();
@@ -58,15 +61,16 @@ private:
     void refreshMembers();
     void refreshAudioDevices();
     void startJoining();
+    void joinVoice();
+    void leaveVoice();
+    void showPreferences();
 
-    QLineEdit* host_ = nullptr;
-    QSpinBox* serverPort_ = nullptr;
     QLineEdit* name_ = nullptr;
-    QLineEdit* advertise_ = nullptr;
-    QSpinBox* voicePort_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
     QComboBox* outputDevice_ = nullptr;
     QPushButton* connectButton_ = nullptr;
+    QPushButton* voiceButton_ = nullptr;
+    QPushButton* settingsButton_ = nullptr;
     QPushButton* muteButton_ = nullptr;
     QPushButton* deafenButton_ = nullptr;
     QTextBrowser* transcript_ = nullptr;
@@ -83,10 +87,23 @@ private:
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
     QHash<QString, Peer> peers_;
     QString myName_;
+    QString serverHost_ = "127.0.0.1";
+    quint16 serverPort_ = 9000;
+    QString advertiseHost_;
+    quint16 preferredVoicePort_ = 5060;
+    QString relayHost_;
+    quint16 relayPort_ = 3333;
+    bool leakMyIp_ = false;
+    bool usingRelay_ = false;
+    bool intentionalDisconnect_ = false;
+    quint16 activeVoicePort_ = 0;
+    bool voiceWanted_ = false;
     QString messageColor_ = "mint";
     bool localSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
     VoiceEngine voice_;
+    RelayAudio relayAudio_;
+    QTimer speakingExpiry_;
 };

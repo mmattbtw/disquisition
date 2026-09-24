@@ -3,10 +3,14 @@
 #include <QDateTime>
 #include <QColor>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QApplication>
+#include <QAction>
 #include <QAudioDevice>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QLabel>
@@ -15,9 +19,11 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QMediaDevices>
+#include <QMenuBar>
 #include <QNetworkInterface>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStyle>
@@ -92,12 +98,21 @@ QString voiceReachableHost(QString host) {
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
+    QSettings settings;
+    serverHost_ = settings.value("server/host", serverHost_).toString();
+    serverPort_ = static_cast<quint16>(qBound(1, settings.value("server/port", 9000).toInt(), 65535));
+    advertiseHost_ = settings.value("server/advertisedHost").toString();
+    preferredVoicePort_ = static_cast<quint16>(
+        qBound(1, settings.value("voice/sipPort", 5060).toInt(), 65534));
+    relayHost_ = settings.value("relay/host").toString();
+    relayPort_ = static_cast<quint16>(qBound(1, settings.value("relay/port", 3333).toInt(), 65535));
+    leakMyIp_ = settings.value("relay/leakMyIp", false).toBool();
     buildUi();
     setWindowTitle("Disquisition");
     resize(980, 680);
 
     connect(&server_, &QTcpSocket::connected, this, [this] {
-        if (!peerServer_.listen(QHostAddress::Any, 0)) {
+        if (!usingRelay_ && !peerServer_.listen(QHostAddress::Any, 0)) {
             QMessageBox::critical(this, "Cannot join", peerServer_.errorString());
             server_.disconnectFromHost();
             return;
@@ -105,26 +120,35 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         connectionLabel_->setText("Signing in");
         sendFrame(&server_, chat::Message {
                                 chat::MsgType::Login,
-                                {s(name_->text()), std::to_string(peerServer_.serverPort()),
-                                 s(advertise_->text()), std::to_string(voicePort_->value())}});
+                                {s(name_->text()), std::to_string(usingRelay_ ? 0 : peerServer_.serverPort()),
+                                 s(advertiseHost_)}});
     });
     connect(&server_, &QTcpSocket::readyRead, this, &MainWindow::readServer);
     connect(&server_, &QTcpSocket::disconnected, this, [this] {
+        const bool fallback = usingRelay_ && leakMyIp_ && !intentionalDisconnect_;
+        leaveVoice();
         peerServer_.close();
+        for (const Peer& peer : std::as_const(peers_)) {
+            if (peer.socket) peer.socket->abort();
+        }
+        peers_.clear();
+        myName_.clear();
+        refreshMembers();
         connectionLabel_->setText("Disconnected");
         connectButton_->setText("Join");
+        name_->setEnabled(true);
+        voiceButton_->setEnabled(false);
         composer_->setEnabled(false);
         sendButton_->setEnabled(false);
-        inputDevice_->setEnabled(true);
-        outputDevice_->setEnabled(true);
-        muteButton_->setEnabled(false);
-        deafenButton_->setEnabled(false);
-        muted_ = false;
-        deafened_ = false;
-        muteButton_->setChecked(false);
-        deafenButton_->setChecked(false);
-        muteButton_->setText("mute");
-        deafenButton_->setText("deafen");
+        if (fallback) {
+            usingRelay_ = false;
+            connectionLabel_->setText("Relay unavailable; connecting directly (IP visible)");
+            QTimer::singleShot(0, this, [this] {
+                if (!intentionalDisconnect_ && server_.state() == QAbstractSocket::UnconnectedState) {
+                    server_.connectToHost(serverHost_, serverPort_);
+                }
+            });
+        }
     });
     connect(&server_, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
         connectionLabel_->setText(server_.errorString());
@@ -137,11 +161,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             disconnectAll();
         }
     });
+    connect(voiceButton_, &QPushButton::clicked, this, [this] {
+        if (voiceWanted_) {
+            leaveVoice();
+        } else {
+            joinVoice();
+        }
+    });
+    connect(settingsButton_, &QPushButton::clicked, this, &MainWindow::showPreferences);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::sendMessage);
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         muted_ = !muted_;
         voice_.setMuted(muted_);
+        relayAudio_.setMuted(muted_);
         muteButton_->setChecked(muted_);
         muteButton_->setText(muted_ ? "unmute" : "mute");
         sendVoiceState();
@@ -152,6 +185,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             mutedBeforeDeafen_ = muted_;
         }
         voice_.setDeafened(deafened_);
+        relayAudio_.setDeafened(deafened_);
+        relayAudio_.setMuted(deafened_ || muted_);
         deafenButton_->setChecked(deafened_);
         deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
         if (deafened_) {
@@ -175,7 +210,57 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
     });
     connect(&voice_, &VoiceEngine::statusChanged, voiceLabel_, &QLabel::setText);
+    connect(&relayAudio_, &RelayAudio::frameReady, this, [this](const QByteArray& pcm) {
+        if (!voiceWanted_ || server_.state() != QAbstractSocket::ConnectedState) return;
+        if (!usingRelay_) {
+            bool hasRelayVoicePeer = false;
+            for (const Peer& peer : std::as_const(peers_)) {
+                hasRelayVoicePeer |= peer.voicePort == 65535;
+            }
+            if (!hasRelayVoicePeer) return;
+        }
+        sendFrame(&server_, chat::Message {chat::MsgType::VoiceAudio,
+                   {std::string(pcm.constData(), static_cast<std::size_t>(pcm.size()))}});
+    });
+    connect(&relayAudio_, &RelayAudio::speakingChanged, this, [this](bool speaking) {
+        if (usingRelay_ && localSpeaking_ != speaking) {
+            localSpeaking_ = speaking;
+            refreshMembers();
+        }
+    });
+    speakingExpiry_.setInterval(200);
+    connect(&speakingExpiry_, &QTimer::timeout, this, [this] {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        bool changed = false;
+        for (Peer& peer : peers_) {
+            if (peer.lastAudioMs && peer.speaking && now - peer.lastAudioMs > 250) {
+                peer.speaking = false;
+                changed = true;
+            }
+        }
+        if (changed) refreshMembers();
+    });
+    speakingExpiry_.start();
+    connect(&voice_, &VoiceEngine::ready, this, [this] {
+        if (!voiceWanted_ || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
+            return;
+        }
+        sendFrame(&server_, chat::Message {chat::MsgType::VoicePort,
+                                           {std::to_string(activeVoicePort_)}});
+        for (const Peer& peer : std::as_const(peers_)) {
+            if (myName_ < peer.name && peer.voicePort != 65535) {
+                voice_.callPeer(peer.name, peer.host, peer.voicePort);
+            }
+        }
+        refreshMembers();
+    });
+    connect(&voice_, &VoiceEngine::stopped, this, [this] {
+        if (voiceWanted_) {
+            leaveVoice();
+        }
+    });
     connect(&voice_, &VoiceEngine::localSpeakingChanged, this, [this](bool speaking) {
+        if (usingRelay_) return;
         if (localSpeaking_ != speaking) {
             localSpeaking_ = speaking;
             refreshMembers();
@@ -199,19 +284,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(mediaDevices_, &QMediaDevices::audioOutputsChanged, this,
             &MainWindow::refreshAudioDevices);
     refreshAudioDevices();
-    QTimer::singleShot(0, this, [this] {
-        requestMicrophoneAccess(this, [this](bool granted) {
-            if (granted) {
-                refreshAudioDevices();
-                connectionLabel_->setText(
-                    "* microphone access granted; " +
-                    QString::number(inputDevice_->count() - 1) + " inputs, " +
-                    QString::number(outputDevice_->count() - 1) + " outputs");
-            } else {
-                connectionLabel_->setText("* microphone access denied");
-            }
-        });
-    });
 }
 
 MainWindow::~MainWindow() {
@@ -229,27 +301,24 @@ void MainWindow::buildUi() {
     page->addWidget(title);
 
     auto* setup = new QHBoxLayout;
-    host_ = new QLineEdit("127.0.0.1", root);
-    host_->setPlaceholderText("server");
-    serverPort_ = new QSpinBox(root);
-    serverPort_->setRange(1, 65535);
-    serverPort_->setValue(9000);
     name_ = new QLineEdit(root);
     name_->setPlaceholderText("name");
-    advertise_ = new QLineEdit(root);
-    advertise_->setPlaceholderText("public host (optional)");
-    voicePort_ = new QSpinBox(root);
-    voicePort_->setRange(1, 65535);
-    voicePort_->setValue(5060);
     connectButton_ = new QPushButton("join", root);
     connectButton_->setObjectName("primary");
-    setup->addWidget(host_, 2);
-    setup->addWidget(serverPort_);
+    voiceButton_ = new QPushButton("join voice", root);
+    voiceButton_->setEnabled(false);
+    settingsButton_ = new QPushButton("settings", root);
     setup->addWidget(name_, 1);
-    setup->addWidget(advertise_, 2);
-    setup->addWidget(voicePort_);
     setup->addWidget(connectButton_);
+    setup->addWidget(voiceButton_);
+    setup->addWidget(settingsButton_);
     page->addLayout(setup);
+
+    auto* appMenu = menuBar()->addMenu("Disquisition");
+    auto* preferencesAction = appMenu->addAction("Preferences…");
+    preferencesAction->setMenuRole(QAction::PreferencesRole);
+    preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -332,38 +401,167 @@ void MainWindow::startJoining() {
         name_->setFocus();
         return;
     }
-    connectButton_->setEnabled(false);
+    connectToServer();
+}
+
+void MainWindow::joinVoice() {
+    if (myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+    voiceButton_->setEnabled(false);
     requestMicrophoneAccess(this, [this](bool granted) {
-        connectButton_->setEnabled(true);
-        if (granted) {
-            refreshAudioDevices();
-            // Separate local clients need separate SIP sockets. Preserve the
-            // requested port when possible, otherwise select the next free one.
-            quint16 candidate = static_cast<quint16>(voicePort_->value());
-            QUdpSocket probe;
-            while (candidate < 65535 &&
-                   !probe.bind(QHostAddress::AnyIPv4, candidate, QUdpSocket::DontShareAddress)) {
-                ++candidate;
-            }
-            if (candidate == 65535 &&
-                !probe.bind(QHostAddress::AnyIPv4, candidate, QUdpSocket::DontShareAddress)) {
-                QMessageBox::critical(this, "Voice unavailable",
-                                      "Could not find a free local SIP port.");
-                return;
-            }
-            if (candidate != voicePort_->value()) {
-                connectionLabel_->setText("* voice port " +
-                                          QString::number(voicePort_->value()) +
-                                          " is busy; using " + QString::number(candidate));
-                voicePort_->setValue(candidate);
-            }
-            probe.close();
-            connectToServer();
-        } else {
-            QMessageBox::warning(this, "Microphone blocked",
-                                 "Allow microphone access in System Settings, then try again.");
+        if (myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
+            return;
         }
+        voiceButton_->setEnabled(true);
+        if (!granted) {
+            voiceLabel_->setText("voice: microphone access denied");
+            return;
+        }
+        refreshAudioDevices();
+        auto selectedDevice = [](QComboBox* combo) {
+            return combo->currentData().isValid() ? combo->currentData().toString()
+                                                  : combo->currentText();
+        };
+        if (!relayAudio_.start(selectedDevice(inputDevice_), selectedDevice(outputDevice_))) {
+            voiceLabel_->setText("voice: selected audio device cannot use 16 kHz mono");
+            return;
+        }
+        if (usingRelay_) {
+            voiceWanted_ = true;
+            activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
+            sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
+            voiceButton_->setText("leave voice");
+            voiceLabel_->setText("voice: relayed");
+            muteButton_->setEnabled(true);
+            deafenButton_->setEnabled(true);
+            inputDevice_->setEnabled(false);
+            outputDevice_->setEnabled(false);
+            refreshMembers();
+            return;
+        }
+        quint16 candidate = preferredVoicePort_;
+        QUdpSocket probe;
+        bool available = probe.bind(QHostAddress::AnyIPv4, candidate,
+                                    QUdpSocket::DontShareAddress);
+        while (!available && candidate < 65534) {
+            ++candidate;
+            available = probe.bind(QHostAddress::AnyIPv4, candidate,
+                                   QUdpSocket::DontShareAddress);
+        }
+        if (!available) {
+            relayAudio_.stop();
+            voiceLabel_->setText("voice: no free SIP port");
+            return;
+        }
+        probe.close();
+        activeVoicePort_ = candidate;
+        voiceWanted_ = true;
+        QString error;
+        if (!voice_.start(myName_, activeVoicePort_, selectedDevice(inputDevice_),
+                          selectedDevice(outputDevice_), error)) {
+            voiceWanted_ = false;
+            activeVoicePort_ = 0;
+            relayAudio_.stop();
+            voiceLabel_->setText(error);
+            return;
+        }
+        voiceButton_->setText("leave voice");
+        muteButton_->setEnabled(true);
+        deafenButton_->setEnabled(true);
+        inputDevice_->setEnabled(false);
+        outputDevice_->setEnabled(false);
+        refreshMembers();
     });
+}
+
+void MainWindow::leaveVoice() {
+    const bool wasInVoice = voiceWanted_;
+    voiceWanted_ = false;
+    if (wasInVoice && server_.state() == QAbstractSocket::ConnectedState) {
+        sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"0"}});
+    }
+    activeVoicePort_ = 0;
+    voice_.stop();
+    relayAudio_.stop();
+    muted_ = false;
+    deafened_ = false;
+    mutedBeforeDeafen_ = false;
+    localSpeaking_ = false;
+    muteButton_->setChecked(false);
+    deafenButton_->setChecked(false);
+    muteButton_->setText("mute");
+    deafenButton_->setText("deafen");
+    muteButton_->setEnabled(false);
+    deafenButton_->setEnabled(false);
+    inputDevice_->setEnabled(true);
+    outputDevice_->setEnabled(true);
+    voiceButton_->setText("join voice");
+    voiceButton_->setEnabled(!myName_.isEmpty() &&
+                             server_.state() == QAbstractSocket::ConnectedState);
+    voiceLabel_->setText("voice: off");
+    if (wasInVoice) {
+        sendVoiceState();
+    }
+    refreshMembers();
+}
+
+void MainWindow::showPreferences() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("Preferences");
+    dialog.setStyleSheet(styleSheet());
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    auto* host = new QLineEdit(serverHost_, &dialog);
+    auto* port = new QSpinBox(&dialog);
+    port->setRange(1, 65535);
+    port->setValue(serverPort_);
+    auto* advertisedHost = new QLineEdit(advertiseHost_, &dialog);
+    advertisedHost->setPlaceholderText("optional public DNS name or IP");
+    auto* sipPort = new QSpinBox(&dialog);
+    sipPort->setRange(1, 65534);
+    sipPort->setValue(preferredVoicePort_);
+    auto* relayHost = new QLineEdit(relayHost_, &dialog);
+    relayHost->setPlaceholderText("optional; leave blank for direct connection");
+    auto* relayPort = new QSpinBox(&dialog);
+    relayPort->setRange(1, 65535);
+    relayPort->setValue(relayPort_);
+    auto* leakIp = new QCheckBox("Connect directly if relay fails (reveals your IP)", &dialog);
+    leakIp->setChecked(leakMyIp_);
+    form->addRow("server address", host);
+    form->addRow("server port", port);
+    form->addRow("public host", advertisedHost);
+    form->addRow("voice SIP port", sipPort);
+    form->addRow("relay address", relayHost);
+    form->addRow("relay port", relayPort);
+    form->addRow("", leakIp);
+    layout->addLayout(form);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
+                                          &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    serverHost_ = host->text().trimmed();
+    if (serverHost_.isEmpty()) {
+        serverHost_ = "127.0.0.1";
+    }
+    serverPort_ = static_cast<quint16>(port->value());
+    advertiseHost_ = advertisedHost->text().trimmed();
+    preferredVoicePort_ = static_cast<quint16>(sipPort->value());
+    relayHost_ = relayHost->text().trimmed();
+    relayPort_ = static_cast<quint16>(relayPort->value());
+    leakMyIp_ = leakIp->isChecked();
+    QSettings settings;
+    settings.setValue("server/host", serverHost_);
+    settings.setValue("server/port", serverPort_);
+    settings.setValue("server/advertisedHost", advertiseHost_);
+    settings.setValue("voice/sipPort", preferredVoicePort_);
+    settings.setValue("relay/host", relayHost_);
+    settings.setValue("relay/port", relayPort_);
+    settings.setValue("relay/leakMyIp", leakMyIp_);
 }
 
 void MainWindow::connectToServer() {
@@ -377,12 +575,17 @@ void MainWindow::connectToServer() {
     name_->setProperty("invalid", false);
     connectionLabel_->setText("Connecting");
     connectButton_->setText("Leave");
-    server_.connectToHost(host_->text().trimmed(), static_cast<quint16>(serverPort_->value()));
+    intentionalDisconnect_ = false;
+    usingRelay_ = !relayHost_.isEmpty();
+    server_.connectToHost(usingRelay_ ? relayHost_ : serverHost_,
+                          usingRelay_ ? relayPort_ : serverPort_);
 }
 
 void MainWindow::disconnectAll() {
+    intentionalDisconnect_ = true;
     // Notify the room first; stopping the audio process must not delay Leave.
     server_.abort();
+    leaveVoice();
     peerServer_.close();
     for (const Peer& peer : std::as_const(peers_)) {
         if (peer.socket) {
@@ -395,7 +598,6 @@ void MainWindow::disconnectAll() {
     myName_.clear();
     localSpeaking_ = false;
     refreshMembers();
-    voice_.stop();
 }
 
 void MainWindow::sendFrame(QTcpSocket* socket, const chat::Message& message) {
@@ -409,6 +611,7 @@ void MainWindow::sendVoiceState() {
     }
     const chat::Message state {chat::MsgType::VoiceState,
                                {s(myName_), muted_ ? "1" : "0", deafened_ ? "1" : "0"}};
+    if (server_.state() == QAbstractSocket::ConnectedState) sendFrame(&server_, state);
     for (const Peer& peer : std::as_const(peers_)) {
         if (peer.socket && peer.socket->state() == QAbstractSocket::ConnectedState) {
             sendFrame(peer.socket, state);
@@ -430,25 +633,16 @@ void MainWindow::readServer() {
 void MainWindow::handleServerMessage(const chat::Message& message) {
     if (message.type == chat::MsgType::LoginOk && !message.fields.empty()) {
         myName_ = q(message.fields[0]);
-        connectionLabel_->setText("* connected to " + host_->text() + ":" +
-                                  QString::number(serverPort_->value()) + " as " + myName_);
+        connectionLabel_->setText("* connected to " +
+                                  (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
+                                               : serverHost_ + ":" + QString::number(serverPort_)) +
+                                  " as " + myName_ +
+                                  (!usingRelay_ && !relayHost_.isEmpty() ? " (direct; IP visible)" : ""));
         connectButton_->setText("Leave");
+        name_->setEnabled(false);
+        voiceButton_->setEnabled(true);
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
-        inputDevice_->setEnabled(false);
-        outputDevice_->setEnabled(false);
-        muteButton_->setEnabled(true);
-        deafenButton_->setEnabled(true);
-        QString error;
-        auto selectedDevice = [](QComboBox* combo) {
-            return combo->currentData().isValid() ? combo->currentData().toString()
-                                                  : combo->currentText();
-        };
-        if (voice_.start(myName_, static_cast<quint16>(voicePort_->value()),
-                         selectedDevice(inputDevice_), selectedDevice(outputDevice_), error)) {
-        } else {
-            voiceLabel_->setText(error);
-        }
         sendFrame(&server_, chat::Message {chat::MsgType::FetchHistory, {}});
         refreshMembers();
     } else if ((message.type == chat::MsgType::Peer ||
@@ -456,6 +650,57 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         addPeer(message);
     } else if (message.type == chat::MsgType::PeerLeft && !message.fields.empty()) {
         removePeer(q(message.fields[0]));
+    } else if (message.type == chat::MsgType::VoicePort && message.fields.size() == 2) {
+        const QString peerName = q(message.fields[0]);
+        if (peers_.contains(peerName)) {
+            Peer& peer = peers_[peerName];
+            bool valid = false;
+            const uint port = q(message.fields[1]).toUInt(&valid);
+            if (valid && port <= 65535) {
+                peer.voicePort = static_cast<quint16>(port);
+                if (port == 0) {
+                    peer.voiceConnected = false;
+                    peer.speaking = false;
+                    peer.muted = false;
+                    peer.deafened = false;
+                } else if (voiceWanted_ && !usingRelay_ && port != 65535 && myName_ < peerName) {
+                    voice_.callPeer(peer.name, peer.host, peer.voicePort);
+                }
+                refreshMembers();
+            }
+        }
+    } else if (message.type == chat::MsgType::VoiceAudio && message.fields.size() == 2) {
+        const QString sender = q(message.fields[0]);
+        if (peers_.contains(sender) && voiceWanted_ &&
+            (usingRelay_ || peers_[sender].voicePort == 65535)) {
+            const std::string& bytes = message.fields[1];
+            relayAudio_.receive(sender, QByteArray(bytes.data(), static_cast<qsizetype>(bytes.size())));
+            if (bytes.size() == 640) {
+                double sum = 0;
+                for (std::size_t i = 0; i < bytes.size(); i += 2) {
+                    const auto lo = static_cast<unsigned char>(bytes[i]);
+                    const auto hi = static_cast<unsigned char>(bytes[i + 1]);
+                    const auto sample = static_cast<qint16>(lo | (hi << 8));
+                    sum += static_cast<double>(sample) * sample;
+                }
+                Peer& peer = peers_[sender];
+                const bool speaking = sum / 320 > 450.0 * 450.0;
+                peer.lastAudioMs = QDateTime::currentMSecsSinceEpoch();
+                if (peer.speaking != speaking) {
+                    peer.speaking = speaking;
+                    refreshMembers();
+                }
+            }
+        }
+    } else if (message.type == chat::MsgType::VoiceState && message.fields.size() == 3) {
+        const QString sender = q(message.fields[0]);
+        if (peers_.contains(sender)) {
+            peers_[sender].muted = message.fields[1] == "1";
+            peers_[sender].deafened = message.fields[2] == "1";
+            refreshMembers();
+        }
+    } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
+        appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
     } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
@@ -483,8 +728,10 @@ void MainWindow::addPeer(const chat::Message& message) {
     peers_[peer.name] = peer;
     refreshMembers();
     if (myName_ < peer.name) {
-        dialPeer(peer.name);
-        voice_.callPeer(peer.name, peer.host, peer.voicePort);
+        if (!usingRelay_) dialPeer(peer.name);
+        if (voiceWanted_ && !usingRelay_ && peer.voicePort != 65535) {
+            voice_.callPeer(peer.name, peer.host, peer.voicePort);
+        }
     }
 }
 
@@ -493,6 +740,7 @@ void MainWindow::removePeer(const QString& name) {
     if (peer.socket) {
         peer.socket->disconnectFromHost();
     }
+    relayAudio_.remove(name);
     refreshMembers();
     appendChat("Room", name + " left", {}, true);
 }
@@ -586,6 +834,7 @@ void MainWindow::sendMessage() {
     const std::string timestamp = std::to_string(QDateTime::currentSecsSinceEpoch());
     const chat::Message live {chat::MsgType::PeerChat,
                               {s(myName_), timestamp, s(body), s(messageColor_)}};
+    if (usingRelay_) sendFrame(&server_, live);
     for (const Peer& peer : std::as_const(peers_)) {
         if (peer.socket && peer.socket->state() == QAbstractSocket::ConnectedState) {
             sendFrame(peer.socket, live);
@@ -637,12 +886,28 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Users", "online: " + descriptions.join("; "), {}, true);
     } else if (name == "/clear") {
         transcript_->clear();
+    } else if (name == "/voice") {
+        if (!voiceWanted_) {
+            joinVoice();
+        }
+    } else if (name == "/leavevoice") {
+        if (voiceWanted_) {
+            leaveVoice();
+        }
     } else if (name == "/mute") {
+        if (!voiceWanted_) {
+            appendChat("Voice", "join voice first", {}, true);
+            return;
+        }
         if (!muted_ && !deafened_) {
             muteButton_->click();
         }
         appendChat("Voice", "microphone muted", {}, true);
     } else if (name == "/unmute") {
+        if (!voiceWanted_) {
+            appendChat("Voice", "join voice first", {}, true);
+            return;
+        }
         if (deafened_) {
             appendChat("Voice", "undeafen before unmuting", {}, true);
         } else {
@@ -652,11 +917,19 @@ void MainWindow::runCommand(const QString& command) {
             appendChat("Voice", "microphone unmuted", {}, true);
         }
     } else if (name == "/deafen") {
+        if (!voiceWanted_) {
+            appendChat("Voice", "join voice first", {}, true);
+            return;
+        }
         if (!deafened_) {
             deafenButton_->click();
         }
         appendChat("Voice", "incoming audio disabled", {}, true);
     } else if (name == "/undeafen") {
+        if (!voiceWanted_) {
+            appendChat("Voice", "join voice first", {}, true);
+            return;
+        }
         if (deafened_) {
             deafenButton_->click();
         }
@@ -668,6 +941,8 @@ void MainWindow::runCommand(const QString& command) {
     } else if (name == "/help") {
         appendChat("Help", "/users          list everyone online", {}, true);
         appendChat("Help", "/color <value>  set a candy shade or xterm color 0-255", {}, true);
+        appendChat("Help", "/voice          join the voice call", {}, true);
+        appendChat("Help", "/leavevoice     leave voice and stay in chat", {}, true);
         appendChat("Help", "/mute           mute your microphone", {}, true);
         appendChat("Help", "/unmute         unmute your microphone", {}, true);
         appendChat("Help", "/deafen         mute mic and incoming audio", {}, true);
@@ -693,7 +968,7 @@ void MainWindow::refreshMembers() {
     if (!myName_.isEmpty()) {
         const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :
                                   localSpeaking_ ? "  talking" :
-                                  voice_.running() ? "  mic" : "  text";
+                                  voiceWanted_ ? "  mic" : "  text";
         auto* self = new QListWidgetItem((localSpeaking_ && !muted_ ? "● " : "○ ") + myName_ +
                                          selfState, members_);
         self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
@@ -703,15 +978,16 @@ void MainWindow::refreshMembers() {
     names.sort(Qt::CaseInsensitive);
     for (const QString& name : names) {
         const Peer& peer = peers_[name];
-        const QString marker = peer.speaking && !peer.muted ? "● " :
-                               peer.voiceConnected ? "○ " : "· ";
-        const QString state = peer.deafened ? "  deafened" : peer.muted ? "  muted" :
+        const bool inVoice = peer.voicePort != 0;
+        const QString marker = peer.speaking && !peer.muted && inVoice ? "● " :
+                               inVoice ? "○ " : "· ";
+        const QString state = !inVoice ? "  text" : peer.deafened ? "  deafened" : peer.muted ? "  muted" :
                               peer.speaking ? "  talking" :
-                              peer.voiceConnected ? "  voice" : "  text";
+                              peer.voiceConnected ? "  voice" : "  in voice";
         auto* item = new QListWidgetItem(marker + name + state, members_);
-        item->setForeground(QColor(peer.deafened ? "#e05252" :
+        item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
                                   peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
-                                  peer.voiceConnected ? "#9dccca" : "#a7a9aa"));
+                                  "#9dccca"));
     }
 }
 
