@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -14,6 +15,7 @@
 #include "client/connection.h"
 #include "client/options.h"
 #include "client/peer_network.h"
+#include "common/recent_messages.h"
 
 namespace chat {
 
@@ -63,6 +65,8 @@ private:
     void showChat(const std::string& sender, std::int64_t timestamp, const std::string& body,
                   const std::string& color);
     void showHistory(const Message& message);
+    void loadSavedMessages();
+    void persistChat(const RecentMessage& message);
     bool remember(const std::string& sender, const std::string& timestamp, const std::string& body);
 
     // Session
@@ -109,6 +113,8 @@ private:
     int width_ = 0;
     int messageHeight_ = 0;
     std::vector<Entry> entries_;
+    std::unique_ptr<RecentMessages> recentMessages_;
+    bool savedMessagesLoaded_ = false;
     std::vector<Row> rows_;
     std::size_t scroll_ = 0;
     std::string text_;

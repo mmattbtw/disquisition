@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <exception>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -18,7 +20,7 @@
 namespace chat {
 namespace {
 
-constexpr std::size_t kMaxEntries = 1000;
+constexpr std::size_t kMaxEntries = 1200; // 1,000 restored chats plus local notices
 constexpr std::size_t kEntriesDroppedWhenFull = 200;
 constexpr std::size_t kMaxInputLength = 2000;
 constexpr std::size_t kMaxSeen = 2000;
@@ -93,6 +95,16 @@ Tui::~Tui() {
 
 int Tui::run(const ClientOptions& options) {
     options_ = options;
+    if (!options_.messageFile.empty()) {
+        try {
+            recentMessages_ = std::make_unique<RecentMessages>(options_.messageFile,
+                                                                 options_.maxSavedMessages);
+        }
+        catch (const std::exception& error) {
+            std::fprintf(stderr, "cannot enable local message saving: %s\n", error.what());
+            return 1;
+        }
+    }
     if (!startPeers()) {
         return 1;
     }
@@ -426,6 +438,7 @@ void Tui::showChat(const std::string& sender, std::int64_t timestamp, const std:
     const std::string stamp = std::to_string(timestamp);
     if (remember(sender, stamp, body)) {
         append(formatTime(stamp) + " " + sender + ": ", body, pairFor(color));
+        persistChat({timestamp, sender, body, color});
     }
 }
 
@@ -442,6 +455,40 @@ void Tui::showHistory(const Message& message) {
     const std::string& body = message.fields[2];
     if (remember(sender, timestamp, body)) {
         append(formatTime(timestamp) + " " + sender + ": ", body, pairFor(message.fields[3]));
+        persistChat({std::strtoll(timestamp.c_str(), nullptr, 10), sender, body,
+                     message.fields[3]});
+    }
+}
+
+void Tui::loadSavedMessages() {
+    if (!recentMessages_ || savedMessagesLoaded_) return;
+    try {
+        const auto saved = recentMessages_->recent();
+        savedMessagesLoaded_ = true;
+        if (saved.empty()) return;
+        appendSystem("recent messages from " + options_.messageFile);
+        for (const RecentMessage& message : saved) {
+            const std::string stamp = std::to_string(message.timestamp);
+            if (remember(message.sender, stamp, message.body)) {
+                append(formatTime(stamp) + " " + message.sender + ": ", message.body,
+                       pairFor(message.color));
+            }
+        }
+    } catch (const std::exception& error) {
+        appendSystem(std::string("cannot load saved messages: ") + error.what(), kColorBad);
+        recentMessages_.reset();
+        options_.messageFile.clear();
+    }
+}
+
+void Tui::persistChat(const RecentMessage& message) {
+    if (!recentMessages_) return;
+    try {
+        recentMessages_->append(message);
+    } catch (const std::exception& error) {
+        appendSystem(std::string("cannot save messages: ") + error.what(), kColorBad);
+        recentMessages_.reset();
+        options_.messageFile.clear();
     }
 }
 
@@ -521,6 +568,7 @@ void Tui::onSignedIn(const Message& message) {
     serverLost_ = false;
     setStatus("online", kColorGood);
     LOG_INFO("signed in as {}", name_);
+    loadSavedMessages();
     appendSystem("you are signed in as " + name_, kColorGood);
 
     if (!pending_.empty()) {
@@ -542,6 +590,7 @@ void Tui::deliver(const std::string& line) {
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
     append(formatTime(stamp) + " you: ", body, kColorSelf);
+    persistChat({timestamp, name_, body, color_});
 
     Connection* active = activeConnection_.load();
     if (relayActive_.load()) {
@@ -818,7 +867,34 @@ void Tui::runCommand(const std::string& command) {
     else if (name == "/clear") {
         entries_.clear();
         rows_.clear();
+        seen_.clear();
         scroll_ = 0;
+    }
+    else if (name == "/save") {
+        const std::string path = trim(command.substr(name.size()));
+        if (path.empty()) {
+            appendSystem(recentMessages_ ? "saving messages to " + options_.messageFile
+                                         : "local message saving is off");
+        }
+        else if (path == "off") {
+            recentMessages_.reset();
+            options_.messageFile.clear();
+            savedMessagesLoaded_ = false;
+            appendSystem("local message saving is off");
+        }
+        else {
+            try {
+                auto store = std::make_unique<RecentMessages>(path, options_.maxSavedMessages);
+                recentMessages_ = std::move(store);
+                options_.messageFile = path;
+                savedMessagesLoaded_ = false;
+                if (signedIn_) loadSavedMessages();
+                appendSystem("saving new chat messages to " + path, kColorGood);
+            }
+            catch (const std::exception& error) {
+                appendSystem(error.what(), kColorBad);
+            }
+        }
     }
     else if (name == "/users") {
         listUsers();
@@ -831,6 +907,8 @@ void Tui::runCommand(const std::string& command) {
         appendSystem("/users          list everyone online");
         appendSystem("/color <shade>  use a candy shade or xterm color 0-255");
         appendSystem("/clear          clear the message pane");
+        appendSystem("/save <path.db> start saving chat to SQLite");
+        appendSystem("/save off       stop saving chat locally");
         appendSystem("/quit, /exit    leave the chat");
     }
     else {

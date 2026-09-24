@@ -29,7 +29,6 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # Cygwin/MSYS2 whose strict C++ mode would otherwise hide them.
 add_compile_definitions(_GNU_SOURCE)
 
-if(BUILD_LEGACY_TARGETS)
 # Homebrew's SQLite is keg-only, so CMake can otherwise pick the older macOS SDK
 # copy. Use installed Homebrew dependencies when present, including on Intel Macs.
 if(APPLE)
@@ -47,7 +46,20 @@ if(APPLE)
       set(SQLite3_INCLUDE_DIR "${HOMEBREW_SQLITE_PREFIX}/include" CACHE PATH "SQLite3 headers" FORCE)
       set(SQLite3_LIBRARY "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib" CACHE FILEPATH "SQLite3 library" FORCE)
     endif()
+  endif()
+endif()
 
+find_package(SQLite3 3.24 REQUIRED)
+
+# CMake renamed this imported target at some point; support both spellings.
+if(TARGET SQLite3::SQLite3)
+  set(SQLITE_TARGET SQLite3::SQLite3)
+else()
+  set(SQLITE_TARGET SQLite::SQLite3)
+endif()
+
+if(BUILD_LEGACY_TARGETS)
+  if(APPLE AND HOMEBREW_EXECUTABLE)
     execute_process(
       COMMAND "${HOMEBREW_EXECUTABLE}" --prefix ncurses
       OUTPUT_VARIABLE HOMEBREW_NCURSES_PREFIX
@@ -61,20 +73,11 @@ if(APPLE)
       set(CURSES_INCLUDE_PATH "${HOMEBREW_NCURSES_PREFIX}/include" CACHE PATH "ncurses headers" FORCE)
     endif()
   endif()
-endif()
 
-find_package(Threads REQUIRED)
-find_package(SQLite3 3.24 REQUIRED)
+  find_package(Threads REQUIRED)
 
-# CMake renamed this imported target at some point; support both spellings.
-if(TARGET SQLite3::SQLite3)
-  set(SQLITE_TARGET SQLite3::SQLite3)
-else()
-  set(SQLITE_TARGET SQLite::SQLite3)
-endif()
-
-set(CURSES_NEED_NCURSES TRUE)
-find_package(Curses REQUIRED)
+  set(CURSES_NEED_NCURSES TRUE)
+  find_package(Curses REQUIRED)
 endif()
 
 # Wire protocol and socket helpers shared by every program.
@@ -85,6 +88,10 @@ add_library(chat_protocol STATIC
   src/util/log.cpp)
 target_include_directories(chat_protocol PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(chat_protocol PUBLIC spdlog::spdlog)
+
+add_library(chat_recent_messages STATIC src/common/recent_messages.cpp)
+target_include_directories(chat_recent_messages PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(chat_recent_messages PRIVATE ${SQLITE_TARGET})
 
 if(BUILD_DESKTOP_APP)
   if(APPLE)
@@ -105,7 +112,7 @@ if(BUILD_DESKTOP_APP)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol Qt6::Widgets Qt6::Network Qt6::Multimedia)
+      chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia)
     if(APPLE)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
@@ -154,7 +161,7 @@ add_executable(client
   src/client/text_wrap.cpp
   src/client/tui.cpp)
 target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(client PRIVATE chat_network ${CURSES_LIBRARIES})
+target_link_libraries(client PRIVATE chat_network chat_recent_messages ${CURSES_LIBRARIES})
 
 add_executable(relay
   src/relay/main.cpp
@@ -167,6 +174,10 @@ if(BUILD_TESTING)
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
+
+  add_executable(recent_messages_test test/recent_messages_test.cpp)
+  target_link_libraries(recent_messages_test PRIVATE chat_recent_messages ${SQLITE_TARGET})
+  add_test(NAME recent_messages_test COMMAND recent_messages_test)
 
   add_executable(connection_test test/connection_test.cpp)
   target_link_libraries(connection_test PRIVATE chat_network)

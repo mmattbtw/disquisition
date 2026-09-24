@@ -41,7 +41,8 @@ cmake --build build --target disquisition-desktop
 
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
-Run the server on Linux or macOS, then build the Windows app with Qt 6 and:
+Install SQLite 3.24 or newer and its development headers alongside Qt 6. Run
+the server on Linux or macOS, then build the Windows app with:
 
 ```powershell
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
@@ -155,6 +156,22 @@ After sign-in, the server sends the client a roster containing each user's host 
 
 The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
 
+Local saving is off by default. In the terminal client, pass
+`--save-messages <path.db>` or enter a file path during interactive setup. You
+can also enter `/save <path.db>` while connected to start saving, or `/save off`
+to stop. Pass `--max-saved-messages <count>` to retain only that many messages.
+In the desktop app, open Preferences (or use `/save`), check "Save chat messages
+locally," choose a SQLite file, and optionally enter a maximum. Leaving the
+maximum blank keeps every message. Both clients append each new chat message
+to the file as it arrives or is sent. They reopen an existing database and
+show its 1,000 most recent messages when you connect. The stored history can
+grow beyond what the UI displays. `/clear` clears the local message pane but
+does not delete saved messages.
+
+The SQLite `saved_messages` table has `timestamp` (Unix seconds), `sender`,
+`body`, and `color` columns. The clients do not save system notices or send
+saved messages to the server.
+
 The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery stops.
 
 ## Use a relay
@@ -260,6 +277,7 @@ The terminal client writes nothing to the console while its interface is open, s
 | `/users` | List users and known connection routes |
 | `/color <value>` | Set a named shade or an xterm-256 index |
 | `/clear` | Clear the local message pane |
+| `/save <path.db>`, `/save off` | Start or stop continuous local message saving |
 | `/help` | Show commands |
 | `/quit`, `/exit` | Quit |
 
