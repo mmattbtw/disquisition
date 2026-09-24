@@ -2,8 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <optional>
 #include <string>
+#include <vector>
+
+struct sqlite3;
 
 namespace chat {
 
@@ -14,22 +17,26 @@ struct RecentMessage {
     std::string color;
 };
 
-// Chat messages seen in this client session. Nothing is written until save()
-// is called. System notices and connection details are not kept here.
+// Each append is committed before returning. An absent maximum keeps every
+// message in the database; recent() only limits what the UI loads at once.
 class RecentMessages {
 public:
-    static constexpr std::size_t limit = 1000;
+    static constexpr std::size_t displayLimit = 1000;
 
-    void add(RecentMessage message);
-    void clear();
-    std::size_t size() const;
+    explicit RecentMessages(const std::string& path,
+                            std::optional<std::int64_t> maximum = std::nullopt);
+    ~RecentMessages();
+    RecentMessages(const RecentMessages&) = delete;
+    RecentMessages& operator=(const RecentMessages&) = delete;
 
-    // Replaces the saved_messages table in the chosen SQLite file with this
-    // snapshot. Throws std::runtime_error on failure.
-    void save(const std::string& path) const;
+    void append(const RecentMessage& message);
+    std::vector<RecentMessage> recent(std::size_t limit = displayLimit) const;
 
 private:
-    std::deque<RecentMessage> messages_;
+    void prune();
+
+    sqlite3* db_ = nullptr;
+    std::optional<std::int64_t> maximum_;
 };
 
 } // namespace chat

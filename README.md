@@ -156,15 +156,21 @@ After sign-in, the server sends the client a roster containing each user's host 
 
 The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
 
-Both clients keep up to 1,000 chat messages in memory during the current session.
-To save them locally, use `/save <path.db>` in the terminal client, or choose
-Disquisition > Save recent messages in the desktop app. The desktop composer
-also accepts `/save` and opens the file picker. The SQLite file has a
-`saved_messages` table with `timestamp` (Unix seconds), `sender`, `body`, and
-`color` columns. Saving to the same file again replaces that table's contents
-with the current snapshot. `/clear` removes messages from the current snapshot.
-No file is created until you choose to save, and the clients do not load saved
-messages when they start.
+Local saving is off by default. In the terminal client, pass
+`--save-messages <path.db>` or enter a file path during interactive setup. You
+can also enter `/save <path.db>` while connected to start saving, or `/save off`
+to stop. Pass `--max-saved-messages <count>` to retain only that many messages.
+In the desktop app, open Preferences (or use `/save`), check "Save chat messages
+locally," choose a SQLite file, and optionally enter a maximum. Leaving the
+maximum blank keeps every message. Both clients append each new chat message
+to the file as it arrives or is sent. They reopen an existing database and
+show its 1,000 most recent messages when you connect. The stored history can
+grow beyond what the UI displays. `/clear` clears the local message pane but
+does not delete saved messages.
+
+The SQLite `saved_messages` table has `timestamp` (Unix seconds), `sender`,
+`body`, and `color` columns. The clients do not save system notices or send
+saved messages to the server.
 
 The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery stops.
 
@@ -271,7 +277,7 @@ The terminal client writes nothing to the console while its interface is open, s
 | `/users` | List users and known connection routes |
 | `/color <value>` | Set a named shade or an xterm-256 index |
 | `/clear` | Clear the local message pane |
-| `/save <path.db>` | Save up to 1,000 recent chat messages in a local SQLite file |
+| `/save <path.db>`, `/save off` | Start or stop continuous local message saving |
 | `/help` | Show commands |
 | `/quit`, `/exit` | Quit |
 

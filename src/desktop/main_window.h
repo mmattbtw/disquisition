@@ -6,6 +6,9 @@
 #include <QTcpSocket>
 #include <QTimer>
 
+#include <memory>
+#include <optional>
+
 #include "common/protocol.h"
 #include "common/recent_messages.h"
 #include "desktop/voice_engine.h"
@@ -58,7 +61,10 @@ private:
     void sendFrame(QTcpSocket* socket, const chat::Message& message);
     void sendVoiceState();
     void appendChat(const QString& sender, const QString& body,
-                    const QString& messageColor = "mint", bool system = false);
+                    const QString& messageColor = "mint", bool system = false,
+                    qint64 timestamp = -1);
+    void openSavedMessages();
+    void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
     void refreshAudioDevices();
     void startJoining();
@@ -66,7 +72,6 @@ private:
     void leaveVoice();
     void restoreVoiceState();
     void showPreferences();
-    void saveRecentMessages();
     void startTransport(bool relay);
     void handleTransportClosed();
     void retryConnection();
@@ -81,7 +86,7 @@ private:
     QPushButton* muteButton_ = nullptr;
     QPushButton* deafenButton_ = nullptr;
     QTextBrowser* transcript_ = nullptr;
-    chat::RecentMessages recentMessages_;
+    std::unique_ptr<chat::RecentMessages> recentMessages_;
     QListWidget* members_ = nullptr;
     QLineEdit* composer_ = nullptr;
     QPushButton* sendButton_ = nullptr;
@@ -117,6 +122,11 @@ private:
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
     QString messageColor_ = "mint";
+    bool saveMessages_ = false;
+    bool savedMessagesLoaded_ = false;
+    bool savingFailed_ = false;
+    QString messageFile_;
+    std::optional<std::int64_t> maxSavedMessages_;
     bool localSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
