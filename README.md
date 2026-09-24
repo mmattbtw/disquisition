@@ -41,7 +41,8 @@ cmake --build build --target disquisition-desktop
 
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
-Run the server on Linux or macOS, then build the Windows app with Qt 6 and:
+Install SQLite 3.24 or newer and its development headers alongside Qt 6. Run
+the server on Linux or macOS, then build the Windows app with:
 
 ```powershell
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
@@ -155,6 +156,16 @@ After sign-in, the server sends the client a roster containing each user's host 
 
 The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
 
+Both clients keep up to 1,000 chat messages in memory during the current session.
+To save them locally, use `/save <path.db>` in the terminal client, or choose
+Disquisition > Save recent messages in the desktop app. The desktop composer
+also accepts `/save` and opens the file picker. The SQLite file has a
+`saved_messages` table with `timestamp` (Unix seconds), `sender`, `body`, and
+`color` columns. Saving to the same file again replaces that table's contents
+with the current snapshot. `/clear` removes messages from the current snapshot.
+No file is created until you choose to save, and the clients do not load saved
+messages when they start.
+
 The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery stops.
 
 ## Use a relay
@@ -260,6 +271,7 @@ The terminal client writes nothing to the console while its interface is open, s
 | `/users` | List users and known connection routes |
 | `/color <value>` | Set a named shade or an xterm-256 index |
 | `/clear` | Clear the local message pane |
+| `/save <path.db>` | Save up to 1,000 recent chat messages in a local SQLite file |
 | `/help` | Show commands |
 | `/quit`, `/exit` | Quit |
 

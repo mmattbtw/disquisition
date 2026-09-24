@@ -7,6 +7,7 @@
 #include <QTimer>
 
 #include "common/protocol.h"
+#include "common/recent_messages.h"
 #include "desktop/voice_engine.h"
 #include "desktop/relay_audio.h"
 
@@ -65,6 +66,7 @@ private:
     void leaveVoice();
     void restoreVoiceState();
     void showPreferences();
+    void saveRecentMessages();
     void startTransport(bool relay);
     void handleTransportClosed();
     void retryConnection();
@@ -79,6 +81,7 @@ private:
     QPushButton* muteButton_ = nullptr;
     QPushButton* deafenButton_ = nullptr;
     QTextBrowser* transcript_ = nullptr;
+    chat::RecentMessages recentMessages_;
     QListWidget* members_ = nullptr;
     QLineEdit* composer_ = nullptr;
     QPushButton* sendButton_ = nullptr;

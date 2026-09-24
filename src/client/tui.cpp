@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <exception>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -426,6 +428,7 @@ void Tui::showChat(const std::string& sender, std::int64_t timestamp, const std:
     const std::string stamp = std::to_string(timestamp);
     if (remember(sender, stamp, body)) {
         append(formatTime(stamp) + " " + sender + ": ", body, pairFor(color));
+        recentMessages_.add({timestamp, sender, body, color});
     }
 }
 
@@ -442,6 +445,8 @@ void Tui::showHistory(const Message& message) {
     const std::string& body = message.fields[2];
     if (remember(sender, timestamp, body)) {
         append(formatTime(timestamp) + " " + sender + ": ", body, pairFor(message.fields[3]));
+        recentMessages_.add({std::strtoll(timestamp.c_str(), nullptr, 10), sender, body,
+                             message.fields[3]});
     }
 }
 
@@ -542,6 +547,7 @@ void Tui::deliver(const std::string& line) {
     const std::string stamp = std::to_string(timestamp);
     remember(name_, stamp, body);
     append(formatTime(stamp) + " you: ", body, kColorSelf);
+    recentMessages_.add({timestamp, name_, body, color_});
 
     Connection* active = activeConnection_.load();
     if (relayActive_.load()) {
@@ -818,7 +824,27 @@ void Tui::runCommand(const std::string& command) {
     else if (name == "/clear") {
         entries_.clear();
         rows_.clear();
+        recentMessages_.clear();
         scroll_ = 0;
+    }
+    else if (name == "/save") {
+        const std::string path = trim(command.substr(name.size()));
+        if (path.empty()) {
+            appendSystem("usage: /save <path.db>", kColorBad);
+        }
+        else if (recentMessages_.size() == 0) {
+            appendSystem("no recent chat messages to save", kColorBad);
+        }
+        else {
+            try {
+                recentMessages_.save(path);
+                appendSystem("saved " + std::to_string(recentMessages_.size()) +
+                             " chat messages to " + path, kColorGood);
+            }
+            catch (const std::exception& error) {
+                appendSystem(error.what(), kColorBad);
+            }
+        }
     }
     else if (name == "/users") {
         listUsers();
@@ -831,6 +857,7 @@ void Tui::runCommand(const std::string& command) {
         appendSystem("/users          list everyone online");
         appendSystem("/color <shade>  use a candy shade or xterm color 0-255");
         appendSystem("/clear          clear the message pane");
+        appendSystem("/save <path.db> save recent chat messages to SQLite");
         appendSystem("/quit, /exit    leave the chat");
     }
     else {

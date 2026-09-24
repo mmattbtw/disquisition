@@ -11,6 +11,7 @@
 #include <QAudioDevice>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QLabel>
@@ -32,6 +33,8 @@
 #include <QUdpSocket>
 #include <QVBoxLayout>
 
+#include <exception>
+#include <string>
 #include <utility>
 
 #include "desktop/audio_permission.h"
@@ -345,6 +348,8 @@ void MainWindow::buildUi() {
     preferencesAction->setMenuRole(QAction::PreferencesRole);
     preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
+    auto* saveAction = appMenu->addAction("Save recent messages…");
+    connect(saveAction, &QAction::triggered, this, &MainWindow::saveRecentMessages);
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -611,6 +616,23 @@ void MainWindow::showPreferences() {
     settings.setValue("relay/leakMyIp", leakMyIp_);
 }
 
+void MainWindow::saveRecentMessages() {
+    if (recentMessages_.size() == 0) {
+        QMessageBox::information(this, "Save recent messages", "No recent chat messages to save.");
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, "Save recent messages",
+                                                      "messages.db", "SQLite database (*.db)");
+    if (path.isEmpty()) return;
+    try {
+        recentMessages_.save(s(path));
+        appendChat("Saved", QString::number(recentMessages_.size()) +
+                   " chat messages to " + path, {}, true);
+    } catch (const std::exception& error) {
+        QMessageBox::warning(this, "Save recent messages", QString::fromUtf8(error.what()));
+    }
+}
+
 void MainWindow::connectToServer() {
     if (name_->text().trimmed().isEmpty()) {
         name_->setProperty("invalid", true);
@@ -847,9 +869,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         }
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        recentMessages_.add({q(message.fields[1]).toLongLong(), message.fields[0],
+                             message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
+        recentMessages_.add({q(message.fields[0]).toLongLong(), message.fields[1],
+                             message.fields[2],
+                             message.fields.size() >= 4 ? message.fields[3] : "pink"});
     } else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
         appendChat("Server", q(message.fields[0]), {}, true);
     }
@@ -955,6 +982,8 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
         }
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        recentMessages_.add({q(message.fields[1]).toLongLong(), message.fields[0],
+                             message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() >= 3) {
         const QString name = q(message.fields[0]);
         if (peers_.contains(name) && peers_[name].socket == socket &&
@@ -977,7 +1006,8 @@ void MainWindow::sendMessage() {
         composer_->clear();
         return;
     }
-    const std::string timestamp = std::to_string(QDateTime::currentSecsSinceEpoch());
+    const qint64 timestampSeconds = QDateTime::currentSecsSinceEpoch();
+    const std::string timestamp = std::to_string(timestampSeconds);
     const chat::Message live {chat::MsgType::PeerChat,
                               {s(myName_), timestamp, s(body), s(messageColor_)}};
     if (usingRelay_) sendFrame(&server_, live);
@@ -989,6 +1019,8 @@ void MainWindow::sendMessage() {
     sendFrame(&server_, chat::Message {chat::MsgType::Store,
                                        {timestamp, s(body), s(messageColor_)}});
     appendChat(myName_, body, "231");
+    recentMessages_.add({timestampSeconds, s(myName_), s(body),
+                         s(messageColor_)});
     composer_->clear();
 }
 
@@ -1032,6 +1064,9 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Users", "online: " + descriptions.join("; "), {}, true);
     } else if (name == "/clear") {
         transcript_->clear();
+        recentMessages_.clear();
+    } else if (name == "/save") {
+        saveRecentMessages();
     } else if (name == "/voice") {
         if (!voiceWanted_) {
             joinVoice();
@@ -1094,6 +1129,7 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Help", "/deafen         mute mic and incoming audio", {}, true);
         appendChat("Help", "/undeafen       restore incoming audio", {}, true);
         appendChat("Help", "/clear          clear the local message pane", {}, true);
+        appendChat("Help", "/save           save recent chat messages to SQLite", {}, true);
         appendChat("Help", "/leave          leave this room", {}, true);
         appendChat("Help", "/quit, /exit    close this app window", {}, true);
     } else {

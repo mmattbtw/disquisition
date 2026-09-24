@@ -14,6 +14,7 @@
 #include "client/connection.h"
 #include "client/options.h"
 #include "client/peer_network.h"
+#include "common/recent_messages.h"
 
 namespace chat {
 
@@ -109,6 +110,7 @@ private:
     int width_ = 0;
     int messageHeight_ = 0;
     std::vector<Entry> entries_;
+    RecentMessages recentMessages_;
     std::vector<Row> rows_;
     std::size_t scroll_ = 0;
     std::string text_;
