@@ -75,7 +75,6 @@ private:
     void deliver(const std::string& line);
     void checkConnectionLost();
     void resumeAfterReconnect();
-    void requestHistoryWhenSettled();
     void drainServer();
     void drainPeers();
 
@@ -131,7 +130,6 @@ private:
     bool signedIn_ = false;
     bool loginSent_ = false;
     bool historyOpen_ = false;
-    bool historyPending_ = false;
     bool serverLost_ = false;
     // The current connection has completed a login; until then nothing may
     // be stored or fetched, even if the socket is up.

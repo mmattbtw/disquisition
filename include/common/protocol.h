@@ -11,16 +11,16 @@
 //
 //     [u32 payload size][u8 type]([u32 field length][field bytes])*
 //
-// All integers are big-endian. The server handles sign-in, discovery and
-// history; live chat travels directly between peers (or through a relay) and
+// All integers are big-endian. The server handles sign-in and discovery;
+// live chat travels directly between peers (or through a relay) and
 // never passes through the server.
 namespace chat {
 
 enum class MsgType : std::uint8_t {
     // Client -> server
     Login = 1,         // [name, peer port, advertised host (may be empty)]
-    Store = 10,        // [timestamp, body, color]  a copy of chat already sent live
-    FetchHistory = 11, // []
+    Store = 10,        // [timestamp, body, color]  legacy storage request, discarded
+    FetchHistory = 11, // [] legacy request, returns only HistoryEnd
 
     // Server -> client
     LoginOk = 3,     // [assigned name, welcome text]

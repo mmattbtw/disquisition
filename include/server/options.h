@@ -9,7 +9,6 @@ namespace chat {
 struct ServerOptions {
     std::uint16_t port = 9000;
     std::string databasePath = "chat.db";
-    std::size_t historyLimit = 50;
     std::size_t maxClients = 128;
 };
 

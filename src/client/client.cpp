@@ -105,9 +105,6 @@ void Client::sendMessage(std::string message) {
         peers_.sendChat(timestamp, body, color);
     }
 
-    if (!server_.send(chat::Message{chat::MsgType::Store, {stamp, body, color}})) {
-        throw std::runtime_error("message was sent, but history could not be saved");
-    }
 }
 
 void Client::setColor(int color) {

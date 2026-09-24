@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "common/net.h"
+#include "server/database.h"
 #include "util/log.h"
 
 namespace chat {
@@ -70,7 +71,7 @@ int runServer(const ServerOptions& options) {
     logToConsole("server");
     try {
         Database database(options.databasePath);
-        Server server(options, database);
+        Server server(options);
         server.listen();
         server.run();
         return 0;
@@ -81,8 +82,7 @@ int runServer(const ServerOptions& options) {
     }
 }
 
-Server::Server(ServerOptions options, Database& database) :
-    options_(std::move(options)), database_(database) {
+Server::Server(ServerOptions options) : options_(std::move(options)) {
 }
 
 Server::~Server() {
@@ -333,8 +333,7 @@ void Server::handleStore(Client& client, const Message& message) {
         return;
     }
 
-    database_.add(timestamp, client.name, body, color);
-    LOG_DEBUG("{} (stored): {}", client.name, body);
+    // Accept legacy storage frames without retaining or logging their contents.
 }
 
 void Server::handleFetchHistory(Client& client) {
@@ -342,11 +341,7 @@ void Server::handleFetchHistory(Client& client) {
         reject(client, "sign in first");
         return;
     }
-    for (const StoredMessage& stored : database_.recent(options_.historyLimit)) {
-        send(client,
-             Message{MsgType::History,
-                     {std::to_string(stored.timestamp), stored.sender, stored.body, stored.color}});
-    }
+    // Older clients still request history after signing in.
     send(client, Message{MsgType::HistoryEnd, {}});
 }
 

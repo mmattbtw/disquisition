@@ -133,7 +133,6 @@ int Tui::run(const ClientOptions& options) {
         drainServer();
         drainPeers();
         resumeAfterReconnect();
-        requestHistoryWhenSettled();
 
         if (dirty_) {
             draw();
@@ -518,7 +517,6 @@ void Tui::onSignedIn(const Message& message) {
         name_ = message.fields[0];
     }
     peers_.setMyName(name_);
-    historyPending_ = true;
     serverReady_ = true;
     serverLost_ = false;
     setStatus("online", kColorGood);
@@ -552,12 +550,9 @@ void Tui::deliver(const std::string& line) {
     else {
         peers_.sendChat(timestamp, body, color_);
     }
-    if (serverReady_ && !active->failed()) {
-        active->send(Message{MsgType::Store, {stamp, body, color_}});
-    }
 }
 
-// Losing the server costs discovery and history only: peer links keep
+// Losing the server costs discovery only: peer links keep
 // working and the monitor thread keeps reconnecting.
 void Tui::checkConnectionLost() {
     Connection* active = activeConnection_.load();
@@ -597,15 +592,6 @@ void Tui::resumeAfterReconnect() {
         signIn();
     }
     dirty_ = true;
-}
-
-// Waiting for the mesh to settle means anything a reachable peer stored is
-// already in the history we fetch. Messages seen twice are deduplicated.
-void Tui::requestHistoryWhenSettled() {
-    if (historyPending_ && serverReady_ && peers_.settled()) {
-        historyPending_ = false;
-        activeConnection_.load()->send(Message{MsgType::FetchHistory, {}});
-    }
 }
 
 void Tui::drainServer() {

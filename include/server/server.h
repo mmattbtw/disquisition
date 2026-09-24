@@ -7,19 +7,18 @@
 #include <vector>
 
 #include "common/protocol.h"
-#include "server/database.h"
 #include "server/options.h"
 
 namespace chat {
 
-// Opens the database and serves until SIGINT or SIGTERM. Returns an exit code.
+// Serves until SIGINT or SIGTERM. Returns an exit code.
 int runServer(const ServerOptions& options);
 
-// The sign-in, discovery and history server. A single poll() loop owns every
-// socket and the database, so nothing needs locking.
+// The sign-in and discovery server. A single poll() loop owns every
+// socket, so nothing needs locking.
 class Server {
 public:
-    Server(ServerOptions options, Database& database);
+    explicit Server(ServerOptions options);
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
     ~Server();
@@ -65,7 +64,6 @@ private:
     static std::string describe(const Client& client); // for log lines
 
     ServerOptions options_;
-    Database& database_;
     int listenFd_ = -1;
     std::uint16_t boundPort_ = 0;
     std::vector<Client> clients_;
