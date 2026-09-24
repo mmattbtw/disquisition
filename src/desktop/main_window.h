@@ -97,6 +97,7 @@ private:
     QString serverHost_ = "127.0.0.1";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
+    bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
     QString relayHost_;
     quint16 relayPort_ = 3333;

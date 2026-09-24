@@ -63,6 +63,9 @@ voice SIP port in Preferences for each client running on the same machine. If
 peers cannot directly reach the address seen by the server, enter a reachable
 DNS name or IP as the public host and forward both the automatically chosen TCP
 chat port and the chosen SIP/RTP ports when connecting directly.
+For clients on the same LAN, select "Advertise local IP automatically" in
+Preferences to announce the local IPv4 address. This takes precedence over the
+saved public host while selected. It also applies during direct relay fallback.
 
 To keep your IP hidden from other users, set the relay address and port in
 Preferences before joining. The desktop app then connects only to the relay;
@@ -133,6 +136,8 @@ Open another terminal for each client:
 ```
 
 Each direct client opens a peer listener on an automatically selected port. On a LAN, the server announces the source address it sees. Across routed networks, pass a reachable address with `--advertise` and forward the chosen `--p2p-port` through the firewall or router.
+
+Pass `--local` to announce the client's local IPv4 address automatically. This is useful when the server sees a different address, such as when it runs on the same machine. The selected address appears in the client's greeting. Use `--advertise` instead when peers need a public address. With `--relay`, `--local` applies only during direct fallback enabled by `--leak-my-ip`.
 
 ```sh
 ./build/client \
@@ -223,6 +228,7 @@ Passing port `0` asks the operating system to select a free server port.
 -n, --name <name>          Name to request at sign-in
     --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
     --advertise <host>     Reachable address announced to peers
+    --local                Automatically announce your local IPv4 address
     --relay <host[:port]>  Use a relay. Default relay port: 3333
     --leak-my-ip           Fall back to direct mode if the relay is unavailable
     --log <file>           Write a debug log to this file. Default: no log
