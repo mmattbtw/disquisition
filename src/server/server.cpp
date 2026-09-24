@@ -313,6 +313,15 @@ bool Server::handleFrames(Connection& connection) {
             case MsgType::FetchHistory:
                 handleFetchHistory(connection);
                 break;
+            case MsgType::VoicePort:
+                handleVoicePort(connection, message);
+                break;
+            case MsgType::VoiceAudio:
+                handleVoiceAudio(connection, message);
+                break;
+            case MsgType::VoiceState:
+                handleVoiceState(connection, message);
+                break;
             default:
                 reject(connection, "unexpected message");
                 break;
@@ -416,6 +425,53 @@ void Server::handleFetchHistory(Connection& connection) {
         return;
     }
     sendHistory(connection);
+}
+
+void Server::handleVoicePort(Connection& connection, const Message& message) {
+    if (!connection.authenticated) {
+        reject(connection, "sign in first");
+        return;
+    }
+    if (message.fields.size() != 1) {
+        reject(connection, "voice update needs a port");
+        return;
+    }
+    std::int64_t port = 0;
+    if (!parseInt64(message.fields[0], port) || port < 0 || port > 65535) {
+        reject(connection, "invalid voice port");
+        return;
+    }
+    if (connection.voicePort == static_cast<std::uint16_t>(port)) {
+        return;
+    }
+    connection.voicePort = static_cast<std::uint16_t>(port);
+    broadcast(Message {MsgType::VoicePort,
+                       {connection.name, std::to_string(connection.voicePort)}}, &connection);
+}
+
+void Server::handleVoiceAudio(Connection& connection, const Message& message) {
+    if (!connection.authenticated || connection.voicePort == 0 ||
+        message.fields.size() != 1 || message.fields[0].size() != 640) {
+        return;
+    }
+    const Message audio {MsgType::VoiceAudio, {connection.name, message.fields[0]}};
+    for (Connection& recipient : connections_) {
+        if (&recipient != &connection && recipient.authenticated && recipient.voicePort != 0 &&
+            recipient.out.size() < 256 * 1024) {
+            send(recipient, audio);
+        }
+    }
+}
+
+void Server::handleVoiceState(Connection& connection, const Message& message) {
+    if (!connection.authenticated || message.fields.size() != 3 ||
+        message.fields[1].size() != 1 || message.fields[2].size() != 1 ||
+        (message.fields[1] != "0" && message.fields[1] != "1") ||
+        (message.fields[2] != "0" && message.fields[2] != "1")) {
+        return;
+    }
+    broadcast(Message {MsgType::VoiceState,
+                       {connection.name, message.fields[1], message.fields[2]}}, &connection);
 }
 
 void Server::sendHistory(Connection& connection) {

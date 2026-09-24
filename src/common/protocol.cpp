@@ -125,6 +125,8 @@ const char* typeName(MsgType type) {
         case MsgType::HelloOk: return "HelloOk";
         case MsgType::PeerChat: return "PeerChat";
         case MsgType::VoiceState: return "VoiceState";
+        case MsgType::VoicePort: return "VoicePort";
+        case MsgType::VoiceAudio: return "VoiceAudio";
     }
     return "Unknown";
 }

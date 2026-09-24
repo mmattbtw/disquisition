@@ -36,6 +36,8 @@ enum class MsgType : std::uint8_t {
     // makes the message appear when another client requests chat history.
     Store = 10,        // [timestamp, body, color]
     FetchHistory = 11, // []
+    VoicePort = 19,    // client: [SIP port, 0 to leave]; server: [name, SIP port]
+    VoiceAudio = 20,   // client: [16 kHz mono signed-16 PCM]; server: [sender, PCM]
 
     // Messages the central server sends to a client.
     LoginOk = 3,    // [assigned name, welcome text]

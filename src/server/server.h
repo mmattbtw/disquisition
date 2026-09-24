@@ -55,6 +55,9 @@ private:
     void handleLogin(Connection& connection, const Message& message);
     void handleStore(Connection& connection, const Message& message);
     void handleFetchHistory(Connection& connection);
+    void handleVoicePort(Connection& connection, const Message& message);
+    void handleVoiceAudio(Connection& connection, const Message& message);
+    void handleVoiceState(Connection& connection, const Message& message);
     void sendHistory(Connection& connection);
     void reject(Connection& connection, const std::string& reason);
 
