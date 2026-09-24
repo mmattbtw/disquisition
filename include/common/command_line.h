@@ -5,9 +5,6 @@
 #include <string_view>
 
 namespace chat {
-
-// Walks argv for the option parsers. Errors print a message and exit, so a
-// parser is just a flat if/else over the options.
 class CommandLine {
 public:
     CommandLine(int argc, char** argv, const char* usage);
