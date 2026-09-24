@@ -21,6 +21,8 @@ enum class MsgType : std::uint8_t {
     Login = 1,         // [name, peer port, advertised host (may be empty)]
     Store = 10,        // [timestamp, body, color]  legacy storage request, discarded
     FetchHistory = 11, // [] legacy request, returns only HistoryEnd
+    VoicePort = 19,    // client: [SIP port, 0 to leave]; server: [name, SIP port]
+    VoiceAudio = 20,   // client: [16 kHz mono signed-16 PCM]; server: [sender, PCM]
 
     // Server -> client
     LoginOk = 3,     // [assigned name, welcome text]
@@ -29,8 +31,8 @@ enum class MsgType : std::uint8_t {
     System = 7,      // [text]
     Users = 8,       // [name]*
     HistoryEnd = 9,  // []
-    Peer = 12,       // [name, host, port, advertised 0|1]  sent once per online peer
-    PeerJoined = 13, // [name, host, port, advertised 0|1]
+    Peer = 12,       // [name, host, port, advertised 0|1, voice SIP port]
+    PeerJoined = 13, // [name, host, port, advertised 0|1, voice SIP port]
     PeerLeft = 14,   // [name]
 
     // Peer <-> peer. A relay hosts several users on one port, so Hello names
@@ -38,6 +40,9 @@ enum class MsgType : std::uint8_t {
     Hello = 15,    // [sender, target]
     HelloOk = 17,  // [target]
     PeerChat = 16, // [sender, timestamp, body, color]
+    VoiceState = 18, // [sender, muted 0|1, deafened 0|1]
+    RelayProbe = 21, // client to relay: [] health check without signing in
+    RelayReady = 22, // relay to client: [] server connection is available
 };
 
 struct Message {
@@ -99,6 +104,7 @@ struct PeerAddress {
     std::string host;
     std::uint16_t port = 0;
     bool advertised = false; // the peer can accept connections from the internet
+    std::uint16_t voicePort = 0;
 };
 
 // Reads a Peer or PeerJoined frame.

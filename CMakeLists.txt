@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(disquisition LANGUAGES CXX)
 
+option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
+if(WIN32)
+  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
+else()
+  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" ON)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -22,6 +29,7 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 # Cygwin/MSYS2 whose strict C++ mode would otherwise hide them.
 add_compile_definitions(_GNU_SOURCE)
 
+if(BUILD_LEGACY_TARGETS)
 # Homebrew's SQLite is keg-only, so CMake can otherwise pick the older macOS SDK
 # copy. Use installed Homebrew dependencies when present, including on Intel Macs.
 if(APPLE)
@@ -67,6 +75,7 @@ endif()
 
 set(CURSES_NEED_NCURSES TRUE)
 find_package(Curses REQUIRED)
+endif()
 
 # Wire protocol and socket helpers shared by every program.
 add_library(chat_protocol STATIC
@@ -77,6 +86,47 @@ add_library(chat_protocol STATIC
 target_include_directories(chat_protocol PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(chat_protocol PUBLIC spdlog::spdlog)
 
+if(BUILD_DESKTOP_APP)
+  if(APPLE)
+    enable_language(OBJCXX)
+  endif()
+  find_package(Qt6 6.5 COMPONENTS Widgets Network Multimedia QUIET)
+  if(Qt6_FOUND)
+    add_executable(disquisition-desktop MACOSX_BUNDLE
+      src/desktop/audio_permission.h
+      src/desktop/audio_permission.cpp
+      src/desktop/main.cpp
+      src/desktop/main_window.cpp
+      src/desktop/main_window.h
+      src/desktop/relay_audio.cpp
+      src/desktop/relay_audio.h
+      src/desktop/voice_engine.cpp
+      src/desktop/voice_engine.h)
+    set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
+    target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(disquisition-desktop PRIVATE
+      chat_protocol Qt6::Widgets Qt6::Network Qt6::Multimedia)
+    if(APPLE)
+      set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
+      find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
+      find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+      target_link_libraries(disquisition-desktop PRIVATE
+        ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK})
+      set_target_properties(disquisition-desktop PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "Disquisition"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+      add_custom_command(TARGET disquisition-desktop POST_BUILD
+        COMMAND codesign --force --deep --sign -
+          "$<TARGET_BUNDLE_DIR:disquisition-desktop>"
+        COMMENT "Ad-hoc signing Disquisition for macOS permissions")
+    endif()
+  else()
+    message(STATUS "Qt 6.5+ not found; skipping disquisition-desktop")
+  endif()
+endif()
+
+if(BUILD_LEGACY_TARGETS)
 # Client-side networking: server/relay connections and the peer mesh. The
 # relay reuses the mesh to host its users.
 add_library(chat_network STATIC
@@ -137,4 +187,5 @@ if(BUILD_TESTING)
     COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
 
   set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
+endif()
 endif()

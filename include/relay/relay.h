@@ -61,6 +61,7 @@ private:
     void dropUser(const std::string& key);
 
     void serviceUsers();
+    void serviceHealth();
     bool serviceUser(User& user);
     void connectServer(User& user);
     void serveClientLogin(User& user);
@@ -74,6 +75,8 @@ private:
     int listenFd_ = -1;
     std::uint16_t boundPort_ = 0;
     std::map<std::string, std::unique_ptr<User>> users_; // keyed by requested name
+    Connection healthServer_;
+    std::chrono::steady_clock::time_point nextHealthAttempt_{};
 
     std::mutex mutex_;
     std::deque<std::unique_ptr<Connection>> awaiting_; // accepted, first frame not read yet

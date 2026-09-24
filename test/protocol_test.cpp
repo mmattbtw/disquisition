@@ -194,6 +194,13 @@ void testPeerAnnouncement() {
     CHECK(peer.host == "10.0.0.2");
     CHECK(peer.port == 4000);
     CHECK(peer.advertised);
+    CHECK(peer.voicePort == 0);
+
+    CHECK(chat::parsePeerAddress(
+        Message{MsgType::Peer, {"bob", "10.0.0.2", "4000", "1", "5060"}}, peer));
+    CHECK(peer.voicePort == 5060);
+    CHECK(!chat::parsePeerAddress(
+        Message{MsgType::Peer, {"bob", "10.0.0.2", "4000", "1", "65536"}}, peer));
 
     CHECK(chat::parsePeerAddress(Message{MsgType::PeerJoined, {"bob", "h", "1", "0"}}, peer));
     CHECK(!peer.advertised);
@@ -206,6 +213,8 @@ void testPeerAnnouncement() {
     const Message rebuilt = chat::peerMessage(MsgType::PeerJoined, {"bob", "h", 4000, true});
     CHECK(rebuilt.type == MsgType::PeerJoined);
     CHECK((rebuilt.fields == std::vector<std::string>{"bob", "h", "4000", "1"}));
+    const Message voiced = chat::peerMessage(MsgType::Peer, {"bob", "h", 4000, true, 5060});
+    CHECK((voiced.fields == std::vector<std::string>{"bob", "h", "4000", "1", "5060"}));
 }
 
 } // namespace

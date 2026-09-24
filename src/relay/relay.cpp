@@ -54,7 +54,14 @@ int Relay::run() {
         LOG_INFO("listening on port {}, advertising {}", boundPort_, options_.advertiseHost);
     }
 
+    // Keep one anonymous server connection for health probes. It never joins
+    // the room, so checking the relay cannot churn a user's session.
+    healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error);
+    if (!healthServer_.failed()) healthServer_.startReader();
+    nextHealthAttempt_ = Clock::now() + kServerRetryInterval;
+
     while (!shutdownRequested()) {
+        serviceHealth();
         dispatchInbound();
         serviceUsers();
         std::this_thread::sleep_for(kTickInterval);
@@ -88,6 +95,7 @@ void Relay::shutdown() {
     }
     users_.clear();
     awaiting_.clear();
+    healthServer_.stop();
 }
 
 void Relay::acceptLoop() {
@@ -146,6 +154,10 @@ void Relay::route(std::unique_ptr<Connection> connection, const Message& first) 
         if (target != nullptr && !sender.empty()) {
             target->peers.adoptInbound(sender, std::move(connection));
         }
+    }
+    else if (first.type == MsgType::RelayProbe && first.fields.empty() &&
+             !healthServer_.failed()) {
+        connection->send(Message{MsgType::RelayReady, {}});
     }
 }
 
@@ -232,6 +244,16 @@ void Relay::serviceUsers() {
     for (const std::string& key : departed) {
         dropUser(key);
     }
+}
+
+void Relay::serviceHealth() {
+    if (!healthServer_.failed() || Clock::now() < nextHealthAttempt_) return;
+    healthServer_.stop();
+    std::string error;
+    if (healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error)) {
+        healthServer_.startReader();
+    }
+    nextHealthAttempt_ = Clock::now() + kServerRetryInterval;
 }
 
 // Returns false once the user's client has disconnected.
@@ -353,6 +375,19 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::History:
         case MsgType::HistoryEnd:
         case MsgType::System:
+        case MsgType::VoiceAudio:
+        case MsgType::VoiceState:
+            sendToClient(user, message);
+            break;
+
+        case MsgType::VoicePort:
+            if (message.fields.size() == 2) {
+                auto peer = user.roster.find(message.fields[0]);
+                std::uint16_t port = 0;
+                if (peer != user.roster.end() && parsePort(message.fields[1], port, true)) {
+                    peer->second.voicePort = port;
+                }
+            }
             sendToClient(user, message);
             break;
 
@@ -377,6 +412,9 @@ void Relay::handleClientMessage(User& user, const Message& message) {
 
         case MsgType::Store:
         case MsgType::FetchHistory:
+        case MsgType::VoicePort:
+        case MsgType::VoiceAudio:
+        case MsgType::VoiceState:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }

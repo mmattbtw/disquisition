@@ -231,6 +231,41 @@ void testServerRejectsUnexpectedFrames(std::uint16_t serverPort) {
     CHECK(waitFor([&] { return session.connection.failed(); }));
 }
 
+void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) {
+    RawSession probe(relayPort);
+    CHECK(probe.connection.send(chat::Message{chat::MsgType::RelayProbe, {}}));
+    CHECK(probe.next(chat::MsgType::RelayReady).fields.empty());
+
+    RawSession direct(serverPort);
+    CHECK(direct.connection.send(
+        chat::Message{chat::MsgType::Login, {"voice_direct", "1", ""}}));
+    CHECK(direct.next(chat::MsgType::LoginOk).fields.at(0) == "voice_direct");
+
+    RawSession relayed(relayPort);
+    CHECK(relayed.connection.send(chat::Message{chat::MsgType::Login, {"voice_relay", "0", ""}}));
+    CHECK(relayed.next(chat::MsgType::LoginOk).fields.at(0) == "voice_relay");
+
+    CHECK(direct.connection.send(chat::Message{chat::MsgType::VoicePort, {"5060"}}));
+    CHECK(relayed.next(chat::MsgType::VoicePort).fields ==
+          (std::vector<std::string>{"voice_direct", "5060"}));
+    CHECK(relayed.connection.send(chat::Message{chat::MsgType::VoicePort, {"65535"}}));
+    CHECK(direct.next(chat::MsgType::VoicePort).fields ==
+          (std::vector<std::string>{"voice_relay", "65535"}));
+
+    CHECK(relayed.connection.send(
+        chat::Message{chat::MsgType::VoiceState, {"voice_relay", "1", "0"}}));
+    CHECK(direct.next(chat::MsgType::VoiceState).fields ==
+          (std::vector<std::string>{"voice_relay", "1", "0"}));
+
+    const std::string pcm(640, '\0');
+    CHECK(relayed.connection.send(chat::Message{chat::MsgType::VoiceAudio, {pcm}}));
+    CHECK(direct.next(chat::MsgType::VoiceAudio).fields ==
+          (std::vector<std::string>{"voice_relay", pcm}));
+    CHECK(direct.connection.send(chat::Message{chat::MsgType::VoiceAudio, {pcm}}));
+    CHECK(relayed.next(chat::MsgType::VoiceAudio).fields ==
+          (std::vector<std::string>{"voice_direct", pcm}));
+}
+
 void testHistoryAndRoster(std::uint16_t serverPort) {
     RawSession dave(serverPort);
     CHECK(dave.connection.send(chat::Message{chat::MsgType::Login, {" alice ", "1", ""}}));
@@ -297,6 +332,7 @@ int main(int argc, char** argv) {
     const std::string relayAddress = "127.0.0.1:" + std::to_string(gRelay.port);
 
     testServerRejectsUnexpectedFrames(gServer.port);
+    testVoiceAndRelayHealth(gServer.port, gRelay.port);
 
     {
         disquisition::Client alice(serverAddress);

@@ -1,6 +1,2 @@
-build/
-*.db
-*.db-wal
-*.db-shm
-.DS_Store
-examples/basic_client
+/build*/
+/.cache/
