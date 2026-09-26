@@ -113,6 +113,8 @@ if(BUILD_DESKTOP_APP)
       src/desktop/main_window.h
       src/desktop/relay_audio.cpp
       src/desktop/relay_audio.h
+      src/desktop/screen_capture.cpp
+      src/desktop/screen_capture.h
       src/desktop/voice_engine.cpp
       src/desktop/voice_engine.h)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
