@@ -6,8 +6,10 @@
 #include <QImage>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QSize>
 #include <QString>
+#include <QThreadPool>
 
 #include <functional>
 #include <utility>
@@ -29,10 +31,13 @@ constexpr qint64 kMaxScreenBacklogBytes = 64 * 1024;
 
 // Screen sharing carried in framed TCP messages. Each captured frame is scaled
 // down, JPEG-encoded and split into chunks that each fit one protocol frame.
+// Encoding runs on worker threads; frames that arrive while they are all busy
+// are dropped, so the frame rate falls instead of the UI stalling.
 class ScreenCapture final : public QObject {
     Q_OBJECT
 public:
     explicit ScreenCapture(QObject* parent = nullptr);
+    ~ScreenCapture() override;
     bool start(QScreen* screen = nullptr);
     void stop();
     bool running() const;
@@ -48,15 +53,21 @@ signals:
 private:
     void handleFrame(const QVideoFrame& frame);
 
+    QThreadPool encoders_;
+    int encoding_ = 0;
+
+    qint64 lastEmittedId_ = -1;
+    quint64 generation_ = 0;
+    QPointer<QScreen> screen_;
     QScreenCapture* capture_ = nullptr;
     QMediaCaptureSession* session_ = nullptr;
     QVideoSink* sink_ = nullptr;
     std::function<qint64()> backlog_;
     QElapsedTimer clock_;
     qint64 nextDueMs_ = 0;
-    qint64 frameIntervalMs_ = 100;
-    QSize maxSize_ {1280, 720};
-    int quality_ = 60;
+    qint64 frameIntervalMs_ = 1000 / 30;
+    QSize maxSize_ {1920, 1080};
+    int quality_ = 75;
     quint32 nextFrameId_ = 0;
 };
 

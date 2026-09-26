@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
 #include <QTcpServer>
@@ -13,9 +14,11 @@
 #include "common/recent_messages.h"
 #include "desktop/voice_engine.h"
 #include "desktop/relay_audio.h"
+#include "desktop/screen_capture.h"
 
 class QLabel;
 class QComboBox;
+class QDialog;
 class QLineEdit;
 class QListWidget;
 class QMediaDevices;
@@ -76,6 +79,9 @@ private:
     void handleTransportClosed();
     void retryConnection();
     void probeRelay();
+    void startScreenShare();
+    void stopScreenShare();
+    void showScreenFrame(quint32 frameId, const QList<QByteArray>& chunks);
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -83,6 +89,7 @@ private:
     QPushButton* connectButton_ = nullptr;
     QPushButton* voiceButton_ = nullptr;
     QPushButton* settingsButton_ = nullptr;
+    QPushButton* shareButton_ = nullptr;
     QPushButton* muteButton_ = nullptr;
     QPushButton* deafenButton_ = nullptr;
     QTextBrowser* transcript_ = nullptr;
@@ -93,6 +100,9 @@ private:
     QLabel* connectionLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
+    QDialog* screenPreview_ = nullptr;
+    QLabel* screenImage_ = nullptr;
+    QLabel* screenStats_ = nullptr;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;
@@ -134,6 +144,14 @@ private:
     bool mutedBeforeDeafen_ = false;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
+    // Screen sharing is local only for now: frames go through the assembler
+    // straight into a preview window instead of over the network.
+    ScreenCapture screenCapture_;
+    ScreenFrameAssembler screenAssembler_;
+    QElapsedTimer screenStatsClock_;
+    int screenStatsFrames_ = 0;
+    qint64 screenStatsBytes_ = 0;
+    int screenStatsChunks_ = 0;
     QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;

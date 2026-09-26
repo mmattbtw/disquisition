@@ -89,6 +89,8 @@ add_library(chat_protocol STATIC
   src/common/protocol.cpp
   src/common/command_line.cpp
   src/util/log.cpp)
+# The socket helpers use POSIX sockets. Only the legacy targets call them, so
+# a Windows build of the desktop app leaves them out.
 if(BUILD_LEGACY_TARGETS)
   target_sources(chat_protocol PRIVATE src/common/net.cpp)
 endif()
