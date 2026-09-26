@@ -106,7 +106,12 @@ if(BUILD_DESKTOP_APP)
     enable_language(OBJCXX)
   endif()
   find_package(Qt6 6.5 COMPONENTS Widgets Network Multimedia QUIET)
-  if(Qt6_FOUND)
+  # Screen sharing encodes and decodes H.264 with FFmpeg.
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=61.13 libavutil libswscale)
+  endif()
+  if(Qt6_FOUND AND FFMPEG_FOUND)
     add_executable(disquisition-desktop MACOSX_BUNDLE
       src/desktop/audio_permission.h
       src/desktop/audio_permission.cpp
@@ -124,20 +129,7 @@ if(BUILD_DESKTOP_APP)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia)
-    # Screen sharing uses H.264 through FFmpeg when it is installed, and JPEG
-    # otherwise.
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-      pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=61.13 libavutil libswscale)
-    endif()
-    if(FFMPEG_FOUND)
-      target_link_libraries(disquisition-desktop PRIVATE PkgConfig::FFMPEG)
-      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_FFMPEG)
-    else()
-      message(STATUS "FFmpeg not found; screen sharing uses JPEG instead of H.264")
-    endif()
-
+      chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     if(APPLE)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
@@ -153,8 +145,10 @@ if(BUILD_DESKTOP_APP)
           "$<TARGET_BUNDLE_DIR:disquisition-desktop>"
         COMMENT "Ad-hoc signing Disquisition for macOS permissions")
     endif()
-  else()
+  elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.5+ not found; skipping disquisition-desktop")
+  else()
+    message(STATUS "FFmpeg (libavcodec, libavutil, libswscale) not found; skipping disquisition-desktop")
   endif()
 endif()
 

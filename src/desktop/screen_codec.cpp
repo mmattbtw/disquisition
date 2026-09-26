@@ -1,18 +1,14 @@
 #include "desktop/screen_codec.h"
 
-#ifdef DISQUISITION_HAVE_FFMPEG
-# include <cstring>
-# include <string_view>
+#include <cstring>
+#include <string_view>
 
 extern "C" {
-# include <libavcodec/avcodec.h>
-# include <libavutil/imgutils.h>
-# include <libavutil/opt.h>
-# include <libswscale/swscale.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libswscale/swscale.h>
 }
-#endif
-
-#ifdef DISQUISITION_HAVE_FFMPEG
 
 namespace {
 
@@ -169,10 +165,6 @@ struct H264Encoder::State {
 H264Encoder::H264Encoder() = default;
 H264Encoder::~H264Encoder() = default;
 
-bool H264Encoder::available() {
-    return true;
-}
-
 QString H264Encoder::name() const {
     return state_ ? state_->name : QString();
 }
@@ -256,10 +248,7 @@ struct ScreenDecoder::State {
     }
 };
 
-ScreenDecoder::ScreenDecoder(ScreenCodec codec) : codec_(codec) {
-    if (codec_ != ScreenCodec::H264) {
-        return;
-    }
+ScreenDecoder::ScreenDecoder() {
     const AVCodec* decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!decoder) {
         return;
@@ -279,9 +268,6 @@ ScreenDecoder::ScreenDecoder(ScreenCodec codec) : codec_(codec) {
 ScreenDecoder::~ScreenDecoder() = default;
 
 QImage ScreenDecoder::decode(const QByteArray& data) {
-    if (codec_ == ScreenCodec::Jpeg) {
-        return QImage::fromData(data, "JPEG");
-    }
     if (!state_ || data.isEmpty() || av_new_packet(state_->packet, static_cast<int>(data.size())) < 0) {
         return {};
     }
@@ -312,31 +298,3 @@ QImage ScreenDecoder::decode(const QByteArray& data) {
     return image;
 }
 
-#else
-
-struct H264Encoder::State {};
-struct ScreenDecoder::State {};
-
-H264Encoder::H264Encoder() = default;
-H264Encoder::~H264Encoder() = default;
-
-bool H264Encoder::available() {
-    return false;
-}
-
-QString H264Encoder::name() const {
-    return {};
-}
-
-bool H264Encoder::encode(const QImage&, const QSize&, int, qint64, QByteArray&, bool&) {
-    return false;
-}
-
-ScreenDecoder::ScreenDecoder(ScreenCodec codec) : codec_(codec) {}
-ScreenDecoder::~ScreenDecoder() = default;
-
-QImage ScreenDecoder::decode(const QByteArray& data) {
-    return codec_ == ScreenCodec::Jpeg ? QImage::fromData(data, "JPEG") : QImage();
-}
-
-#endif

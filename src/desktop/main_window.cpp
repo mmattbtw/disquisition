@@ -640,7 +640,7 @@ void MainWindow::startScreenShare() {
         appendChat("Screen", "no screen to capture", {}, true);
         return;
     }
-    screenDecoder_ = std::make_unique<ScreenDecoder>(screenCapture_.codec());
+    screenDecoder_ = std::make_unique<ScreenDecoder>();
     screenStatsClock_.start();
     screenStatsFrames_ = 0;
     screenStatsBytes_ = 0;

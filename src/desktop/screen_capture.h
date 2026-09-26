@@ -32,10 +32,9 @@ constexpr int kMaxScreenChunks = 64;
 constexpr qint64 kMaxScreenBacklogBytes = 64 * 1024;
 
 // Screen sharing carried in framed TCP messages. Each captured frame is scaled
-// down, encoded as H.264 (or JPEG without FFmpeg) and split into chunks that
-// each fit one protocol frame. Encoding runs on worker threads; frames that
-// arrive while they are all busy are dropped, so the frame rate falls instead
-// of the UI stalling.
+// down, encoded as H.264 and split into chunks that each fit one protocol
+// frame. Encoding runs on a worker thread; frames that arrive while it is busy
+// are dropped, so the frame rate falls instead of the UI stalling.
 class ScreenCapture final : public QObject {
     Q_OBJECT
 public:
@@ -44,30 +43,24 @@ public:
     bool start(QScreen* screen = nullptr);
     void stop();
     bool running() const;
-    // Takes effect on the next start(). Before start() it is H.264 when
-    // available; JPEG is kept as a fallback and for comparison.
-    void setCodec(ScreenCodec codec) { codec_ = codec; }
-    ScreenCodec codec() const { return codec_; }
-    // The encoder in use, such as "h264_nvenc" or "jpeg".
+    // The encoder in use, such as "h264_nvenc".
     QString encoderName() const { return encoderName_; }
-    // 0 picks the default: 60 fps for H.264 and 30 for JPEG.
-    void setFrameRate(int fps) { fps_ = fps > 0 ? qMin(fps, 60) : 0; }
+    void setFrameRate(int fps) { frameIntervalMs_ = 1000 / qBound(1, fps, 60); }
     void setMaxSize(const QSize& size) { maxSize_ = size; }
-    void setQuality(int quality) { quality_ = qBound(1, quality, 100); }
     void setBacklogProbe(std::function<qint64()> probe) { backlog_ = std::move(probe); }
 
 signals:
-    // H.264 frames depend on the ones before them; keyframes do not.
+    // Frames depend on the ones before them; keyframes do not.
     void frameReady(quint32 frameId, const QList<QByteArray>& chunks, bool keyframe);
     void errorOccurred(const QString& message);
 
 private:
     void handleFrame(const QVideoFrame& frame);
 
-    QThreadPool encoders_;
-    int encoding_ = 0;
-
-    qint64 lastEmittedId_ = -1;
+    // One thread, never retired, so the encoder always runs on the thread it
+    // was opened on and frames are encoded in order.
+    QThreadPool encoder_;
+    bool encoding_ = false;
     quint64 generation_ = 0;
     QPointer<QScreen> screen_;
     QScreenCapture* capture_ = nullptr;
@@ -76,14 +69,11 @@ private:
     std::function<qint64()> backlog_;
     QElapsedTimer clock_;
     qint64 nextDueMs_ = 0;
-    ScreenCodec codec_ = H264Encoder::available() ? ScreenCodec::H264 : ScreenCodec::Jpeg;
     // Used only by the encoding thread; replaced on each start().
     std::shared_ptr<H264Encoder> h264_;
     QString encoderName_;
-    int fps_ = 0;
     qint64 frameIntervalMs_ = 1000 / 30;
     QSize maxSize_ {1920, 1080};
-    int quality_ = 75;
     quint32 nextFrameId_ = 0;
 };
 

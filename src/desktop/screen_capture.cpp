@@ -1,6 +1,5 @@
 #include "desktop/screen_capture.h"
 
-#include <QBuffer>
 #include <QCursor>
 #include <QGuiApplication>
 #include <QMediaCaptureSession>
@@ -8,7 +7,6 @@
 #include <QPolygonF>
 #include <QScreen>
 #include <QScreenCapture>
-#include <QThread>
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 #include <QVideoSink>
@@ -86,10 +84,9 @@ QList<QByteArray> splitChunks(const QByteArray& data) {
     return chunks;
 }
 
-// Runs on an encoding thread. Returns no chunks when there is nothing to send.
+// Runs on the encoding thread. Returns no chunks when there is nothing to send.
 EncodedFrame encodeFrame(const QVideoFrame& frame, const QRect& geometry, const QPoint& cursor,
-                         H264Encoder* h264, const QSize& maxSize, int quality, int fps,
-                         qint64 ptsMs) {
+                         H264Encoder& h264, const QSize& maxSize, int fps, qint64 ptsMs) {
     EncodedFrame encoded;
     QImage image = frameImage(frame);
     if (image.isNull()) {
@@ -97,44 +94,27 @@ EncodedFrame encodeFrame(const QVideoFrame& frame, const QRect& geometry, const 
     }
     drawCursor(image, geometry, cursor);
 
-    if (h264) {
-        QByteArray data;
-        if (!h264->encode(image, maxSize, fps, ptsMs, data, encoded.keyframe)) {
-            encoded.failed = true;
-            return encoded;
-        }
-        encoded.encoder = h264->name();
-        encoded.chunks = splitChunks(data);
+    QByteArray data;
+    if (!h264.encode(image, maxSize, fps, ptsMs, data, encoded.keyframe)) {
+        encoded.failed = true;
         return encoded;
     }
-
-    if (image.width() > maxSize.width() || image.height() > maxSize.height()) {
-        image = image.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-    QByteArray jpeg;
-    QBuffer buffer(&jpeg);
-    buffer.open(QIODevice::WriteOnly);
-    if (!image.save(&buffer, "JPEG", quality)) {
-        return encoded;
-    }
-    encoded.encoder = QStringLiteral("jpeg");
-    encoded.keyframe = true;
-    encoded.chunks = splitChunks(jpeg);
+    encoded.encoder = h264.name();
+    encoded.chunks = splitChunks(data);
     return encoded;
 }
 
 } // namespace
 
 ScreenCapture::ScreenCapture(QObject* parent) : QObject(parent) {
-    // H.264 runs on this pool's one thread; never retiring it keeps the
-    // encoder on the thread it was opened on.
-    encoders_.setExpiryTimeout(-1);
+    encoder_.setMaxThreadCount(1);
+    encoder_.setExpiryTimeout(-1);
 }
 
 ScreenCapture::~ScreenCapture() {
     stop();
     // Jobs post their result back to this object, so none may still run.
-    encoders_.waitForDone();
+    encoder_.waitForDone();
 }
 
 bool ScreenCapture::start(QScreen* screen) {
@@ -145,23 +125,8 @@ bool ScreenCapture::start(QScreen* screen) {
     if (!screen) {
         return false;
     }
-    if (codec_ == ScreenCodec::H264 && !H264Encoder::available()) {
-        codec_ = ScreenCodec::Jpeg;
-    }
-    if (codec_ == ScreenCodec::H264) {
-        // Each H.264 frame builds on the previous one, so frames are encoded
-        // one at a time, in order.
-        encoders_.setMaxThreadCount(1);
-        h264_ = std::make_shared<H264Encoder>();
-    }
-    else {
-        // A 1080p JPEG takes 40-80 ms, so one thread manages about 15 fps;
-        // three keep up with 30 fps while leaving cores for the rest.
-        encoders_.setMaxThreadCount(qBound(1, QThread::idealThreadCount() - 1, 3));
-        h264_.reset();
-    }
-    const int fps = fps_ > 0 ? fps_ : (codec_ == ScreenCodec::H264 ? 60 : 30);
-    frameIntervalMs_ = 1000 / fps;
+    // A fresh encoder starts the stream with a keyframe.
+    h264_ = std::make_shared<H264Encoder>();
     encoderName_.clear();
 
     screen_ = screen;
@@ -212,8 +177,8 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
     if (backlog_ && backlog_() > kMaxScreenBacklogBytes) {
         return;
     }
-    // Every worker is still on an earlier frame; this one is dropped.
-    if (encoding_ >= encoders_.maxThreadCount()) {
+    // The encoder is still on an earlier frame; this one is dropped.
+    if (encoding_) {
         return;
     }
     nextDueMs_ += frameIntervalMs_;
@@ -222,7 +187,7 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
         nextDueMs_ = now + frameIntervalMs_;
     }
 
-    ++encoding_;
+    encoding_ = true;
     QRect geometry;
     QPoint cursor;
     if (screen_) {
@@ -232,12 +197,11 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
     const quint32 frameId = nextFrameId_++;
     const quint64 generation = generation_;
     const int fps = static_cast<int>(1000 / frameIntervalMs_);
-    encoders_.start([this, frame, geometry, cursor, frameId, generation, h264 = h264_,
-                     maxSize = maxSize_, quality = quality_, fps, now] {
-        EncodedFrame encoded =
-            encodeFrame(frame, geometry, cursor, h264.get(), maxSize, quality, fps, now);
+    encoder_.start([this, frame, geometry, cursor, frameId, generation, h264 = h264_,
+                    maxSize = maxSize_, fps, now] {
+        EncodedFrame encoded = encodeFrame(frame, geometry, cursor, *h264, maxSize, fps, now);
         QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation] {
-            --encoding_;
+            encoding_ = false;
             if (generation != generation_) {
                 return;
             }
@@ -248,10 +212,7 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
             if (!encoded.encoder.isEmpty()) {
                 encoderName_ = encoded.encoder;
             }
-            // Frames encoded in parallel can finish out of order; an older one
-            // that finishes after a newer one is dropped.
-            if (!encoded.chunks.isEmpty() && frameId > lastEmittedId_) {
-                lastEmittedId_ = frameId;
+            if (!encoded.chunks.isEmpty()) {
                 emit frameReady(frameId, encoded.chunks, encoded.keyframe);
             }
         });
