@@ -16,7 +16,7 @@
 #include <utility>
 
 #include "common/protocol.h"
-#include "desktop/screen_codec.h"
+#include "desktop/screen_h264.h"
 
 class QMediaCaptureSession;
 class QScreen;

@@ -112,22 +112,22 @@ if(BUILD_DESKTOP_APP)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=61.13 libavutil libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
+    # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
     add_executable(disquisition-desktop MACOSX_BUNDLE
-      src/desktop/audio_permission.h
+      include/desktop/audio_permission.h
+      include/desktop/main_window.h
+      include/desktop/relay_audio.h
+      include/desktop/screen_capture.h
+      include/desktop/screen_h264.h
+      include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/main.cpp
       src/desktop/main_window.cpp
-      src/desktop/main_window.h
       src/desktop/relay_audio.cpp
-      src/desktop/relay_audio.h
       src/desktop/screen_capture.cpp
-      src/desktop/screen_capture.h
-      src/desktop/screen_codec.cpp
-      src/desktop/screen_codec.h
-      src/desktop/voice_engine.cpp
-      src/desktop/voice_engine.h)
+      src/desktop/screen_h264.cpp
+      src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
-    target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     if(APPLE)
