@@ -10,9 +10,38 @@
 #include <QScreenCapture>
 #include <QThread>
 #include <QVideoFrame>
+#include <QVideoFrameFormat>
 #include <QVideoSink>
 
 namespace {
+
+struct EncodedFrame {
+    QList<QByteArray> chunks;
+    bool keyframe = false;
+    bool failed = false;
+    QString encoder;
+};
+
+// Copies the frame's pixels out directly when Qt has a matching image format,
+// which is several times faster than QVideoFrame::toImage().
+QImage frameImage(const QVideoFrame& frame) {
+    QVideoFrame mapped(frame);
+    if (mapped.map(QVideoFrame::ReadOnly)) {
+        const QImage::Format format =
+            QVideoFrameFormat::imageFormatFromPixelFormat(mapped.pixelFormat());
+        QImage image;
+        if (format != QImage::Format_Invalid) {
+            image = QImage(mapped.bits(0), mapped.width(), mapped.height(), mapped.bytesPerLine(0),
+                           format)
+                        .copy();
+        }
+        mapped.unmap();
+        if (!image.isNull()) {
+            return image;
+        }
+    }
+    return frame.toImage();
+}
 
 // Captured frames leave out the mouse pointer, so draw an arrow where it is.
 void drawCursor(QImage& image, const QRect& geometry, const QPoint& position) {
@@ -27,7 +56,7 @@ void drawCursor(QImage& image, const QRect& geometry, const QPoint& position) {
         point = tip + point * scale;
     }
     // Converting a full frame is slow, so only formats QPainter cannot draw
-    // on are converted. Windows delivers RGBA8888.
+    // on are converted. Windows delivers BGRA, which is ARGB32 here.
     switch (image.format()) {
         case QImage::Format_RGB32:
         case QImage::Format_ARGB32:
@@ -46,27 +75,10 @@ void drawCursor(QImage& image, const QRect& geometry, const QPoint& position) {
     painter.drawPolygon(arrow);
 }
 
-// Runs on the worker thread. Returns no chunks when the frame cannot be sent.
-QList<QByteArray> encodeFrame(const QVideoFrame& frame, const QRect& geometry,
-                              const QPoint& cursor, const QSize& maxSize, int quality) {
-    QImage image = frame.toImage();
-    if (image.isNull()) {
-        return {};
-    }
-    drawCursor(image, geometry, cursor);
-    if (image.width() > maxSize.width() || image.height() > maxSize.height()) {
-        image = image.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-    QByteArray jpeg;
-    QBuffer buffer(&jpeg);
-    buffer.open(QIODevice::WriteOnly);
-    if (!image.save(&buffer, "JPEG", quality)) {
-        return {};
-    }
-
+QList<QByteArray> splitChunks(const QByteArray& data) {
     QList<QByteArray> chunks;
-    for (qsizetype offset = 0; offset < jpeg.size(); offset += kScreenChunkBytes) {
-        chunks.append(jpeg.mid(offset, kScreenChunkBytes));
+    for (qsizetype offset = 0; offset < data.size(); offset += kScreenChunkBytes) {
+        chunks.append(data.mid(offset, kScreenChunkBytes));
     }
     if (chunks.size() > kMaxScreenChunks) {
         return {};
@@ -74,12 +86,49 @@ QList<QByteArray> encodeFrame(const QVideoFrame& frame, const QRect& geometry,
     return chunks;
 }
 
+// Runs on an encoding thread. Returns no chunks when there is nothing to send.
+EncodedFrame encodeFrame(const QVideoFrame& frame, const QRect& geometry, const QPoint& cursor,
+                         H264Encoder* h264, const QSize& maxSize, int quality, int fps,
+                         qint64 ptsMs) {
+    EncodedFrame encoded;
+    QImage image = frameImage(frame);
+    if (image.isNull()) {
+        return encoded;
+    }
+    drawCursor(image, geometry, cursor);
+
+    if (h264) {
+        QByteArray data;
+        if (!h264->encode(image, maxSize, fps, ptsMs, data, encoded.keyframe)) {
+            encoded.failed = true;
+            return encoded;
+        }
+        encoded.encoder = h264->name();
+        encoded.chunks = splitChunks(data);
+        return encoded;
+    }
+
+    if (image.width() > maxSize.width() || image.height() > maxSize.height()) {
+        image = image.scaled(maxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    QByteArray jpeg;
+    QBuffer buffer(&jpeg);
+    buffer.open(QIODevice::WriteOnly);
+    if (!image.save(&buffer, "JPEG", quality)) {
+        return encoded;
+    }
+    encoded.encoder = QStringLiteral("jpeg");
+    encoded.keyframe = true;
+    encoded.chunks = splitChunks(jpeg);
+    return encoded;
+}
+
 } // namespace
 
 ScreenCapture::ScreenCapture(QObject* parent) : QObject(parent) {
-    // A 1080p frame takes 40-80 ms to encode, so one thread manages about
-    // 15 fps; three keep up with 30 fps while leaving cores for the rest.
-    encoders_.setMaxThreadCount(qBound(1, QThread::idealThreadCount() - 1, 3));
+    // H.264 runs on this pool's one thread; never retiring it keeps the
+    // encoder on the thread it was opened on.
+    encoders_.setExpiryTimeout(-1);
 }
 
 ScreenCapture::~ScreenCapture() {
@@ -96,6 +145,25 @@ bool ScreenCapture::start(QScreen* screen) {
     if (!screen) {
         return false;
     }
+    if (codec_ == ScreenCodec::H264 && !H264Encoder::available()) {
+        codec_ = ScreenCodec::Jpeg;
+    }
+    if (codec_ == ScreenCodec::H264) {
+        // Each H.264 frame builds on the previous one, so frames are encoded
+        // one at a time, in order.
+        encoders_.setMaxThreadCount(1);
+        h264_ = std::make_shared<H264Encoder>();
+    }
+    else {
+        // A 1080p JPEG takes 40-80 ms, so one thread manages about 15 fps;
+        // three keep up with 30 fps while leaving cores for the rest.
+        encoders_.setMaxThreadCount(qBound(1, QThread::idealThreadCount() - 1, 3));
+        h264_.reset();
+    }
+    const int fps = fps_ > 0 ? fps_ : (codec_ == ScreenCodec::H264 ? 60 : 30);
+    frameIntervalMs_ = 1000 / fps;
+    encoderName_.clear();
+
     screen_ = screen;
     capture_ = new QScreenCapture(this);
     session_ = new QMediaCaptureSession(this);
@@ -163,21 +231,35 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
     }
     const quint32 frameId = nextFrameId_++;
     const quint64 generation = generation_;
-    encoders_.start([this, frame, geometry, cursor, frameId, generation, maxSize = maxSize_,
-                     quality = quality_] {
-        QList<QByteArray> chunks = encodeFrame(frame, geometry, cursor, maxSize, quality);
-        QMetaObject::invokeMethod(this, [this, chunks = std::move(chunks), frameId, generation] {
+    const int fps = static_cast<int>(1000 / frameIntervalMs_);
+    encoders_.start([this, frame, geometry, cursor, frameId, generation, h264 = h264_,
+                     maxSize = maxSize_, quality = quality_, fps, now] {
+        EncodedFrame encoded =
+            encodeFrame(frame, geometry, cursor, h264.get(), maxSize, quality, fps, now);
+        QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation] {
             --encoding_;
-            if (generation == generation_ && !chunks.isEmpty() && frameId > lastEmittedId_) {
+            if (generation != generation_) {
+                return;
+            }
+            if (encoded.failed) {
+                emit errorOccurred(QStringLiteral("no H.264 encoder could be opened"));
+                return;
+            }
+            if (!encoded.encoder.isEmpty()) {
+                encoderName_ = encoded.encoder;
+            }
+            // Frames encoded in parallel can finish out of order; an older one
+            // that finishes after a newer one is dropped.
+            if (!encoded.chunks.isEmpty() && frameId > lastEmittedId_) {
                 lastEmittedId_ = frameId;
-                emit frameReady(frameId, chunks);
+                emit frameReady(frameId, encoded.chunks, encoded.keyframe);
             }
         });
     });
 }
 
 bool ScreenFrameAssembler::add(const QString& sender, quint32 frameId, int index, int count,
-                               const QByteArray& chunk, QImage& image) {
+                               const QByteArray& chunk, QByteArray& data) {
     if (count < 1 || count > kMaxScreenChunks || index < 0 || index >= count || chunk.isEmpty() ||
         chunk.size() > kScreenChunkBytes) {
         return false;
@@ -194,11 +276,10 @@ bool ScreenFrameAssembler::add(const QString& sender, quint32 frameId, int index
         return false;
     }
 
-    QByteArray jpeg;
+    data.clear();
     for (const QByteArray& piece : std::as_const(partial.chunks)) {
-        jpeg += piece;
+        data += piece;
     }
     partial_.remove(sender);
-    image = QImage::fromData(jpeg, "JPEG");
-    return !image.isNull();
+    return true;
 }

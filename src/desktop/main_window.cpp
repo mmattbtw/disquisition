@@ -640,6 +640,7 @@ void MainWindow::startScreenShare() {
         appendChat("Screen", "no screen to capture", {}, true);
         return;
     }
+    screenDecoder_ = std::make_unique<ScreenDecoder>(screenCapture_.codec());
     screenStatsClock_.start();
     screenStatsFrames_ = 0;
     screenStatsBytes_ = 0;
@@ -665,7 +666,11 @@ void MainWindow::showScreenFrame(quint32 frameId, const QList<QByteArray>& chunk
     QImage image;
     for (int i = 0; i < chunks.size(); ++i) {
         const auto count = static_cast<int>(chunks.size());
-        if (screenAssembler_.add(myName_, frameId, i, count, chunks[i], image)) {
+        QByteArray data;
+        if (screenAssembler_.add(myName_, frameId, i, count, chunks[i], data) && screenDecoder_) {
+            image = screenDecoder_->decode(data);
+        }
+        if (!image.isNull() && i == chunks.size() - 1) {
             // Scale in device pixels, and only when the frame does not fit,
             // so the preview is never softer than the frame itself.
             const qreal ratio = screenImage_->devicePixelRatioF();
@@ -689,7 +694,8 @@ void MainWindow::showScreenFrame(quint32 frameId, const QList<QByteArray>& chunk
     const double fps = screenStatsFrames_ * 1000.0 / static_cast<double>(elapsed);
     const double kbPerFrame = static_cast<double>(screenStatsBytes_) / 1024.0 / screenStatsFrames_;
     const double mbps = static_cast<double>(screenStatsBytes_) * 8.0 / 1000.0 / static_cast<double>(elapsed);
-    screenStats_->setText(QString("%1x%2  %3 fps  %4 KB/frame  %5 chunks/frame  %6 Mbps")
+    screenStats_->setText(QString("%1  %2x%3  %4 fps  %5 KB/frame  %6 chunks/frame  %7 Mbps")
+                              .arg(screenCapture_.encoderName())
                               .arg(image.width())
                               .arg(image.height())
                               .arg(fps, 0, 'f', 1)

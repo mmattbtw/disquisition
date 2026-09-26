@@ -6,15 +6,14 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
-
 #include <memory>
 #include <optional>
 
 #include "common/protocol.h"
 #include "common/recent_messages.h"
-#include "desktop/voice_engine.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
+#include "desktop/voice_engine.h"
 
 class QLabel;
 class QComboBox;
@@ -148,6 +147,7 @@ private:
     // straight into a preview window instead of over the network.
     ScreenCapture screenCapture_;
     ScreenFrameAssembler screenAssembler_;
+    std::unique_ptr<ScreenDecoder> screenDecoder_;
     QElapsedTimer screenStatsClock_;
     int screenStatsFrames_ = 0;
     qint64 screenStatsBytes_ = 0;

@@ -117,12 +117,27 @@ if(BUILD_DESKTOP_APP)
       src/desktop/relay_audio.h
       src/desktop/screen_capture.cpp
       src/desktop/screen_capture.h
+      src/desktop/screen_codec.cpp
+      src/desktop/screen_codec.h
       src/desktop/voice_engine.cpp
       src/desktop/voice_engine.h)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia)
+    # Screen sharing uses H.264 through FFmpeg when it is installed, and JPEG
+    # otherwise.
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+      pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=61.13 libavutil libswscale)
+    endif()
+    if(FFMPEG_FOUND)
+      target_link_libraries(disquisition-desktop PRIVATE PkgConfig::FFMPEG)
+      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_FFMPEG)
+    else()
+      message(STATUS "FFmpeg not found; screen sharing uses JPEG instead of H.264")
+    endif()
+
     if(APPLE)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
