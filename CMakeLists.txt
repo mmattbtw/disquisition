@@ -81,8 +81,10 @@ endif()
 add_library(chat_protocol STATIC
   src/common/protocol.cpp
   src/common/command_line.cpp
-  src/common/net.cpp
   src/util/log.cpp)
+if(BUILD_LEGACY_TARGETS)
+  target_sources(chat_protocol PRIVATE src/common/net.cpp)
+endif()
 target_include_directories(chat_protocol PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(chat_protocol PUBLIC spdlog::spdlog)
 

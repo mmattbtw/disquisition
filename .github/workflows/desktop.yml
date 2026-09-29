@@ -1,0 +1,67 @@
+name: desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: disquisition-desktop-linux-x64
+          - os: macos-15
+            artifact: disquisition-desktop-macos-arm64
+          - os: windows-2022
+            artifact: disquisition-desktop-windows-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+
+      - name: Build desktop client
+        run: cmake --build build --config Release --target disquisition-desktop --parallel
+
+      - name: Package Linux build
+        if: runner.os == 'Linux'
+        run: tar -czf disquisition-desktop-linux-x64.tar.gz -C build disquisition-desktop
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          macdeployqt build/disquisition-desktop.app
+          codesign --force --deep --sign - build/disquisition-desktop.app
+          ditto -c -k --sequesterRsrc --keepParent build/disquisition-desktop.app disquisition-desktop-macos-arm64.zip
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item build/Release/disquisition-desktop.exe dist/
+          windeployqt --release --no-translations dist/disquisition-desktop.exe
+          Compress-Archive -Path dist/* -DestinationPath disquisition-desktop-windows-x64.zip
+
+      - name: Upload desktop build
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.*
+          if-no-files-found: error

@@ -48,6 +48,13 @@ cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
 cmake --build build --config Release --target disquisition-desktop
 ```
 
+The [desktop build workflow](.github/workflows/desktop.yml) uploads macOS
+(Apple silicon), Ubuntu (x64), and Windows (x64) builds for every pull request
+and every push to `main`. Download them from the workflow run's artifacts.
+The macOS and Windows archives include Qt. The Linux archive contains the
+executable and requires a compatible Qt 6.8 runtime. Voice chat also requires
+`baresip` on `PATH` on each platform.
+
 Install a baresip build that includes `menu`, `mixminus`, `vumeter`, `ctrl_tcp`,
 `g711`, and the platform audio module (`coreaudio`, `wasapi`, or `alsa`). The app
 creates a small isolated baresip profile in the platform application-data
