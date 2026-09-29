@@ -24,7 +24,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(spdlog)
 
-add_compile_options(-Wall -Wextra -Wpedantic)
+if(MSVC)
+  add_compile_options(/W4)
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 # Exposes the POSIX socket and signal declarations on platforms such as
 # Cygwin/MSYS2 whose strict C++ mode would otherwise hide them.
 add_compile_definitions(_GNU_SOURCE)
