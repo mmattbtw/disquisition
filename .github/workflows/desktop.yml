@@ -33,8 +33,8 @@ jobs:
             artifact: disquisition-desktop-windows-x64
             audio-module: wasapi
             re-library: re-static.lib
-            static-openssl: 'OFF'
-            openssl-root: 'C:/Program Files/OpenSSL-Win64'
+            static-openssl: 'ON'
+            openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +68,12 @@ jobs:
       - name: Install macOS voice dependencies
         if: runner.os == 'macOS'
         run: brew install openssl@3
+
+      - name: Install Windows voice dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
 
       - name: Build libre
         run: |
@@ -118,13 +124,7 @@ jobs:
           New-Item -ItemType Directory -Path dist/licenses | Out-Null
           Copy-Item third_party/baresip/LICENSE dist/licenses/baresip.LICENSE
           Copy-Item third_party/re/LICENSE dist/licenses/libre.LICENSE
-          $opensslRoot = Join-Path $env:ProgramFiles 'OpenSSL-Win64'
-          Copy-Item (Join-Path $opensslRoot 'license.txt') dist/licenses/OpenSSL.LICENSE
-          foreach ($name in @('libssl-3-x64.dll', 'libcrypto-3-x64.dll')) {
-            $dll = Get-ChildItem $opensslRoot -Recurse -File -Filter $name | Select-Object -First 1
-            if (-not $dll) { throw "Missing OpenSSL runtime: $name" }
-            Copy-Item $dll.FullName dist/
-          }
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/share/openssl/copyright" dist/licenses/OpenSSL.LICENSE
           windeployqt --release --no-translations dist/disquisition-desktop.exe
           Compress-Archive -Path dist/* -DestinationPath disquisition-desktop-windows-x64.zip
 
