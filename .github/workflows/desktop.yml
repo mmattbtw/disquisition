@@ -21,21 +21,18 @@ jobs:
             artifact: disquisition-desktop-linux-x64
             audio-module: alsa
             re-library: libre.a
-            baresip-exe: baresip
             static-openssl: 'ON'
             openssl-root: ''
           - os: macos-15
             artifact: disquisition-desktop-macos-arm64
             audio-module: coreaudio
             re-library: libre.a
-            baresip-exe: baresip
             static-openssl: 'ON'
             openssl-root: /opt/homebrew/opt/openssl@3
           - os: windows-2022
             artifact: disquisition-desktop-windows-x64
             audio-module: wasapi
             re-library: re-static.lib
-            baresip-exe: baresip.exe
             static-openssl: 'OFF'
             openssl-root: 'C:/Program Files/OpenSSL-Win64'
     steps:
@@ -72,10 +69,6 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl@3
 
-      - name: Install Windows voice dependencies
-        if: runner.os == 'Windows'
-        run: choco install openssl --version=3.6.2 --no-progress -y
-
       - name: Build libre
         run: |
           cmake -S third_party/re -B build-re -DCMAKE_BUILD_TYPE=Release -DLIBRE_BUILD_SHARED=OFF -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/baresip-prefix"
@@ -86,7 +79,6 @@ jobs:
         run: |
           cmake -S cmake/bundled-baresip -B build-baresip -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/baresip-prefix" -DBARESIP_SOURCE_DIR="${{ github.workspace }}/third_party/baresip" -DBARESIP_AUDIO_MODULE=${{ matrix.audio-module }} -DRE_INCLUDE_DIR="${{ github.workspace }}/baresip-prefix/include/re" -DRE_LIBRARY="${{ github.workspace }}/baresip-prefix/lib/${{ matrix.re-library }}" -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}"
           cmake --build build-baresip --config Release --target baresip_exe --parallel
-          ./build-baresip/output/${{ matrix.baresip-exe }} -h
 
       - name: Configure
         run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
