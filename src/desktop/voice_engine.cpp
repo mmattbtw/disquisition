@@ -176,7 +176,11 @@ bool VoiceEngine::start(const QString& name, quint16 sipPort, const QString& inp
     if (!writeProfile(name, sipPort, inputDevice, outputDevice, error)) {
         return false;
     }
-    QString executable = QStandardPaths::findExecutable("baresip");
+    QString executable = QStandardPaths::findExecutable(
+        "baresip", {QCoreApplication::applicationDirPath()});
+    if (executable.isEmpty()) {
+        executable = QStandardPaths::findExecutable("baresip");
+    }
 #if defined(Q_OS_MACOS)
     if (executable.isEmpty() && QFile::exists("/opt/homebrew/bin/baresip")) {
         executable = "/opt/homebrew/bin/baresip";

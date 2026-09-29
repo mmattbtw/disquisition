@@ -1,0 +1,145 @@
+name: desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: disquisition-desktop-linux-x64
+            audio-module: alsa
+            re-library: libre.a
+            static-openssl: 'ON'
+            openssl-root: ''
+          - os: macos-15
+            artifact: disquisition-desktop-macos-arm64
+            audio-module: coreaudio
+            re-library: libre.a
+            static-openssl: 'ON'
+            openssl-root: /opt/homebrew/opt/openssl@3
+          - os: windows-2022
+            artifact: disquisition-desktop-windows-x64
+            audio-module: wasapi
+            re-library: re-static.lib
+            static-openssl: 'ON'
+            openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out libre
+        uses: actions/checkout@v4
+        with:
+          repository: baresip/re
+          ref: v4.11.0
+          path: third_party/re
+
+      - name: Check out baresip
+        uses: actions/checkout@v4
+        with:
+          repository: baresip/baresip
+          ref: v4.11.0
+          path: third_party/baresip
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install Linux voice dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libssl-dev
+
+      - name: Install macOS voice dependencies
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
+      - name: Restore Windows OpenSSL cache
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-openssl-x64-windows-static-md-v1
+
+      - name: Install Windows voice dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $env:GITHUB_WORKSPACE '.vcpkg-cache'
+          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
+
+      - name: Build libre
+        run: |
+          cmake -S third_party/re -B build-re -DCMAKE_BUILD_TYPE=Release -DLIBRE_BUILD_SHARED=OFF -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/baresip-prefix"
+          cmake --build build-re --config Release --target re --parallel
+          cmake --install build-re --config Release
+
+      - name: Build baresip with voice modules
+        run: |
+          cmake -S cmake/bundled-baresip -B build-baresip -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/baresip-prefix" -DBARESIP_SOURCE_DIR="${{ github.workspace }}/third_party/baresip" -DBARESIP_AUDIO_MODULE=${{ matrix.audio-module }} -DRE_INCLUDE_DIR="${{ github.workspace }}/baresip-prefix/include/re" -DRE_LIBRARY="${{ github.workspace }}/baresip-prefix/lib/${{ matrix.re-library }}" -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}"
+          cmake --build build-baresip --config Release --target baresip_exe --parallel
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+
+      - name: Build desktop client
+        run: cmake --build build --config Release --target disquisition-desktop --parallel
+
+      - name: Package Linux build
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/licenses
+          cp build/disquisition-desktop build-baresip/output/baresip dist/
+          cp third_party/baresip/LICENSE dist/licenses/baresip.LICENSE
+          cp third_party/re/LICENSE dist/licenses/libre.LICENSE
+          cp /usr/share/doc/libssl-dev/copyright dist/licenses/OpenSSL.LICENSE
+          tar -czf disquisition-desktop-linux-x64.tar.gz -C dist .
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          cp build-baresip/output/baresip build/disquisition-desktop.app/Contents/MacOS/
+          mkdir -p build/disquisition-desktop.app/Contents/Resources/licenses
+          cp third_party/baresip/LICENSE build/disquisition-desktop.app/Contents/Resources/licenses/baresip.LICENSE
+          cp third_party/re/LICENSE build/disquisition-desktop.app/Contents/Resources/licenses/libre.LICENSE
+          cp "$(brew --prefix openssl@3)/LICENSE.txt" build/disquisition-desktop.app/Contents/Resources/licenses/OpenSSL.LICENSE
+          macdeployqt build/disquisition-desktop.app
+          codesign --force --deep --sign - build/disquisition-desktop.app
+          ditto -c -k --sequesterRsrc --keepParent build/disquisition-desktop.app disquisition-desktop-macos-arm64.zip
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item build/Release/disquisition-desktop.exe dist/
+          Copy-Item build-baresip/output/baresip.exe dist/
+          New-Item -ItemType Directory -Path dist/licenses | Out-Null
+          Copy-Item third_party/baresip/LICENSE dist/licenses/baresip.LICENSE
+          Copy-Item third_party/re/LICENSE dist/licenses/libre.LICENSE
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/share/openssl/copyright" dist/licenses/OpenSSL.LICENSE
+          windeployqt --release --no-translations dist/disquisition-desktop.exe
+          Compress-Archive -Path dist/* -DestinationPath disquisition-desktop-windows-x64.zip
+
+      - name: Upload desktop build
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.*
+          if-no-files-found: error
