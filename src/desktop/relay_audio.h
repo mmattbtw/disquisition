@@ -1,12 +1,14 @@
 #pragma once
 
 #include <QAudioFormat>
+#include <QAudioDevice>
 #include <QAudioSink>
 #include <QAudioSource>
 #include <QByteArray>
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <QVector>
 
 class QIODevice;
 
@@ -31,13 +33,19 @@ private:
     struct Playback {
         QAudioSink* sink = nullptr;
         QIODevice* device = nullptr;
+        QVector<float> samples;
+        double position = 0;
     };
-    QAudioFormat format_;
+    QAudioFormat inputFormat_;
+    QAudioFormat outputFormat_;
+    QAudioDevice outputDevice_;
     QAudioSource* source_ = nullptr;
     QIODevice* capture_ = nullptr;
     QHash<QString, Playback> playback_;
+    QByteArray captureBytes_;
+    QVector<float> captureSamples_;
+    double capturePosition_ = 0;
     QByteArray pending_;
-    QString outputId_;
     bool muted_ = false;
     bool deafened_ = false;
     bool speaking_ = false;
