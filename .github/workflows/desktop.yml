@@ -69,10 +69,19 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl@3
 
+      - name: Restore Windows OpenSSL cache
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-openssl-x64-windows-static-md-v1
+
       - name: Install Windows voice dependencies
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $env:GITHUB_WORKSPACE '.vcpkg-cache'
           & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
 
       - name: Build libre
