@@ -1,5 +1,6 @@
 #include "check.h"
 #include "session.h"
+#include "settings.h"
 #include "transport.h"
 
 #include <arpa/inet.h>
@@ -13,6 +14,21 @@
 using chat::MsgType;
 
 namespace {
+
+void settingsTest() {
+    handheld::Settings settings;
+    settings.host = "relay.mmatt.net";
+    settings.name = "my 3ds";
+    settings.color = "peach";
+    settings.pushToTalk = false;
+    const auto decoded = handheld::parseSettings(handheld::encodeSettings(settings));
+    CHECK(decoded.host == "relay.mmatt.net" && decoded.port == 3333);
+    CHECK(decoded.name == "my_3ds" && decoded.color == "peach" && !decoded.pushToTalk);
+    const auto invalid = handheld::parseSettings("host=http://bad\nport=999999\nname= \ncolor=invalid\n");
+    CHECK(invalid.host.empty() && invalid.port == 3333 && invalid.name == "3ds" && invalid.color == "mint");
+    const auto windows = handheld::parseSettings("host=relay.mmatt.net\r\nport=3333\r\nname=matt\r\n");
+    CHECK(windows.host == "relay.mmatt.net" && windows.name == "matt" && windows.port == 3333);
+}
 
 void sessionTest() {
     handheld::Session session;
@@ -237,6 +253,6 @@ void transportTest() {
 } // namespace
 
 int main() {
-    sessionTest(); audioTest(); transportTest();
+    settingsTest(); sessionTest(); audioTest(); transportTest();
     std::puts("handheld_test: ok");
 }

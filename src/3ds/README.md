@@ -80,6 +80,24 @@ color=mint
 push_to_talk=1
 ```
 
+Settings use the native 3DS SD archive API. Saving checks folder creation,
+file writes, flushing, and replacement, and keeps the previous file as
+`settings.cfg.bak` for recovery. A save failure does not prevent joining with
+the settings currently entered.
+
+## Troubleshooting connection and settings
+
+For `relay.mmatt.net`, use port `3333` for the relay. Port `9000` on that same
+hostname is the central server and does not accept a relay client session.
+
+The line below the title always shows the connection state. Local notices,
+including settings failures, appear in the top screen's footer instead of
+covering that state. Press B to dismiss a notice. SD errors identify the
+operation and native result, such as `SD open card: 0x...` or
+`SD write settings: 0x...`. The `3ds/disquisition` path on the card must be a
+directory, with `disquisition.3dsx` inside it, rather than a file named
+`disquisition`.
+
 ## Voice
 
 Dump the DSP firmware using Luma3DS's Rosalina menu: Miscellaneous options,
@@ -158,6 +176,11 @@ and resampling rate/pitch. `end_to_end_test` connects these same client classes
 to the real server and relay, checks text delivery both ways with a direct
 client and SQLite history, and exchanges known PCM with a desktop-format peer.
 Those tests substitute PCM for the device's microphone and speaker services.
+`handheld_settings_store_test` runs the native settings code against simulated
+filesystem calls, checking first and repeated saves, denied/short writes,
+failed replacement rollback, backup recovery, unavailable SD media, and a file
+where the settings directory should be. It does not emulate the console's
+filesystem service or establish that a particular SD card is writable.
 
 Before calling a device build stable, test sending and receiving on both
 screens, long messages, scrolling while messages arrive, multiple voice users,
@@ -178,5 +201,7 @@ so an interrupted send can be lost and is never automatically resent.
   playback buffers and output configuration.
 - [Citro2D text API](https://github.com/devkitPro/citro2d/blob/master/include/c2d/text.h)
   supplies system-font rendering.
+- [libctru filesystem API](https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/services/fs.h)
+  supplies direct SD archive access and file write/flush operations.
 - [devkitPro application template](https://github.com/devkitPro/3ds-examples/blob/master/templates/application/Makefile)
   is the basis of the Makefile.

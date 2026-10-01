@@ -1,17 +1,10 @@
 #pragma once
 
 #include "session.h"
+#include "settings.h"
 #include <3ds.h>
 
 namespace handheld {
-
-struct Settings {
-    std::string host;
-    std::uint16_t port = 3333;
-    std::string name = "3ds";
-    std::string color = "mint";
-    bool pushToTalk = true;
-};
 
 class Worker {
 public:

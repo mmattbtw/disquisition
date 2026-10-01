@@ -1,4 +1,5 @@
 #include "worker.h"
+#include "settings_store.h"
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -8,9 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
 #include <malloc.h>
-#include <sys/stat.h>
 #include <utility>
 
 namespace {
@@ -19,7 +18,6 @@ using handheld::Settings;
 using handheld::View;
 using handheld::Worker;
 
-constexpr const char* kSettings = "sdmc:/3ds/disquisition/settings.cfg";
 const u32 background = C2D_Color32(23, 27, 30, 255);
 const u32 panel = C2D_Color32(34, 40, 43, 255);
 const u32 edge = C2D_Color32(51, 60, 63, 255);
@@ -150,37 +148,6 @@ u32 chatColor(const std::string& color) {
     return C2D_Color32(basic[index][0], basic[index][1], basic[index][2], 255);
 }
 
-Settings loadSettings() {
-    Settings settings;
-    std::ifstream file(kSettings);
-    std::string line;
-    while (std::getline(file, line)) {
-        const auto separator = line.find('=');
-        if (separator == std::string::npos) continue;
-        const auto key = line.substr(0, separator);
-        const auto value = chat::trim(line.substr(separator + 1));
-        if (key == "host" && value.size() <= 253) settings.host = value;
-        else if (key == "port") chat::parsePort(value, settings.port, false);
-        else if (key == "name") settings.name = chat::sanitizeName(value);
-        else if (key == "color" && chat::isValidColor(value)) settings.color = value;
-        else if (key == "push_to_talk") settings.pushToTalk = value != "0";
-    }
-    if (settings.name.empty()) settings.name = "3ds";
-    return settings;
-}
-
-bool saveSettings(const Settings& settings) {
-    mkdir("sdmc:/3ds", 0777);
-    mkdir("sdmc:/3ds/disquisition", 0777);
-    const std::string temporary = std::string(kSettings) + ".tmp";
-    std::ofstream file(temporary, std::ios::trunc);
-    file << "host=" << settings.host << "\nport=" << settings.port << "\nname=" << settings.name
-         << "\ncolor=" << settings.color << "\npush_to_talk=" << settings.pushToTalk << '\n';
-    file.close();
-    if (!file) return false;
-    return std::rename(temporary.c_str(), kSettings) == 0;
-}
-
 struct HookContext { Worker* worker; std::atomic<bool> keyboard{false}; };
 void lifecycle(APT_HookType type, void* data) {
     auto& context = *static_cast<HookContext*>(data);
@@ -247,7 +214,7 @@ void topScreen(C3D_RenderTarget* target, const View& view, const std::vector<Row
     C2D_SceneBegin(target);
     text("Disquisition", 14, 6, .72f);
     text(view.connected ? view.name : "3DS", 270, 13, .44f, mint, 120);
-    text(notice.empty() ? view.status : notice, 14, 34, .39f, subtle, 372);
+    text(view.status, 14, 34, .39f, subtle, 372);
     rect(14, 52, 372, 1, edge);
     if (rows.empty()) {
         text(view.connected ? "You're in. Say hello." : "Your chat, on two screens.", 18, 84, .62f, mint, 364);
@@ -265,7 +232,7 @@ void topScreen(C3D_RenderTarget* target, const View& view, const std::vector<Row
         }
     }
     rect(0, 222, 400, 18, panel);
-    text(scroll > 0 ? "D-pad scrolls  |  R returns to newest" : "D-pad scrolls  |  START exits",
+    text(!notice.empty() ? notice : scroll > 0 ? "D-pad scrolls  |  R returns to newest" : "D-pad scrolls  |  START exits",
          14, 224, .36f, subtle, 372);
 }
 
@@ -343,8 +310,11 @@ int main() {
         return 1;
     }
     u32* socketMemory = static_cast<u32*>(memalign(0x1000, 1024 * 1024));
-    const bool networkAvailable = socketMemory && R_SUCCEEDED(socInit(socketMemory, 1024 * 1024));
-    Settings settings = loadSettings();
+    const Result networkResult = socketMemory ? socInit(socketMemory, 1024 * 1024) :
+        static_cast<Result>(MAKERESULT(RL_PERMANENT, RS_OUTOFRESOURCE, RM_APPLICATION, RD_OUT_OF_MEMORY));
+    const bool networkAvailable = R_SUCCEEDED(networkResult);
+    std::string storageError;
+    Settings settings = handheld::loadSettings(storageError);
     {
         Worker worker;
         const bool workerAvailable = networkAvailable && worker.start();
@@ -354,7 +324,12 @@ int main() {
         int tab = settings.host.empty() ? 2 : 0;
         int scroll = 0, memberScroll = 0;
         bool joining = false, muted = false, deafened = false;
-        std::string notice = workerAvailable ? "" : "Network unavailable. Restart with Wi-Fi enabled.";
+        std::string notice = storageError;
+        if (!networkAvailable) {
+            char code[16];
+            std::snprintf(code, sizeof(code), "0x%08lX", static_cast<unsigned long>(static_cast<u32>(networkResult)));
+            notice = std::string("Socket service: ") + code;
+        } else if (!workerAvailable) notice = "Could not start network worker.";
         std::uint64_t revision = ~std::uint64_t(0);
         std::vector<Row> rows;
         std::map<std::string, std::vector<Row>> rowCache;
@@ -362,7 +337,7 @@ int main() {
             if (!workerAvailable) return;
             if (joining) { worker.leave(); joining = false; return; }
             if (settings.host.empty()) { tab = 2; notice = "Tap Relay to enter its host or IPv4 address."; return; }
-            if (!saveSettings(settings)) notice = "Could not save settings to the SD card.";
+            if (!handheld::saveSettings(settings, storageError)) notice = storageError + "; settings not saved";
             else notice.clear();
             worker.join(settings);
             joining = true;
@@ -405,7 +380,8 @@ int main() {
                     if (hit(touch, 12, 197, 296, 29)) join();
                     else if (hit(touch, 12, 158, 296, 31)) {
                         settings.pushToTalk = !settings.pushToTalk;
-                        if (!saveSettings(settings)) notice = "Could not save settings to the SD card.";
+                        if (!handheld::saveSettings(settings, storageError)) notice = storageError + "; settings not saved";
+                        else notice.clear();
                     } else if (joining) notice = "Leave the relay before changing connection settings.";
                     else if (hit(touch, 12, 44, 296, 31)) {
                         std::string value = settings.host;
@@ -450,7 +426,7 @@ int main() {
             C3D_FrameEnd(0);
         }
         aptUnhook(&cookie);
-        if (!settings.host.empty()) saveSettings(settings);
+        if (!settings.host.empty()) handheld::saveSettings(settings, storageError);
     } // Stop the worker and release MIC/NDSP before tearing down sockets/graphics.
     if (networkAvailable) socExit();
     std::free(socketMemory);
