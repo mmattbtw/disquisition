@@ -12,7 +12,8 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.artifact }}
-    runs-on: ${{ matrix.os }}
+    # Keep fork pull requests on GitHub-hosted runners.
+    runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","truenas","disquisition"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,10 +38,13 @@ jobs:
             openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Check out libre
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: baresip/re
           ref: v4.11.0
           path: third_party/re
@@ -48,6 +52,7 @@ jobs:
       - name: Check out baresip
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: baresip/baresip
           ref: v4.11.0
           path: third_party/baresip
@@ -60,7 +65,7 @@ jobs:
           cache: true
 
       - name: Install Linux voice dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment != 'self-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libssl-dev pkg-config libavcodec-dev libavutil-dev libswscale-dev
@@ -91,19 +96,19 @@ jobs:
       - name: Build libre
         run: |
           cmake -S third_party/re -B build-re -DCMAKE_BUILD_TYPE=Release -DLIBRE_BUILD_SHARED=OFF -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/baresip-prefix"
-          cmake --build build-re --config Release --target re --parallel
+          cmake --build build-re --config Release --target re --parallel 2
           cmake --install build-re --config Release
 
       - name: Build baresip with voice modules
         run: |
           cmake -S cmake/bundled-baresip -B build-baresip -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/baresip-prefix" -DBARESIP_SOURCE_DIR="${{ github.workspace }}/third_party/baresip" -DBARESIP_AUDIO_MODULE=${{ matrix.audio-module }} -DRE_INCLUDE_DIR="${{ github.workspace }}/baresip-prefix/include/re" -DRE_LIBRARY="${{ github.workspace }}/baresip-prefix/lib/${{ matrix.re-library }}" -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}"
-          cmake --build build-baresip --config Release --target baresip_exe --parallel
+          cmake --build build-baresip --config Release --target baresip_exe --parallel 2
 
       - name: Configure
         run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
 
       - name: Build desktop client
-        run: cmake --build build --config Release --target disquisition-desktop --parallel
+        run: cmake --build build --config Release --target disquisition-desktop --parallel 2
 
       - name: Package Linux build
         if: runner.os == 'Linux'
