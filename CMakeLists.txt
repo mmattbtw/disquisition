@@ -193,6 +193,14 @@ if(BUILD_TESTING)
   target_include_directories(handheld_settings_store_test PRIVATE test/fake_3ds_fs)
   target_link_libraries(handheld_settings_store_test PRIVATE handheld_core)
   add_test(NAME handheld_settings_store_test COMMAND handheld_settings_store_test)
+  add_executable(handheld_socket_status_test
+    test/handheld_socket_status_test.cpp src/3ds/source/transport.cpp)
+  target_include_directories(handheld_socket_status_test PRIVATE src/3ds/include)
+  target_compile_definitions(handheld_socket_status_test PRIVATE __3DS__)
+  target_compile_options(handheld_socket_status_test PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/test/fake_3ds_soc.h")
+  target_link_libraries(handheld_socket_status_test PRIVATE chat_protocol)
+  add_test(NAME handheld_socket_status_test COMMAND handheld_socket_status_test)
 
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
@@ -220,6 +228,6 @@ if(BUILD_TESTING)
   add_test(NAME end_to_end_test
     COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
 
-  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test handheld_test handheld_settings_store_test PROPERTIES TIMEOUT 120)
+  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test handheld_test handheld_settings_store_test handheld_socket_status_test PROPERTIES TIMEOUT 120)
 endif()
 endif()

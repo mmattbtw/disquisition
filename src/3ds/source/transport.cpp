@@ -13,6 +13,21 @@
 namespace handheld {
 namespace {
 bool wouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR; }
+bool connectPending(int code) {
+#ifdef __3DS__
+    // SO_ERROR's value is not translated by libctru. These are the SOC
+    // service's raw EAGAIN, EALREADY and EINPROGRESS values, not POSIX errno.
+    if (code == -6 || code == -7 || code == -26) return true;
+#endif
+    return code == EINPROGRESS || code == EALREADY || code == EWOULDBLOCK || code == EAGAIN;
+}
+std::string systemError(const char* operation, int code) {
+    // A negative SO_ERROR is a raw service code. Passing it to newlib's
+    // strerror is unsafe and cannot produce the corresponding POSIX message.
+    if (code < 0)
+        return std::string(operation) + ": SOC error [" + std::to_string(code) + "]";
+    return std::string(operation) + ": " + std::strerror(code) + " [" + std::to_string(code) + "]";
+}
 }
 
 void Transport::close() {
@@ -41,14 +56,22 @@ bool Transport::open(const std::string& host, std::uint16_t port, std::uint64_t 
         hostent* resolved = gethostbyname(host.c_str());
         if (!resolved || resolved->h_addrtype != AF_INET || resolved->h_length != 4 ||
             !resolved->h_addr_list[0]) {
-            fail("Cannot resolve relay. Check Wi-Fi and host.");
+            fail("DNS failed [" + std::to_string(h_errno) + "]. Check Wi-Fi and relay host.");
             return false;
         }
         std::memcpy(&address.sin_addr, resolved->h_addr_list[0], 4);
     }
     socket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_ < 0 || socket_ >= FD_SETSIZE || fcntl(socket_, F_SETFL, O_NONBLOCK) < 0) {
-        fail("Cannot open network socket.");
+    if (socket_ < 0) {
+        fail(systemError("Socket", errno));
+        return false;
+    }
+    if (socket_ >= FD_SETSIZE) {
+        fail("Socket descriptor exceeds select limit.");
+        return false;
+    }
+    if (fcntl(socket_, F_SETFL, O_NONBLOCK) < 0) {
+        fail(systemError("Nonblocking socket", errno));
         return false;
     }
     int yes = 1;
@@ -57,8 +80,8 @@ bool Transport::open(const std::string& host, std::uint16_t port, std::uint64_t 
     setsockopt(socket_, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
 #endif
     const int result = connect(socket_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-    if (result < 0 && errno != EINPROGRESS && errno != EWOULDBLOCK) {
-        fail("Relay connection failed.");
+    if (result < 0 && !connectPending(errno)) {
+        fail(systemError("TCP connect", errno));
         return false;
     }
     state_ = result == 0 ? State::Connected : State::Connecting;
@@ -99,10 +122,25 @@ void Transport::poll(std::uint64_t now, std::vector<chat::Message>& received) {
         if (ready > 0) {
             int error = 0;
             socklen_t length = sizeof(error);
-            if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error, &length) < 0 || error != 0)
-                fail("Relay refused the connection.");
-            else state_ = State::Connected;
-        } else if ((ready < 0 && errno != EINTR) || now >= deadline_) {
+            if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error, &length) < 0)
+                fail(systemError("Socket status", errno));
+            else if (error != 0 && !connectPending(error))
+                fail(systemError("TCP connect", error));
+            else {
+                // Horizon may retain raw EINPROGRESS in SO_ERROR after the
+                // connection completes. Verify a peer rather than declaring
+                // either failure or success from that stale value alone.
+                sockaddr_in peer{};
+                socklen_t peerLength = sizeof(peer);
+                if (getpeername(socket_, reinterpret_cast<sockaddr*>(&peer), &peerLength) == 0)
+                    state_ = State::Connected;
+                else if (errno != ENOTCONN && !connectPending(errno) && errno != EINTR)
+                    fail(systemError("TCP peer", errno));
+            }
+        } else if (ready < 0 && errno != EINTR) {
+            fail(systemError("Socket select", errno));
+        }
+        if (state_ == State::Connecting && now >= deadline_) {
             fail("Relay connection timed out.");
         }
     }
@@ -117,7 +155,7 @@ void Transport::poll(std::uint64_t now, std::vector<chat::Message>& received) {
 #endif
         );
         if (sent < 0 && wouldBlock()) break;
-        if (sent <= 0) { fail("Relay disconnected."); return; }
+        if (sent <= 0) { fail(sent < 0 ? systemError("TCP send", errno) : "Relay disconnected."); return; }
         offset_ += static_cast<std::size_t>(sent);
         queued_ -= static_cast<std::size_t>(sent);
         if (offset_ == bytes.size()) { outgoing_.pop_front(); offset_ = 0; }
@@ -126,7 +164,7 @@ void Transport::poll(std::uint64_t now, std::vector<chat::Message>& received) {
         char buffer[4096];
         const auto got = recv(socket_, buffer, sizeof(buffer), 0);
         if (got < 0 && wouldBlock()) break;
-        if (got <= 0) { fail("Relay disconnected."); return; }
+        if (got <= 0) { fail(got < 0 ? systemError("TCP receive", errno) : "Relay disconnected."); return; }
         incoming_.append(buffer, static_cast<std::size_t>(got));
         for (;;) {
             chat::Message message;

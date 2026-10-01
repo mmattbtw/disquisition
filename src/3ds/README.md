@@ -98,6 +98,19 @@ operation and native result, such as `SD open card: 0x...` or
 directory, with `disquisition.3dsx` inside it, rather than a file named
 `disquisition`.
 
+Network errors distinguish Wi-Fi being disconnected, DNS lookup, socket
+creation, nonblocking setup, TCP connection, and send/receive. Socket failures
+include the system error number in brackets. If a connection still fails,
+record both that status line and any SD error in the footer. The worker retries
+every three seconds; a save warning will not hide those attempts.
+
+Older builds could report `TCP connect` with code `-26` while the connection
+was actually completing. The 3DS socket service can leave its raw
+connection-in-progress value in `SO_ERROR` after the socket becomes writable.
+The client now checks for a connected peer, waits within the connection timeout
+when there is no peer yet, and preserves actual connection errors. See the
+[libctru report](https://github.com/devkitPro/libctru/issues/412).
+
 ## Voice
 
 Dump the DSP firmware using Luma3DS's Rosalina menu: Miscellaneous options,
@@ -181,6 +194,9 @@ filesystem calls, checking first and repeated saves, denied/short writes,
 failed replacement rollback, backup recovery, unavailable SD media, and a file
 where the settings directory should be. It does not emulate the console's
 filesystem service or establish that a particular SD card is writable.
+`handheld_socket_status_test` uses real loopback sockets with simulated 3DS
+status replies to check stale `-26`, delayed peer availability, timeouts, raw
+service failures, and successful protocol traffic after connection.
 
 Before calling a device build stable, test sending and receiving on both
 screens, long messages, scrolling while messages arrive, multiple voice users,

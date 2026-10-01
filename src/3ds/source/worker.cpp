@@ -54,6 +54,7 @@ void Worker::run() {
         audio.mixer.receive(sender, pcm);
     };
     Settings settings;
+    const bool wifiService = R_SUCCEEDED(acInit());
     bool wanted = false, quit = false, loggedIn = false;
     std::uint64_t retry = 0, signInDeadline = 0, publish = 0;
     std::uint64_t historyDeadline = 0, nextHistory = 0;
@@ -110,10 +111,21 @@ void Worker::run() {
         if (quit) break;
         if (wanted && (network.state() == Transport::State::Closed ||
                        network.state() == Transport::State::Failed) && now >= retry) {
-            session.view.status = "Connecting to " + settings.host + "...";
-            network.open(settings.host, settings.port, now);
-            loggedIn = false;
-            signInDeadline = now + 15000;
+            u32 wifi = 0;
+            if (wifiService && R_SUCCEEDED(ACU_GetWifiStatus(&wifi)) && wifi == 0) {
+                session.view.status = "Wi-Fi disconnected. Retrying in 3 seconds.";
+                retry = now + 3000;
+            } else {
+                session.view.status = "Connecting to " + settings.host + ":" + std::to_string(settings.port);
+                // DNS may block on this thread. Publish progress before entering
+                // it so the UI never appears to have ignored the Join button.
+                LightLock_Lock(&lock_);
+                published_ = session.view;
+                LightLock_Unlock(&lock_);
+                network.open(settings.host, settings.port, now);
+                loggedIn = false;
+                signInDeadline = static_cast<std::uint64_t>(osGetTime()) + 15000;
+            }
         }
         std::vector<chat::Message> messages;
         network.poll(now, messages);
@@ -165,6 +177,7 @@ void Worker::run() {
     }
     audio.stop();
     network.close();
+    if (wifiService) acExit();
 }
 
 } // namespace handheld
