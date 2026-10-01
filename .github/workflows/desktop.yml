@@ -74,7 +74,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-openssl-ffmpeg-x64-windows-v1
+          key: vcpkg-openssl-ffmpeg-sqlite3-x64-windows-v1
 
       - name: Install Windows voice dependencies
         if: runner.os == 'Windows'
@@ -83,7 +83,7 @@ jobs:
           New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
           $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $env:GITHUB_WORKSPACE '.vcpkg-cache'
           & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
-          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install 'ffmpeg[core,avcodec,swscale,nvcodec,amf]:x64-windows' pkgconf:x64-windows
+          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install 'ffmpeg[core,avcodec,swscale,nvcodec,amf]:x64-windows' pkgconf:x64-windows sqlite3:x64-windows
           $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
           "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           "PKG_CONFIG_PATH=$installed/lib/pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -100,7 +100,13 @@ jobs:
           cmake --build build-baresip --config Release --target baresip_exe --parallel
 
       - name: Configure
+        if: runner.os != 'Windows'
         run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
 
       - name: Build desktop client
         run: cmake --build build --config Release --target disquisition-desktop --parallel
