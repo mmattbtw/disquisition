@@ -35,7 +35,9 @@ jobs:
         run: ${{ matrix.deps }}
 
       - name: Build
-        run: make -j2
+        run: |
+          cmake -S . -B build
+          cmake --build build --parallel 2
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
