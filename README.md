@@ -10,6 +10,12 @@ The repository builds five pieces:
 - `disquisition::client`, a static C++ client library
 - `disquisition-desktop`, a Qt 6 desktop client with text chat and baresip voice
 
+There is also a native [Nintendo 3DS homebrew client](src/3ds/README.md)
+with a separate devkitPro build. It supports chat through the relay and
+experimental microphone/speaker voice using the desktop's TCP audio format.
+The [3DS workflow](.github/workflows/3ds.yml) produces a Homebrew Launcher
+`.3dsx` artifact. Actual hardware audio and lifecycle behavior still need testing.
+
 This is a plain TCP protocol. It does not provide encryption, authentication, private rooms, or access control. Use it only on networks and hosts you trust.
 
 ## Requirements

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -25,6 +26,8 @@
 #include "client/client.h"
 #include "client/connection.h"
 #include "common/protocol.h"
+#include "session.h"
+#include "transport.h"
 
 extern char** environ;
 
@@ -321,6 +324,124 @@ void testHistoryAndRoster(std::uint16_t serverPort) {
     CHECK(stored("carol", "hello from carol"));
 }
 
+// These are the exact state and socket classes compiled into the .3dsx. The
+// device services are the only part replaced here, with known PCM samples.
+struct Handheld {
+    handheld::Session session;
+    handheld::Transport transport;
+    bool started = false;
+    bool sawHistoryEnd = false;
+    std::vector<std::pair<std::string, std::string>> audio;
+
+    explicit Handheld(std::uint16_t port) {
+        session.audioReceived = [&](const std::string& name, const std::string& pcm) {
+            audio.emplace_back(name, pcm);
+        };
+        CHECK(transport.open("127.0.0.1", port, now()));
+    }
+    static std::uint64_t now() {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now().time_since_epoch()).count());
+    }
+    void tick() {
+        std::vector<chat::Message> received;
+        transport.poll(now(), received);
+        CHECK(transport.state() != handheld::Transport::State::Failed);
+        if (!started && transport.state() == handheld::Transport::State::Connected) {
+            session.begin("handheld");
+            started = true;
+        }
+        for (const auto& message : received) {
+            session.receive(message, now());
+            if (message.type == chat::MsgType::HistoryEnd) sawHistoryEnd = true;
+        }
+        for (const auto& message : session.takeOutgoing()) CHECK(transport.queue(message));
+    }
+    bool has(const std::string& name, const std::string& body) {
+        return std::any_of(session.view.messages.begin(), session.view.messages.end(),
+            [&](const auto& message) { return message.sender == name && message.body == body; });
+    }
+};
+
+void testHandheld(std::uint16_t serverPort, std::uint16_t relayPort,
+                  disquisition::Client& alice) {
+    Handheld device(relayPort);
+    CHECK(waitFor([&] { device.tick(); return device.session.view.connected && device.sawHistoryEnd; }));
+    CHECK(device.session.view.name == "handheld");
+    CHECK(device.has("alice", "hello from alice"));
+    CHECK(device.session.view.members.count("alice") == 1);
+    CHECK(waitFor([&] {
+        alice.sendMessage("hello Nintendo 3DS");
+        device.tick();
+        return device.has("alice", "hello Nintendo 3DS");
+    }));
+    CHECK(waitFor([&] {
+        CHECK(device.session.sendChat("hello from Nintendo 3DS", std::time(nullptr)));
+        device.tick();
+        return gAliceInbox.contains("handheld", "hello from Nintendo 3DS");
+    }));
+
+    RawSession desktop(serverPort);
+    CHECK(desktop.connection.send({chat::MsgType::Login, {"desktop_audio", "1", ""}}));
+    CHECK(desktop.next(chat::MsgType::LoginOk).fields[0] == "desktop_audio");
+    CHECK(desktop.connection.send({chat::MsgType::VoicePort, {"5062"}}));
+    CHECK(waitFor([&] {
+        device.tick();
+        const auto found = device.session.view.members.find("desktop_audio");
+        return found != device.session.view.members.end() && found->second.voice;
+    }));
+    device.session.setVoice(true);
+    device.tick(); device.tick();
+    CHECK(desktop.next(chat::MsgType::VoicePort).fields ==
+          (std::vector<std::string>{"handheld", "65535"}));
+    handheld::Samples samples;
+    samples.fill(1000);
+    samples[0] = -1000;
+    const auto pcm = handheld::encodePcm(samples);
+    CHECK(desktop.connection.send({chat::MsgType::VoiceAudio, {pcm}}));
+    CHECK(waitFor([&] { device.tick(); return !device.audio.empty(); }));
+    CHECK(device.audio.front() == (std::pair<std::string, std::string>{"desktop_audio", pcm}));
+    device.session.controls(false, false, true, true);
+    device.session.capture(pcm);
+    device.tick(); device.tick();
+    CHECK(desktop.next(chat::MsgType::VoiceAudio).fields ==
+          (std::vector<std::string>{"handheld", pcm}));
+    device.session.controls(false, true, true, true);
+    device.tick(); device.tick();
+    // The first state may still be the initial idle push-to-talk announcement.
+    chat::Message state;
+    CHECK(waitFor([&] {
+        while (desktop.connection.poll(state)) {
+            if (state.type == chat::MsgType::VoiceState && state.fields ==
+                (std::vector<std::string>{"handheld", "1", "1"})) return true;
+        }
+        return false;
+    }));
+    const auto heard = device.audio.size();
+    CHECK(desktop.connection.send({chat::MsgType::VoiceAudio, {pcm}}));
+    CHECK(!waitFor([&] { device.tick(); return device.audio.size() > heard; }, 250));
+    device.session.setVoice(false);
+    device.tick(); device.tick();
+    CHECK(desktop.next(chat::MsgType::VoicePort).fields ==
+          (std::vector<std::string>{"handheld", "0"}));
+
+    RawSession history(serverPort);
+    CHECK(history.connection.send({chat::MsgType::Login, {"handheld_history", "1", ""}}));
+    history.next(chat::MsgType::LoginOk);
+    CHECK(history.connection.send({chat::MsgType::FetchHistory, {}}));
+    bool stored = false;
+    CHECK(waitFor([&] {
+        chat::Message message;
+        while (history.connection.poll(message)) {
+            if (message.type == chat::MsgType::History && message.fields.size() == 4 &&
+                message.fields[1] == "handheld" && message.fields[2] == "hello from Nintendo 3DS") stored = true;
+            if (message.type == chat::MsgType::HistoryEnd) return true;
+        }
+        return false;
+    }));
+    CHECK(stored);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -376,6 +497,7 @@ int main(int argc, char** argv) {
         CHECK(!gCarolInbox.contains("carol", "hello from carol"));
 
         testHistoryAndRoster(gServer.port);
+        testHandheld(gServer.port, gRelay.port, alice);
 
         carol.disconnect();
         bob.disconnect();

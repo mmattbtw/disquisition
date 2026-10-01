@@ -170,6 +170,17 @@ target_link_libraries(relay PRIVATE chat_network)
 
 include(CTest)
 if(BUILD_TESTING)
+  # The console's protocol, state, sockets, mixer and resampler also compile on
+  # the host, so compatibility tests exercise the code shipped in the .3dsx.
+  add_library(handheld_core STATIC
+    src/3ds/source/session.cpp
+    src/3ds/source/transport.cpp)
+  target_include_directories(handheld_core PUBLIC src/3ds/include)
+  target_link_libraries(handheld_core PUBLIC chat_protocol)
+  add_executable(handheld_test test/handheld_test.cpp)
+  target_link_libraries(handheld_test PRIVATE handheld_core)
+  add_test(NAME handheld_test COMMAND handheld_test)
+
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
@@ -188,10 +199,10 @@ if(BUILD_TESTING)
 
   # Runs the real server and relay executables as child processes.
   add_executable(end_to_end_test test/end_to_end_test.cpp)
-  target_link_libraries(end_to_end_test PRIVATE disquisition_client)
+  target_link_libraries(end_to_end_test PRIVATE disquisition_client handheld_core)
   add_test(NAME end_to_end_test
     COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
 
-  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
+  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test handheld_test PROPERTIES TIMEOUT 120)
 endif()
 endif()
