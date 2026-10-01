@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace chat {
@@ -21,6 +22,8 @@ struct ClientOptions {
     bool leakMyIp = false;
 
     std::string logFile; // empty: no logging, since console output would corrupt the screen
+    std::string messageFile; // empty: do not save chat locally
+    std::optional<std::int64_t> maxSavedMessages; // absent: unlimited
 };
 
 // Reads the command line, or asks interactively when there are no arguments.

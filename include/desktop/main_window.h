@@ -1,17 +1,23 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <memory>
+#include <optional>
 
 #include "common/protocol.h"
-#include "desktop/voice_engine.h"
+#include "common/recent_messages.h"
 #include "desktop/relay_audio.h"
+#include "desktop/screen_capture.h"
+#include "desktop/voice_engine.h"
 
 class QLabel;
 class QComboBox;
+class QDialog;
 class QLineEdit;
 class QListWidget;
 class QMediaDevices;
@@ -57,7 +63,10 @@ private:
     void sendFrame(QTcpSocket* socket, const chat::Message& message);
     void sendVoiceState();
     void appendChat(const QString& sender, const QString& body,
-                    const QString& messageColor = "mint", bool system = false);
+                    const QString& messageColor = "mint", bool system = false,
+                    qint64 timestamp = -1);
+    void openSavedMessages();
+    void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
     void refreshAudioDevices();
     void startJoining();
@@ -69,6 +78,9 @@ private:
     void handleTransportClosed();
     void retryConnection();
     void probeRelay();
+    void startScreenShare();
+    void stopScreenShare();
+    void showScreenFrame(quint32 frameId, const QList<QByteArray>& chunks);
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -76,15 +88,20 @@ private:
     QPushButton* connectButton_ = nullptr;
     QPushButton* voiceButton_ = nullptr;
     QPushButton* settingsButton_ = nullptr;
+    QPushButton* shareButton_ = nullptr;
     QPushButton* muteButton_ = nullptr;
     QPushButton* deafenButton_ = nullptr;
     QTextBrowser* transcript_ = nullptr;
+    std::unique_ptr<chat::RecentMessages> recentMessages_;
     QListWidget* members_ = nullptr;
     QLineEdit* composer_ = nullptr;
     QPushButton* sendButton_ = nullptr;
     QLabel* connectionLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
+    QDialog* screenPreview_ = nullptr;
+    QLabel* screenImage_ = nullptr;
+    QLabel* screenStats_ = nullptr;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;
@@ -97,6 +114,7 @@ private:
     QString serverHost_ = "127.0.0.1";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
+    bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
     QString relayHost_;
     quint16 relayPort_ = 3333;
@@ -114,12 +132,28 @@ private:
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
     QString messageColor_ = "mint";
+    bool saveMessages_ = false;
+    bool savedMessagesLoaded_ = false;
+    bool savingFailed_ = false;
+    QString messageFile_;
+    std::optional<std::int64_t> maxSavedMessages_;
     bool localSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
+    // Screen sharing is local only for now: frames go through the assembler
+    // straight into a preview window instead of over the network.
+    ScreenCapture screenCapture_;
+    ScreenFrameAssembler screenAssembler_;
+    std::unique_ptr<ScreenDecoder> screenDecoder_;
+    QElapsedTimer screenStatsClock_;
+    int screenStatsFrames_ = 0;
+    qint64 screenStatsBytes_ = 0;
+    int screenStatsChunks_ = 0;
+    bool screenFramesSeen_ = false;
+    quint64 screenShareGeneration_ = 0;
     QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;

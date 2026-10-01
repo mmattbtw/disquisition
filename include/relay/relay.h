@@ -27,7 +27,7 @@ namespace chat {
 //   Hello  a peer dialling one of the hosted users; handed to that user's
 //          mesh.
 //
-// The relay stores nothing; history stays on the server.
+// The relay and server do not retain message history.
 class Relay {
 public:
     explicit Relay(RelayOptions options);

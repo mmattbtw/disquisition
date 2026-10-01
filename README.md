@@ -1,10 +1,10 @@
 # disquisition
 
-Disquisition is a small C++20 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and stores recent messages in SQLite. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
+Disquisition is a small C++20 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and does not store messages. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
 
 The repository builds five pieces:
 
-- `server`, the discovery and history service
+- `server`, the discovery service
 - `client`, an ncurses terminal client
 - `relay`, a shared gateway for clients that cannot accept inbound connections
 - `disquisition::client`, a static C++ client library
@@ -15,8 +15,8 @@ This is a plain TCP protocol. It does not provide encryption, authentication, pr
 ## Requirements
 
 - CMake 3.16 or newer
-- a C++20 compiler
 - SQLite 3.24 or newer, including development headers
+- a C++20 compiler
 - ncurses, including development headers
 - Git and network access the first time CMake configures, to download spdlog
 - POSIX sockets and `poll`
@@ -41,7 +41,8 @@ cmake --build build --target disquisition-desktop
 
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
-Run the server on Linux or macOS, then build the Windows app with Qt 6 and:
+Install SQLite 3.24 or newer and its development headers alongside Qt 6. Run
+the server on Linux or macOS, then build the Windows app with:
 
 ```powershell
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
@@ -70,6 +71,9 @@ voice SIP port in Preferences for each client running on the same machine. If
 peers cannot directly reach the address seen by the server, enter a reachable
 DNS name or IP as the public host and forward both the automatically chosen TCP
 chat port and the chosen SIP/RTP ports when connecting directly.
+For clients on the same LAN, select "Advertise local IP automatically" in
+Preferences to announce the local IPv4 address. This takes precedence over the
+saved public host while selected. It also applies during direct relay fallback.
 
 To keep your IP hidden from other users, set the relay address and port in
 Preferences before joining. The desktop app then connects only to the relay;
@@ -143,6 +147,8 @@ Open another terminal for each client:
 
 Each direct client opens a peer listener on an automatically selected port. On a LAN, the server announces the source address it sees. Across routed networks, pass a reachable address with `--advertise` and forward the chosen `--p2p-port` through the firewall or router.
 
+Pass `--local` to announce the client's local IPv4 address automatically. This is useful when the server sees a different address, such as when it runs on the same machine. The selected address appears in the client's greeting. Use `--advertise` instead when peers need a public address. With `--relay`, `--local` applies only during direct fallback enabled by `--leak-my-ip`.
+
 ```sh
 ./build/client \
   --host chat.example.net \
@@ -156,18 +162,31 @@ If two connected users request the same name, the server gives the later user a 
 
 Running `./build/client` with no arguments starts an interactive setup prompt. That prompt defaults to `relay.mmatt.net:9000`. When any command-line option is present, the normal command-line defaults are `127.0.0.1:9000`.
 
+SQLite remains available for future server data. The server opens the configured database but creates no message tables and stores no chat history.
+
 ## How delivery works
 
 After sign-in, the server sends the client a roster containing each user's host and peer port. For each pair of users, the lexicographically earlier name opens the connection. This produces one TCP connection per pair.
 
-When the terminal client sends a message, it does two separate things:
+The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
 
-1. It sends the live message to the peer mesh.
-2. It sends a copy to the server for SQLite storage.
+Local saving is off by default. In the terminal client, pass
+`--save-messages <path.db>` or enter a file path during interactive setup. You
+can also enter `/save <path.db>` while connected to start saving, or `/save off`
+to stop. Pass `--max-saved-messages <count>` to retain only that many messages.
+In the desktop app, open Preferences (or use `/save`), check "Save chat messages
+locally," choose a SQLite file, and optionally enter a maximum. Leaving the
+maximum blank keeps every message. Both clients append each new chat message
+to the file as it arrives or is sent. They reopen an existing database and
+show its 1,000 most recent messages when you connect. The stored history can
+grow beyond what the UI displays. `/clear` clears the local message pane but
+does not delete saved messages.
 
-After joining, the terminal client waits for its peer links to settle and then requests recent history. It removes duplicates when the same message arrives from both the live mesh and history.
+The SQLite `saved_messages` table has `timestamp` (Unix seconds), `sender`,
+`body`, and `color` columns. The clients do not save system notices or send
+saved messages to the server.
 
-The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery and history storage stop. Messages sent during that outage are not added to SQLite later.
+The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery stops.
 
 ## Use a relay
 
@@ -190,7 +209,7 @@ Then connect clients to it:
 ./build/client --relay relay.example.net:3333 --name jesse
 ```
 
-The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server still handles names, discovery, and stored history.
+The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
 
 If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
 
@@ -218,7 +237,6 @@ If `--host` is absent, the fallback assumes that the chat server runs on the rel
 ```text
 -p, --port <port>       Listen port. Default: 9000
 -d, --db <path>         SQLite file. Default: chat.db
-    --history <count>   Messages returned for history. Default: 50
 -h, --help              Show help
 ```
 
@@ -232,6 +250,7 @@ Passing port `0` asks the operating system to select a free server port.
 -n, --name <name>          Name to request at sign-in
     --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
     --advertise <host>     Reachable address announced to peers
+    --local                Automatically announce your local IPv4 address
     --relay <host[:port]>  Use a relay. Default relay port: 3333
     --leak-my-ip           Fall back to direct mode if the relay is unavailable
     --log <file>           Write a debug log to this file. Default: no log
@@ -273,6 +292,7 @@ The terminal client writes nothing to the console while its interface is open, s
 | `/users` | List users and known connection routes |
 | `/color <value>` | Set a named shade or an xterm-256 index |
 | `/clear` | Clear the local message pane |
+| `/save <path.db>`, `/save off` | Start or stop continuous local message saving |
 | `/help` | Show commands |
 | `/quit`, `/exit` | Quit |
 
@@ -322,7 +342,7 @@ disquisition::Client client(
 );
 ```
 
-The current library is smaller than the terminal client. It supports live send and receive, direct or relay mode, and history storage for sent messages. It does not request stored history, reconnect after a connection failure, expose the user roster, or report the final suffixed name. The message callback runs on the library's background service thread, so callback code must be thread-safe. The API throws standard exceptions for invalid values, invalid call order, and connection failures.
+The current library is smaller than the terminal client. It supports live send and receive in direct or relay mode. It does not reconnect after a connection failure, expose the user roster, or report the final suffixed name. The message callback runs on the library's background service thread, so callback code must be thread-safe. The API throws standard exceptions for invalid values, invalid call order, and connection failures.
 
 See [`examples/basic_client.cpp`](examples/basic_client.cpp) for an interactive example. It uses its own Makefile and compiles the required project sources directly. Build the main project once first, so CMake has downloaded spdlog:
 
@@ -338,7 +358,7 @@ make
 include/client/client.h        Public C++ library API
 include/                       Headers, one folder per component below
 src/common/                    Wire protocol, socket helpers and command-line parsing
-src/server/                    Discovery and SQLite history server
+src/server/                    Discovery server
 src/client/                    Client library, terminal UI, connection and peer mesh
 src/relay/                     Multi-user relay
 test/                          Unit and end-to-end tests (run with ctest)

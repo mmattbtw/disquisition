@@ -1,6 +1,9 @@
 #include "common/net.h"
 
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -86,6 +89,69 @@ std::uint16_t localPort(int fd) {
         return ntohs(reinterpret_cast<sockaddr_in*>(&address)->sin_port);
     }
     return 0;
+}
+
+std::string localIpAddress(const std::string& serverHost, std::uint16_t serverPort) {
+    // A UDP connect selects a route without sending a packet or depending on
+    // the server being up. The resulting socket has the interface's address.
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    addrinfo* results = nullptr;
+    if (getaddrinfo(serverHost.c_str(), std::to_string(serverPort).c_str(), &hints,
+                    &results) == 0) {
+        for (addrinfo* entry = results; entry != nullptr; entry = entry->ai_next) {
+            const int fd = socket(entry->ai_family, entry->ai_socktype, entry->ai_protocol);
+            if (fd < 0) {
+                continue;
+            }
+            sockaddr_in local{};
+            socklen_t length = sizeof(local);
+            const bool found = connect(fd, entry->ai_addr, entry->ai_addrlen) == 0 &&
+                               getsockname(fd, reinterpret_cast<sockaddr*>(&local), &length) == 0 &&
+                               local.sin_family == AF_INET &&
+                               (ntohl(local.sin_addr.s_addr) >> 24) != 127;
+            ::close(fd);
+            if (found) {
+                char address[INET_ADDRSTRLEN];
+                if (inet_ntop(AF_INET, &local.sin_addr, address, sizeof(address)) != nullptr) {
+                    freeaddrinfo(results);
+                    return address;
+                }
+            }
+        }
+        freeaddrinfo(results);
+    }
+
+    // Loopback servers and unavailable DNS cannot identify a LAN route.
+    ifaddrs* interfaces = nullptr;
+    if (getifaddrs(&interfaces) != 0) {
+        return {};
+    }
+    std::string address;
+    // Prefer a LAN interface over a point-to-point tunnel when the server
+    // route cannot help us choose.
+    for (int pass = 0; pass < 2 && address.empty(); ++pass) {
+        for (ifaddrs* entry = interfaces; entry != nullptr; entry = entry->ifa_next) {
+            if (entry->ifa_addr == nullptr || entry->ifa_addr->sa_family != AF_INET ||
+                (entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_LOOPBACK) != 0 ||
+                (pass == 0 && (entry->ifa_flags & IFF_BROADCAST) == 0)) {
+                continue;
+            }
+            const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(entry->ifa_addr);
+            const std::uint32_t ip = ntohl(ipv4->sin_addr.s_addr);
+            if (ip == 0 || (ip >> 24) == 127 || (ip >> 16) == 0xa9fe) {
+                continue;
+            }
+            char text[INET_ADDRSTRLEN];
+            if (inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) != nullptr) {
+                address = text;
+                break;
+            }
+        }
+    }
+    freeifaddrs(interfaces);
+    return address;
 }
 
 void acceptConnections(int listenFd, const std::atomic<bool>& running,
