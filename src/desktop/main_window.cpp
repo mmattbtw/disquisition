@@ -10,6 +10,8 @@
 #include <QAction>
 #include <QAudioDevice>
 #include <QDialog>
+#include <QDesktopServices>
+#include <QPixmap>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -32,6 +34,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <exception>
@@ -243,6 +246,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
     });
     connect(settingsButton_, &QPushButton::clicked, this, &MainWindow::showPreferences);
+    connect(shareButton_, &QPushButton::clicked, this, [this] {
+        if (screenCapture_.running()) {
+            stopScreenShare();
+        } else {
+            startScreenShare();
+        }
+    });
+    screenCapture_.setBacklogProbe([this] { return server_.bytesToWrite(); });
+    connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::showScreenFrame);
+    connect(&screenCapture_, &ScreenCapture::errorOccurred, this, [this](const QString& message) {
+        appendChat("Screen", "capture failed: " + message, {}, true);
+        stopScreenShare();
+    });
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::sendMessage);
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
@@ -362,6 +378,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
 }
 
 MainWindow::~MainWindow() {
+    stopScreenShare();
     disconnectAll();
 }
 
@@ -383,9 +400,11 @@ void MainWindow::buildUi() {
     voiceButton_ = new QPushButton("join voice", root);
     voiceButton_->setEnabled(false);
     settingsButton_ = new QPushButton("settings", root);
+    shareButton_ = new QPushButton("share screen", root);
     setup->addWidget(name_, 1);
     setup->addWidget(connectButton_);
     setup->addWidget(voiceButton_);
+    setup->addWidget(shareButton_);
     setup->addWidget(settingsButton_);
     page->addLayout(setup);
 
@@ -602,6 +621,122 @@ void MainWindow::leaveVoice() {
         sendVoiceState();
     }
     refreshMembers();
+}
+
+void MainWindow::startScreenShare() {
+#if defined(Q_OS_MACOS)
+    if (!requestScreenRecordingAccess()) {
+        QMessageBox message(this);
+        message.setWindowTitle("Screen recording permission needed");
+        message.setText("Allow Disquisition to record your screen in macOS System Settings, then restart the app.");
+        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access.");
+        auto* settings = message.addButton("Open System Settings", QMessageBox::ActionRole);
+        message.addButton(QMessageBox::Close);
+        message.exec();
+        if (message.clickedButton() == settings) {
+            QDesktopServices::openUrl(QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"));
+        }
+        return;
+    }
+#endif
+    if (!screenPreview_) {
+        screenPreview_ = new QDialog(this);
+        screenPreview_->setWindowTitle("screen share preview");
+        screenPreview_->resize(1280, 760);
+        auto* layout = new QVBoxLayout(screenPreview_);
+        screenImage_ = new QLabel(screenPreview_);
+        screenImage_->setAlignment(Qt::AlignCenter);
+        // Ignored lets the window shrink below the size of the last frame.
+        screenImage_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+        screenStats_ = new QLabel("waiting for the first frame", screenPreview_);
+        layout->addWidget(screenImage_, 1);
+        layout->addWidget(screenStats_);
+        connect(screenPreview_, &QDialog::finished, this, &MainWindow::stopScreenShare);
+    }
+    if (!screenCapture_.start()) {
+        appendChat("Screen", "no screen to capture", {}, true);
+        return;
+    }
+    screenDecoder_ = std::make_unique<ScreenDecoder>();
+    screenStatsClock_.start();
+    screenStatsFrames_ = 0;
+    screenStatsBytes_ = 0;
+    screenStatsChunks_ = 0;
+    screenFramesSeen_ = false;
+    const quint64 generation = ++screenShareGeneration_;
+    screenImage_->clear();
+    screenStats_->setText("waiting for the first frame");
+    screenPreview_->show();
+    shareButton_->setText("stop sharing");
+    QTimer::singleShot(5000, this, [this, generation] {
+        if (generation != screenShareGeneration_ || screenFramesSeen_) return;
+#if defined(Q_OS_MACOS)
+        const QString detail = "ScreenCaptureKit did not deliver a frame. Quit Disquisition, check its Screen & System Audio Recording access in System Settings, then reopen it.";
+#else
+        const QString detail = "No screen frames arrived. Check that this app has permission to capture your screen.";
+#endif
+        stopScreenShare();
+        QMessageBox::warning(this, "Screen capture failed", detail);
+    });
+}
+
+void MainWindow::stopScreenShare() {
+    ++screenShareGeneration_;
+    screenCapture_.stop();
+    screenAssembler_.remove(myName_);
+    if (screenPreview_ && screenPreview_->isVisible()) {
+        screenPreview_->hide();
+    }
+    if (shareButton_) {
+        shareButton_->setText("share screen");
+    }
+}
+
+void MainWindow::showScreenFrame(quint32 frameId, const QList<QByteArray>& chunks) {
+    QImage image;
+    for (int i = 0; i < chunks.size(); ++i) {
+        const auto count = static_cast<int>(chunks.size());
+        QByteArray data;
+        if (screenAssembler_.add(myName_, frameId, i, count, chunks[i], data) && screenDecoder_) {
+            image = screenDecoder_->decode(data);
+        }
+        if (!image.isNull() && i == chunks.size() - 1) {
+            screenFramesSeen_ = true;
+            // Scale in device pixels, and only when the frame does not fit,
+            // so the preview is never softer than the frame itself.
+            const qreal ratio = screenImage_->devicePixelRatioF();
+            const QSize room = screenImage_->size() * ratio;
+            QPixmap pixmap = QPixmap::fromImage(image);
+            if (pixmap.width() > room.width() || pixmap.height() > room.height()) {
+                pixmap = pixmap.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+            pixmap.setDevicePixelRatio(ratio);
+            screenImage_->setPixmap(pixmap);
+        }
+        screenStatsBytes_ += chunks[i].size();
+    }
+    ++screenStatsFrames_;
+    screenStatsChunks_ += static_cast<int>(chunks.size());
+
+    const qint64 elapsed = screenStatsClock_.elapsed();
+    if (elapsed < 1000 || image.isNull()) {
+        return;
+    }
+    const double fps = screenStatsFrames_ * 1000.0 / static_cast<double>(elapsed);
+    const double kbPerFrame = static_cast<double>(screenStatsBytes_) / 1024.0 / screenStatsFrames_;
+    const double mbps = static_cast<double>(screenStatsBytes_) * 8.0 / 1000.0 / static_cast<double>(elapsed);
+    screenStats_->setText(QString("%1  %2x%3  %4 fps  %5 KB/frame  %6 chunks/frame  %7 Mbps")
+                              .arg(screenCapture_.encoderName())
+                              .arg(image.width())
+                              .arg(image.height())
+                              .arg(fps, 0, 'f', 1)
+                              .arg(kbPerFrame, 0, 'f', 1)
+                              .arg(static_cast<double>(screenStatsChunks_) / screenStatsFrames_, 0, 'f', 1)
+                              .arg(mbps, 0, 'f', 2));
+    screenStatsClock_.restart();
+    screenStatsFrames_ = 0;
+    screenStatsBytes_ = 0;
+    screenStatsChunks_ = 0;
 }
 
 void MainWindow::showPreferences() {
