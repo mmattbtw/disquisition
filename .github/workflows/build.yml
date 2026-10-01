@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -20,16 +23,19 @@ jobs:
           - os: macos-latest
             artifact: disquisition-macos-arm64
             deps: brew install sqlite ncurses
-    runs-on: ${{ matrix.os }}
+    # Keep fork pull requests on GitHub-hosted runners.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","truenas","disquisition"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
-        if: ${{ matrix.deps != '' }}
+        if: ${{ matrix.deps != '' && runner.environment != 'self-hosted' }}
         run: ${{ matrix.deps }}
 
       - name: Build
-        run: make
+        run: make -j2
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
