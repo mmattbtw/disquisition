@@ -1,6 +1,6 @@
 // Black-box test of the whole system: it launches the real server and relay
 // executables, connects library clients to them, and checks that chat
-// travels peer to peer, through the relay, and into the server's history.
+// travels peer to peer and through the relay without server history.
 //
 // usage: end_to_end_test <path to server> <path to relay> <scratch directory>
 
@@ -295,6 +295,8 @@ void testHistoryAndRoster(std::uint16_t serverPort) {
     std::sort(peers.begin(), peers.end());
     CHECK((peers == std::vector<std::string>{"alice", "bob", "carol"}));
 
+    CHECK(dave.connection.send(chat::Message{chat::MsgType::Store,
+        {"123456789", "legacy message must not be retained", "20"}}));
     CHECK(dave.connection.send(chat::Message{chat::MsgType::FetchHistory, {}}));
     std::vector<chat::Message> history;
     CHECK(waitFor([&] {
@@ -309,16 +311,7 @@ void testHistoryAndRoster(std::uint16_t serverPort) {
         }
         return false;
     }));
-    auto stored = [&](const std::string& sender, const std::string& body) {
-        return std::any_of(history.begin(), history.end(), [&](const chat::Message& message) {
-            return message.fields.size() == 4 && message.fields[1] == sender &&
-                   message.fields[2] == body;
-        });
-    };
-    CHECK(stored("alice", "hello from alice"));
-    CHECK(stored("bob", "hello from bob"));
-    // carol's copy reached the server through the relay.
-    CHECK(stored("carol", "hello from carol"));
+    CHECK(history.empty());
 }
 
 } // namespace
@@ -327,15 +320,10 @@ int main(int argc, char** argv) {
     CHECK(argc == 4);
     const std::string serverPath = argv[1];
     const std::string relayPath = argv[2];
-    const std::string database = std::string(argv[3]) + "/end_to_end_test.db";
-    for (const char* suffix : {"", "-wal", "-shm"}) {
-        std::remove((database + suffix).c_str());
-    }
-
     gCheckCleanup = killChildren;
     signal(SIGPIPE, SIG_IGN);
 
-    spawnListening(gServer, {serverPath, "--port", "0", "--db", database});
+    spawnListening(gServer, {serverPath, "--port", "0", "--db", ":memory:"});
     spawnListening(gRelay,
                    {relayPath, "--host", "127.0.0.1", "--port", std::to_string(gServer.port),
                     "--listen", "0", "--advertise", "127.0.0.1"});
@@ -384,9 +372,6 @@ int main(int argc, char** argv) {
 
     stopChild(gRelay);
     stopChild(gServer);
-    for (const char* suffix : {"", "-wal", "-shm"}) {
-        std::remove((database + suffix).c_str());
-    }
     std::puts("end_to_end_test: ok");
     return 0;
 }

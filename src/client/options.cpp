@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <charconv>
 #include <iostream>
 
 #include "common/command_line.h"
@@ -29,6 +30,9 @@ constexpr const char* kUsage = R"(usage: client [options]
       --leak-my-ip     if the relay drops, fall back to a direct connection
                        while continuing to retry the relay
       --log <file>     write a debug log to this file
+      --save-messages <file>  continuously save chat to a local SQLite file
+      --max-saved-messages <count>  keep only the newest count in that file
+                       (default: unlimited; requires --save-messages)
   -h, --help           show this message
 )";
 
@@ -43,6 +47,12 @@ bool readLine(const char* prompt, std::string& answer) {
     }
     answer = trim(answer);
     return true;
+}
+
+bool parsePositiveCount(const std::string& value, std::int64_t& result) {
+    const char* end = value.data() + value.size();
+    const auto parsed = std::from_chars(value.data(), end, result);
+    return parsed.ec == std::errc{} && parsed.ptr == end && result > 0;
 }
 
 bool promptForOptions(ClientOptions& options) {
@@ -73,10 +83,26 @@ bool promptForOptions(ClientOptions& options) {
         }
         options.name = sanitizeName(answer);
         if (!options.name.empty()) {
-            return true;
+            break;
         }
         std::cout << "please enter a name\n";
     }
+
+    if (!readLine("save messages to SQLite file [off]: ", answer)) return false;
+    options.messageFile = answer;
+    if (!options.messageFile.empty()) {
+        for (;;) {
+            if (!readLine("maximum saved messages [unlimited]: ", answer)) return false;
+            if (answer.empty()) break;
+            std::int64_t maximum = 0;
+            if (parsePositiveCount(answer, maximum)) {
+                options.maxSavedMessages = maximum;
+                break;
+            }
+            std::cout << "please enter a positive number\n";
+        }
+    }
+    return true;
 }
 
 // Settles the options that depend on each other once all flags are read.
@@ -146,6 +172,17 @@ ClientOptions parseClientOptions(int argc, char** argv) {
         else if (args.is("--log")) {
             options.logFile = args.value();
         }
+        else if (args.is("--save-messages")) {
+            options.messageFile = args.value();
+            if (options.messageFile.empty()) args.fail("message file cannot be empty");
+        }
+        else if (args.is("--max-saved-messages")) {
+            std::int64_t maximum = 0;
+            if (!parsePositiveCount(args.value(), maximum)) {
+                args.fail("--max-saved-messages must be a positive integer");
+            }
+            options.maxSavedMessages = maximum;
+        }
         else if (args.is("-h", "--help")) {
             args.showHelp();
         }
@@ -154,6 +191,9 @@ ClientOptions parseClientOptions(int argc, char** argv) {
         }
     }
     resolveRelay(args, options, relay, hostGiven);
+    if (options.maxSavedMessages && options.messageFile.empty()) {
+        args.fail("--max-saved-messages requires --save-messages");
+    }
     return options;
 }
 
