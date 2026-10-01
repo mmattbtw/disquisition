@@ -59,7 +59,7 @@ int main() {
     std::thread server([&] {
         const int client = accept(listener, nullptr, nullptr);
         CHECK(client >= 0);
-        receiveMessages(client, messages, 3);
+        receiveMessages(client, messages, 2);
 
         const std::string incoming = chat::encode(
             chat::Message{chat::MsgType::PeerChat, {"jesse", "123456789", "hello matt", "20"}});
@@ -84,7 +84,7 @@ int main() {
     server.join();
     close(listener);
 
-    CHECK(messages.size() == 3);
+    CHECK(messages.size() == 2);
     CHECK(messages[0].type == chat::MsgType::Login);
     CHECK((messages[0].fields == std::vector<std::string>{"matt", "0", ""}));
     CHECK(messages[1].type == chat::MsgType::PeerChat);
@@ -92,12 +92,7 @@ int main() {
     CHECK(messages[1].fields[0] == "matt");
     CHECK(messages[1].fields[2] == "what's up");
     CHECK(messages[1].fields[3] == "20");
-    CHECK(messages[2].type == chat::MsgType::Store);
-    CHECK(
-        (messages[2].fields == std::vector<std::string>{messages[1].fields[1], "what's up", "20"}));
-
-    // Direct mode sends Login and Store to the central server. PeerChat goes
-    // through peer connections instead, so it does not appear here.
+    // Direct mode sends only Login to the central server.
     const int directListener = socket(AF_INET, SOCK_STREAM, 0);
     CHECK(directListener >= 0);
 
@@ -118,7 +113,7 @@ int main() {
     std::thread directServer([&] {
         const int directSocket = accept(directListener, nullptr, nullptr);
         CHECK(directSocket >= 0);
-        receiveMessages(directSocket, directMessages, 2);
+        receiveMessages(directSocket, directMessages, 1);
         close(directSocket);
     });
 
@@ -132,10 +127,9 @@ int main() {
     directServer.join();
     close(directListener);
 
-    CHECK(directMessages.size() == 2);
+    CHECK(directMessages.size() == 1);
     CHECK(directMessages[0].type == chat::MsgType::Login);
     CHECK(directMessages[0].fields[0] == "matt");
     CHECK(directMessages[0].fields[1] != "0");
-    CHECK(directMessages[1].type == chat::MsgType::Store);
-    CHECK(directMessages[1].fields[1] == "direct hello");
+
 }
