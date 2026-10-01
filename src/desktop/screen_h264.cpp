@@ -37,6 +37,7 @@ AVPixelFormat pixelFormatOf(QImage::Format format) {
 // encoders get NV12 or YUV 4:2:0, converted on the CPU.
 AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec,
                              AVPixelFormat sourceFormat) {
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
     const void* configs = nullptr;
     int count = 0;
     if (avcodec_get_supported_config(context, codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs,
@@ -45,6 +46,18 @@ AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec
         return AV_PIX_FMT_YUV420P;
     }
     const auto* formats = static_cast<const AVPixelFormat*>(configs);
+#else
+    // FFmpeg before 7.1 (e.g. Ubuntu 24.04) lists the formats on the codec.
+    (void)context;
+    const AVPixelFormat* formats = codec->pix_fmts;
+    if (!formats) {
+        return AV_PIX_FMT_YUV420P;
+    }
+    int count = 0;
+    while (formats[count] != AV_PIX_FMT_NONE) {
+        ++count;
+    }
+#endif
     for (const AVPixelFormat wanted : {sourceFormat, AV_PIX_FMT_NV12, AV_PIX_FMT_YUV420P}) {
         for (int i = 0; i < count; ++i) {
             if (formats[i] == wanted) {

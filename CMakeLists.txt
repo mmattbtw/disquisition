@@ -109,7 +109,7 @@ if(BUILD_DESKTOP_APP)
   # Screen sharing encodes and decodes H.264 with FFmpeg.
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
-    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=61.13 libavutil libswscale)
+    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
     # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
