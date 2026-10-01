@@ -23,6 +23,10 @@ class QScreen;
 class QScreenCapture;
 class QVideoFrame;
 class QVideoSink;
+class MacScreenCapture;
+
+// Requests macOS Screen Recording access when needed. Other platforms return true.
+bool requestScreenRecordingAccess();
 
 
 constexpr qsizetype kScreenChunkBytes = chat::kMaxFrameSize - 256;
@@ -56,6 +60,8 @@ signals:
 
 private:
     void handleFrame(const QVideoFrame& frame);
+    void handleImage(QImage image);
+    void submitFrame(std::function<QImage()> image);
 
     // One thread, never retired, so the encoder always runs on the thread it
     // was opened on and frames are encoded in order.
@@ -66,6 +72,9 @@ private:
     QScreenCapture* capture_ = nullptr;
     QMediaCaptureSession* session_ = nullptr;
     QVideoSink* sink_ = nullptr;
+#if defined(Q_OS_MACOS)
+    std::unique_ptr<MacScreenCapture> macCapture_;
+#endif
     std::function<qint64()> backlog_;
     QElapsedTimer clock_;
     qint64 nextDueMs_ = 0;

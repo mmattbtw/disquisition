@@ -11,6 +11,19 @@
 #include <QVideoFrameFormat>
 #include <QVideoSink>
 
+#if defined(Q_OS_MACOS)
+#include "desktop/mac_screen_capture.h"
+#include <CoreGraphics/CGWindow.h>
+#endif
+
+bool requestScreenRecordingAccess() {
+#if defined(Q_OS_MACOS)
+    return CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess();
+#else
+    return true;
+#endif
+}
+
 namespace {
 
 struct EncodedFrame {
@@ -85,10 +98,9 @@ QList<QByteArray> splitChunks(const QByteArray& data) {
 }
 
 // Runs on the encoding thread. Returns no chunks when there is nothing to send.
-EncodedFrame encodeFrame(const QVideoFrame& frame, const QRect& geometry, const QPoint& cursor,
+EncodedFrame encodeFrame(QImage image, const QRect& geometry, const QPoint& cursor,
                          H264Encoder& h264, const QSize& maxSize, int fps, qint64 ptsMs) {
     EncodedFrame encoded;
-    QImage image = frameImage(frame);
     if (image.isNull()) {
         return encoded;
     }
@@ -130,6 +142,25 @@ bool ScreenCapture::start(QScreen* screen) {
     encoderName_.clear();
 
     screen_ = screen;
+#if defined(Q_OS_MACOS)
+    const quint64 generation = generation_;
+    QPointer<ScreenCapture> self(this);
+    macCapture_ = std::make_unique<MacScreenCapture>(
+        [self, generation](QImage image) {
+            QMetaObject::invokeMethod(QGuiApplication::instance(),
+                                      [self, generation, image = std::move(image)]() mutable {
+                if (self && self->generation_ == generation) self->handleImage(std::move(image));
+            });
+        },
+        [self, generation](QString error) {
+            QMetaObject::invokeMethod(QGuiApplication::instance(), [self, generation, error] {
+                if (self && self->generation_ == generation) self->errorOccurred(error);
+            });
+        });
+    clock_.start();
+    nextDueMs_ = 0;
+    macCapture_->start();
+#else
     capture_ = new QScreenCapture(this);
     session_ = new QMediaCaptureSession(this);
     sink_ = new QVideoSink(this);
@@ -142,11 +173,15 @@ bool ScreenCapture::start(QScreen* screen) {
     clock_.start();
     nextDueMs_ = 0;
     capture_->start();
+#endif
     return true;
 }
 
 void ScreenCapture::stop() {
     ++generation_;
+#if defined(Q_OS_MACOS)
+    macCapture_.reset();
+#endif
     if (capture_) {
         capture_->stop();
 
@@ -162,10 +197,23 @@ void ScreenCapture::stop() {
 }
 
 bool ScreenCapture::running() const {
+#if defined(Q_OS_MACOS)
+    return macCapture_ && macCapture_->running();
+#else
     return capture_ && capture_->isActive();
+#endif
 }
 
 void ScreenCapture::handleFrame(const QVideoFrame& frame) {
+    submitFrame([frame] { return frameImage(frame); });
+}
+
+void ScreenCapture::handleImage(QImage image) {
+    if (image.isNull()) return;
+    submitFrame([image = std::move(image)] { return image; });
+}
+
+void ScreenCapture::submitFrame(std::function<QImage()> image) {
     // The screen delivers frames at its own refresh rate. Keep one per
     // interval, scheduled from the previous deadline so the average rate holds
     // even though frames never land exactly on it.
@@ -197,9 +245,9 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
     const quint32 frameId = nextFrameId_++;
     const quint64 generation = generation_;
     const int fps = static_cast<int>(1000 / frameIntervalMs_);
-    encoder_.start([this, frame, geometry, cursor, frameId, generation, h264 = h264_,
+    encoder_.start([this, image = std::move(image), geometry, cursor, frameId, generation, h264 = h264_,
                     maxSize = maxSize_, fps, now] {
-        EncodedFrame encoded = encodeFrame(frame, geometry, cursor, *h264, maxSize, fps, now);
+        EncodedFrame encoded = encodeFrame(image(), geometry, cursor, *h264, maxSize, fps, now);
         QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation] {
             encoding_ = false;
             if (generation != generation_) {

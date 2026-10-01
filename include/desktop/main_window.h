@@ -152,6 +152,8 @@ private:
     int screenStatsFrames_ = 0;
     qint64 screenStatsBytes_ = 0;
     int screenStatsChunks_ = 0;
+    bool screenFramesSeen_ = false;
+    quint64 screenShareGeneration_ = 0;
     QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;

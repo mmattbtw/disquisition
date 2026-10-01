@@ -131,19 +131,29 @@ if(BUILD_DESKTOP_APP)
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     if(APPLE)
+      set(DISQUISITION_CODESIGN_IDENTITY "-" CACHE STRING
+          "macOS signing identity for the desktop app; '-' uses ad-hoc signing")
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
+      set_source_files_properties(src/desktop/mac_screen_capture.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+      find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+      find_library(SCREENCAPTUREKIT_FRAMEWORK ScreenCaptureKit REQUIRED)
+      find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
+      find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
       target_link_libraries(disquisition-desktop PRIVATE
-        ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK})
+        ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
+        ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Disquisition"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
       add_custom_command(TARGET disquisition-desktop POST_BUILD
-        COMMAND codesign --force --deep --sign -
+        COMMAND codesign --force --deep --sign "${DISQUISITION_CODESIGN_IDENTITY}"
           "$<TARGET_BUNDLE_DIR:disquisition-desktop>"
-        COMMENT "Ad-hoc signing Disquisition for macOS permissions")
+        COMMENT "Signing Disquisition for macOS permissions")
     endif()
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.5+ not found; skipping disquisition-desktop")

@@ -10,6 +10,7 @@
 #include <QAction>
 #include <QAudioDevice>
 #include <QDialog>
+#include <QDesktopServices>
 #include <QPixmap>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -33,6 +34,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <exception>
@@ -622,6 +624,21 @@ void MainWindow::leaveVoice() {
 }
 
 void MainWindow::startScreenShare() {
+#if defined(Q_OS_MACOS)
+    if (!requestScreenRecordingAccess()) {
+        QMessageBox message(this);
+        message.setWindowTitle("Screen recording permission needed");
+        message.setText("Allow Disquisition to record your screen in macOS System Settings, then restart the app.");
+        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access.");
+        auto* settings = message.addButton("Open System Settings", QMessageBox::ActionRole);
+        message.addButton(QMessageBox::Close);
+        message.exec();
+        if (message.clickedButton() == settings) {
+            QDesktopServices::openUrl(QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"));
+        }
+        return;
+    }
+#endif
     if (!screenPreview_) {
         screenPreview_ = new QDialog(this);
         screenPreview_->setWindowTitle("screen share preview");
@@ -645,13 +662,26 @@ void MainWindow::startScreenShare() {
     screenStatsFrames_ = 0;
     screenStatsBytes_ = 0;
     screenStatsChunks_ = 0;
+    screenFramesSeen_ = false;
+    const quint64 generation = ++screenShareGeneration_;
     screenImage_->clear();
     screenStats_->setText("waiting for the first frame");
     screenPreview_->show();
     shareButton_->setText("stop sharing");
+    QTimer::singleShot(5000, this, [this, generation] {
+        if (generation != screenShareGeneration_ || screenFramesSeen_) return;
+#if defined(Q_OS_MACOS)
+        const QString detail = "ScreenCaptureKit did not deliver a frame. Quit Disquisition, check its Screen & System Audio Recording access in System Settings, then reopen it.";
+#else
+        const QString detail = "No screen frames arrived. Check that this app has permission to capture your screen.";
+#endif
+        stopScreenShare();
+        QMessageBox::warning(this, "Screen capture failed", detail);
+    });
 }
 
 void MainWindow::stopScreenShare() {
+    ++screenShareGeneration_;
     screenCapture_.stop();
     screenAssembler_.remove(myName_);
     if (screenPreview_ && screenPreview_->isVisible()) {
@@ -671,6 +701,7 @@ void MainWindow::showScreenFrame(quint32 frameId, const QList<QByteArray>& chunk
             image = screenDecoder_->decode(data);
         }
         if (!image.isNull() && i == chunks.size() - 1) {
+            screenFramesSeen_ = true;
             // Scale in device pixels, and only when the frame does not fit,
             // so the preview is never softer than the frame itself.
             const qreal ratio = screenImage_->devicePixelRatioF();
