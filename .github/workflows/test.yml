@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -24,20 +27,23 @@ jobs:
               sudo apt-get install -y libncurses-dev libsqlite3-dev
           - os: macos-latest
             deps: ""
-    runs-on: ${{ matrix.os }}
+    # Keep fork pull requests on GitHub-hosted runners.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","truenas","disquisition"]') || matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
-        if: ${{ matrix.deps != '' }}
+        if: ${{ matrix.deps != '' && runner.environment != 'self-hosted' }}
         run: ${{ matrix.deps }}
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 2
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
@@ -46,7 +52,7 @@ jobs:
   # (use-after-free, overflows, leaks, undefined behavior) into test failures.
   sanitizers:
     name: sanitizers (address, undefined)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Linux","X64","truenas","disquisition"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     env:
       SANITIZE: -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
@@ -54,8 +60,11 @@ jobs:
       UBSAN_OPTIONS: print_stacktrace=1
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
+        if: runner.environment != 'self-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y libncurses-dev libsqlite3-dev
@@ -68,7 +77,7 @@ jobs:
           "-DCMAKE_EXE_LINKER_FLAGS=$SANITIZE"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 2
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
