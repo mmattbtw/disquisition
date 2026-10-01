@@ -40,7 +40,7 @@ public:
     void connect();
     // Signs in. Allowed once per connection.
     void setName(std::string name);
-    // Delivers the message live and stores a copy on the server for history.
+    // Delivers the message live to peers or through the relay.
     void sendMessage(std::string message);
     // An xterm-256 color index for future messages.
     void setColor(int color);

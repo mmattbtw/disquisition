@@ -11,6 +11,7 @@
 #include <QAudioDevice>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QLabel>
@@ -21,6 +22,7 @@
 #include <QMediaDevices>
 #include <QMenuBar>
 #include <QNetworkInterface>
+#include <QDir>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
@@ -32,6 +34,8 @@
 #include <QUdpSocket>
 #include <QVBoxLayout>
 
+#include <exception>
+#include <string>
 #include <utility>
 
 #include "desktop/audio_permission.h"
@@ -95,6 +99,34 @@ QString voiceReachableHost(QString host) {
     return host;
 }
 
+QString localAdvertiseHost(const QHostAddress& routeAddress) {
+    if (routeAddress.protocol() == QAbstractSocket::IPv4Protocol &&
+        !routeAddress.isLoopback() && !routeAddress.isLinkLocal() && !routeAddress.isNull()) {
+        return routeAddress.toString();
+    }
+
+    // A server on this machine gives us a loopback route. Prefer an active
+    // LAN interface over a point-to-point tunnel in that case.
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const QNetworkInterface& interface : interfaces) {
+            const auto flags = interface.flags();
+            if (!(flags & QNetworkInterface::IsUp) || (flags & QNetworkInterface::IsLoopBack) ||
+                (pass == 0 && !(flags & QNetworkInterface::CanBroadcast))) {
+                continue;
+            }
+            for (const QNetworkAddressEntry& entry : interface.addressEntries()) {
+                const QHostAddress address = entry.ip();
+                if (address.protocol() == QAbstractSocket::IPv4Protocol &&
+                    !address.isLoopback() && !address.isLinkLocal() && !address.isNull()) {
+                    return address.toString();
+                }
+            }
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
@@ -102,11 +134,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     serverHost_ = settings.value("server/host", serverHost_).toString();
     serverPort_ = static_cast<quint16>(qBound(1, settings.value("server/port", 9000).toInt(), 65535));
     advertiseHost_ = settings.value("server/advertisedHost").toString();
+    advertiseLocal_ = settings.value("server/advertiseLocal", false).toBool();
     preferredVoicePort_ = static_cast<quint16>(
         qBound(1, settings.value("voice/sipPort", 5060).toInt(), 65534));
     relayHost_ = settings.value("relay/host").toString();
     relayPort_ = static_cast<quint16>(qBound(1, settings.value("relay/port", 3333).toInt(), 65535));
     leakMyIp_ = settings.value("relay/leakMyIp", false).toBool();
+    saveMessages_ = settings.value("messages/enabled", false).toBool();
+    messageFile_ = settings.value("messages/file",
+                                  QDir::homePath() + "/disquisition-messages.db").toString();
+    const QString maximum = settings.value("messages/maximum").toString();
+    bool validMaximum = false;
+    const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
+    if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     buildUi();
     setWindowTitle("Disquisition");
     resize(980, 680);
@@ -153,6 +193,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             });
 
     connect(&server_, &QTcpSocket::connected, this, [this] {
+        const QString advertised = usingRelay_ ? QString() :
+                                   advertiseLocal_ ? localAdvertiseHost(server_.localAddress()) :
+                                                     advertiseHost_;
+        if (!usingRelay_ && advertiseLocal_ && advertised.isEmpty()) {
+            QMessageBox::critical(this, "Cannot join",
+                                  "No active non-loopback IPv4 address is available to advertise.");
+            disconnectAll();
+            return;
+        }
         if (!usingRelay_ && !peerServer_.listen(QHostAddress::Any, 0)) {
             QMessageBox::critical(this, "Cannot join", peerServer_.errorString());
             server_.disconnectFromHost();
@@ -164,7 +213,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         sendFrame(&server_, chat::Message {
                                 chat::MsgType::Login,
                                 {s(name_->text()), std::to_string(usingRelay_ ? 0 : peerServer_.serverPort()),
-                                 s(advertiseHost_)}});
+                                 s(advertised)}});
     });
     connect(&server_, &QTcpSocket::readyRead, this, &MainWindow::readServer);
     connect(&server_, &QTcpSocket::disconnected, this, &MainWindow::handleTransportClosed);
@@ -345,6 +394,8 @@ void MainWindow::buildUi() {
     preferencesAction->setMenuRole(QAction::PreferencesRole);
     preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
+    auto* saveAction = appMenu->addAction("Message saving…");
+    connect(saveAction, &QAction::triggered, this, &MainWindow::showPreferences);
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -565,6 +616,10 @@ void MainWindow::showPreferences() {
     port->setValue(serverPort_);
     auto* advertisedHost = new QLineEdit(advertiseHost_, &dialog);
     advertisedHost->setPlaceholderText("optional public DNS name or IP");
+    auto* advertiseLocal = new QCheckBox("Advertise local IP automatically", &dialog);
+    advertiseLocal->setChecked(advertiseLocal_);
+    advertisedHost->setEnabled(!advertiseLocal_);
+    connect(advertiseLocal, &QCheckBox::toggled, advertisedHost, &QWidget::setDisabled);
     auto* sipPort = new QSpinBox(&dialog);
     sipPort->setRange(1, 65534);
     sipPort->setValue(preferredVoicePort_);
@@ -575,18 +630,77 @@ void MainWindow::showPreferences() {
     relayPort->setValue(relayPort_);
     auto* leakIp = new QCheckBox("Connect directly if relay fails (reveals your IP)", &dialog);
     leakIp->setChecked(leakMyIp_);
+    auto* saveMessages = new QCheckBox("Save chat messages locally", &dialog);
+    saveMessages->setChecked(saveMessages_);
+    auto* messageFile = new QLineEdit(messageFile_, &dialog);
+    auto* chooseMessageFile = new QPushButton("browse…", &dialog);
+    auto* messageFileRow = new QWidget(&dialog);
+    auto* messageFileLayout = new QHBoxLayout(messageFileRow);
+    messageFileLayout->setContentsMargins(0, 0, 0, 0);
+    messageFileLayout->addWidget(messageFile, 1);
+    messageFileLayout->addWidget(chooseMessageFile);
+    auto* maximum = new QLineEdit(&dialog);
+    maximum->setText(maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
+    maximum->setPlaceholderText("unlimited");
+    messageFileRow->setEnabled(saveMessages_);
+    maximum->setEnabled(saveMessages_);
+    connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
+    connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
+    connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
+        const QString chosen = QFileDialog::getSaveFileName(
+            &dialog, "Choose message database", messageFile->text(),
+            "SQLite database (*.db)", nullptr, QFileDialog::DontConfirmOverwrite);
+        if (!chosen.isEmpty()) messageFile->setText(chosen);
+    });
     form->addRow("server address", host);
     form->addRow("server port", port);
     form->addRow("public host", advertisedHost);
+    form->addRow("", advertiseLocal);
     form->addRow("voice SIP port", sipPort);
     form->addRow("relay address", relayHost);
     form->addRow("relay port", relayPort);
     form->addRow("", leakIp);
+    form->addRow("", saveMessages);
+    form->addRow("SQLite file", messageFileRow);
+    form->addRow("maximum messages", maximum);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
     layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    std::optional<std::int64_t> chosenMaximum;
+    std::unique_ptr<chat::RecentMessages> replacementStore;
+    bool storeChanged = false;
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        const QString path = messageFile->text().trimmed();
+        const QString count = maximum->text().trimmed();
+        if (saveMessages->isChecked() && path.isEmpty()) {
+            QMessageBox::warning(&dialog, "Message saving", "Choose a SQLite file.");
+            return;
+        }
+        chosenMaximum.reset();
+        if (saveMessages->isChecked() && !count.isEmpty()) {
+            bool valid = false;
+            const qlonglong parsed = count.toLongLong(&valid);
+            if (!valid || parsed <= 0) {
+                QMessageBox::warning(&dialog, "Message saving",
+                                     "Maximum messages must be a positive number, or blank for unlimited.");
+                return;
+            }
+            chosenMaximum = parsed;
+        }
+        storeChanged = saveMessages->isChecked() &&
+            (!saveMessages_ || path != messageFile_ || chosenMaximum != maxSavedMessages_ ||
+             !recentMessages_);
+        if (storeChanged) {
+            try {
+                replacementStore = std::make_unique<chat::RecentMessages>(s(path), chosenMaximum);
+            } catch (const std::exception& error) {
+                QMessageBox::warning(&dialog, "Message saving", q(error.what()));
+                return;
+            }
+        }
+        dialog.accept();
+    });
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) {
         return;
@@ -597,18 +711,74 @@ void MainWindow::showPreferences() {
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
+    advertiseLocal_ = advertiseLocal->isChecked();
     preferredVoicePort_ = static_cast<quint16>(sipPort->value());
     relayHost_ = relayHost->text().trimmed();
     relayPort_ = static_cast<quint16>(relayPort->value());
     leakMyIp_ = leakIp->isChecked();
+    saveMessages_ = saveMessages->isChecked();
+    messageFile_ = messageFile->text().trimmed();
+    maxSavedMessages_ = chosenMaximum;
+    if (!saveMessages_) {
+        recentMessages_.reset();
+        savedMessagesLoaded_ = false;
+        savingFailed_ = false;
+    } else if (storeChanged) {
+        recentMessages_ = std::move(replacementStore);
+        savedMessagesLoaded_ = false;
+        savingFailed_ = false;
+        openSavedMessages();
+    }
     QSettings settings;
     settings.setValue("server/host", serverHost_);
     settings.setValue("server/port", serverPort_);
     settings.setValue("server/advertisedHost", advertiseHost_);
+    settings.setValue("server/advertiseLocal", advertiseLocal_);
     settings.setValue("voice/sipPort", preferredVoicePort_);
     settings.setValue("relay/host", relayHost_);
     settings.setValue("relay/port", relayPort_);
     settings.setValue("relay/leakMyIp", leakMyIp_);
+    settings.setValue("messages/enabled", saveMessages_);
+    settings.setValue("messages/file", messageFile_);
+    settings.setValue("messages/maximum",
+                      maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
+}
+
+void MainWindow::openSavedMessages() {
+    if (!saveMessages_ || savingFailed_) return;
+    try {
+        if (!recentMessages_) {
+            recentMessages_ = std::make_unique<chat::RecentMessages>(s(messageFile_),
+                                                                      maxSavedMessages_);
+        }
+        if (savedMessagesLoaded_ || myName_.isEmpty()) return;
+        const auto saved = recentMessages_->recent();
+        savedMessagesLoaded_ = true;
+        if (!saved.empty()) {
+            appendChat("History", "recent messages from " + messageFile_, {}, true);
+            for (const chat::RecentMessage& message : saved) {
+                appendChat(q(message.sender), q(message.body), q(message.color), false,
+                           message.timestamp);
+            }
+        }
+    } catch (const std::exception& error) {
+        savingFailed_ = true;
+        recentMessages_.reset();
+        QMessageBox::warning(this, "Message saving", q(error.what()));
+    }
+}
+
+void MainWindow::recordChat(const chat::RecentMessage& message) {
+    if (!saveMessages_ || savingFailed_) return;
+    openSavedMessages();
+    if (!recentMessages_) return;
+    try {
+        recentMessages_->append(message);
+    } catch (const std::exception& error) {
+        savingFailed_ = true;
+        recentMessages_.reset();
+        QMessageBox::warning(this, "Message saving", q(error.what()));
+    }
 }
 
 void MainWindow::connectToServer() {
@@ -784,7 +954,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         voiceButton_->setEnabled(true);
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
-        sendFrame(&server_, chat::Message {chat::MsgType::FetchHistory, {}});
+        openSavedMessages();
         refreshMembers();
         if (resumeVoice_) {
             QTimer::singleShot(0, this, [this] {
@@ -847,9 +1017,13 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         }
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
+                    message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
+        recordChat({q(message.fields[0]).toLongLong(), message.fields[1], message.fields[2],
+                    message.fields.size() >= 4 ? message.fields[3] : "pink"});
     } else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
         appendChat("Server", q(message.fields[0]), {}, true);
     }
@@ -955,6 +1129,8 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
         }
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
+                    message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() >= 3) {
         const QString name = q(message.fields[0]);
         if (peers_.contains(name) && peers_[name].socket == socket &&
@@ -977,7 +1153,8 @@ void MainWindow::sendMessage() {
         composer_->clear();
         return;
     }
-    const std::string timestamp = std::to_string(QDateTime::currentSecsSinceEpoch());
+    const qint64 timestampSeconds = QDateTime::currentSecsSinceEpoch();
+    const std::string timestamp = std::to_string(timestampSeconds);
     const chat::Message live {chat::MsgType::PeerChat,
                               {s(myName_), timestamp, s(body), s(messageColor_)}};
     if (usingRelay_) sendFrame(&server_, live);
@@ -986,9 +1163,8 @@ void MainWindow::sendMessage() {
             sendFrame(peer.socket, live);
         }
     }
-    sendFrame(&server_, chat::Message {chat::MsgType::Store,
-                                       {timestamp, s(body), s(messageColor_)}});
     appendChat(myName_, body, "231");
+    recordChat({timestampSeconds, s(myName_), s(body), s(messageColor_)});
     composer_->clear();
 }
 
@@ -1032,6 +1208,8 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Users", "online: " + descriptions.join("; "), {}, true);
     } else if (name == "/clear") {
         transcript_->clear();
+    } else if (name == "/save") {
+        showPreferences();
     } else if (name == "/voice") {
         if (!voiceWanted_) {
             joinVoice();
@@ -1094,6 +1272,7 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Help", "/deafen         mute mic and incoming audio", {}, true);
         appendChat("Help", "/undeafen       restore incoming audio", {}, true);
         appendChat("Help", "/clear          clear the local message pane", {}, true);
+        appendChat("Help", "/save           configure continuous local message saving", {}, true);
         appendChat("Help", "/leave          leave this room", {}, true);
         appendChat("Help", "/quit, /exit    close this app window", {}, true);
     } else {
@@ -1102,9 +1281,11 @@ void MainWindow::runCommand(const QString& command) {
 }
 
 void MainWindow::appendChat(const QString& sender, const QString& body,
-                            const QString& messageColor, bool system) {
+                            const QString& messageColor, bool system, qint64 timestamp) {
     const QString color = system ? "#b5b65f" : chatColor(messageColor).name();
-    const QString prefix = system ? "* " : QDateTime::currentDateTime().toString("HH:mm ");
+    const QString prefix = system ? "* " :
+                           (timestamp >= 0 ? QDateTime::fromSecsSinceEpoch(timestamp)
+                                           : QDateTime::currentDateTime()).toString("HH:mm ");
     transcript_->append("<div style='margin:1px 0;color:" + color + "'>" + prefix +
                         safeHtml(sender) + (system ? " " : ": ") + safeHtml(body) + "</div>");
 }
