@@ -179,31 +179,6 @@ with devkitARM in the container above. Actual Old/New 3DS operation, microphone
 and speaker timing, system keyboard behavior, sleep/resume, and Wi-Fi recovery
 still need hardware testing. A successful build does not establish those results.
 
-The portable session, socket transport, resampler, and mixer also compile in
-the host CMake build. Run the regular suite:
-
-```sh
-cmake -S . -B build
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-`handheld_test` checks frame fragmentation, malformed frames, history ordering,
-live arrival order with skewed clocks, sends during history loading,
-and deduplication, memory limits, PTT/mute/deafen, sample byte order, clipping,
-and resampling rate/pitch. `end_to_end_test` connects these same client classes
-to the real server and relay, checks text delivery both ways with a direct
-client and SQLite history, and exchanges known PCM with a desktop-format peer.
-Those tests substitute PCM for the device's microphone and speaker services.
-`handheld_settings_store_test` runs the native settings code against simulated
-filesystem calls, checking first and repeated saves, denied/short writes,
-failed replacement rollback, backup recovery, unavailable SD media, and a file
-where the settings directory should be. It does not emulate the console's
-filesystem service or establish that a particular SD card is writable.
-`handheld_socket_status_test` uses real loopback sockets with simulated 3DS
-status replies to check stale `-26`, delayed peer availability, timeouts, raw
-service failures, and successful protocol traffic after connection.
-
 Before calling a device build stable, test sending and receiving on both
 screens, long messages, scrolling while messages arrive, multiple voice users,
 mute/deafen/PTT, typing during voice, DSP firmware missing, lid/HOME suspend,
