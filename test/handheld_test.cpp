@@ -54,7 +54,8 @@ void sessionTest() {
     session.receive({MsgType::PeerChat, {"desktop", "bad", "invalid", "aqua"}}, 200);
     CHECK(session.view.messages.size() == 3);
     CHECK(session.view.messages.front().body == "older");
-    CHECK(session.view.messages.back().body == "hello 3DS");
+    CHECK(session.view.messages[1].body == "hello 3DS");
+    CHECK(session.view.messages.back().body == "live");
     session.receive({MsgType::HistoryEnd, {}}, 200);
     CHECK(!session.view.historyLoading);
 
@@ -111,6 +112,60 @@ void sessionTest() {
     CHECK(session.view.members.size() == handheld::kMemberLimit);
     session.receive({MsgType::Users, {"replacement", "bounded"}}, 500);
     CHECK(session.view.members.size() == 2 && session.view.members.count("replacement") == 1);
+}
+
+void messageOrderTest() {
+    handheld::Session session;
+    session.receive({MsgType::LoginOk, {"handheld"}}, 1);
+    session.takeOutgoing();
+    session.receive({MsgType::History, {"1000", "desktop", "old history", "pink"}}, 2);
+    session.receive({MsgType::PeerChat, {"desktop", "2000", "new live", "pink"}}, 3);
+    CHECK(session.sendChat("my clock is behind", 500));
+    CHECK(session.view.messages.back().body == "my clock is behind");
+    CHECK(session.view.messages.back().timestamp == 500);
+    CHECK(session.view.sentRevision == 1);
+    const auto sent = session.takeOutgoing();
+    CHECK(sent.size() == 2 && sent.front().fields[1] == "500");
+
+    // History may finish after a local send, or repeat on the ten-second poll.
+    // Older records belong above live chat; echoes must not relocate a send.
+    session.receive({MsgType::History, {"1500", "desktop", "later history", "pink"}}, 4);
+    session.receive({MsgType::History, {"500", "handheld", "my clock is behind", "mint"}}, 4);
+    session.receive({MsgType::HistoryEnd, {}}, 4);
+    CHECK(session.view.messages.size() == 4);
+    CHECK(session.view.messages[0].body == "old history");
+    CHECK(session.view.messages[1].body == "later history");
+    CHECK(session.view.messages[2].body == "new live");
+    CHECK(session.view.messages[3].body == "my clock is behind");
+    session.receive({MsgType::PeerChat, {"desktop", "100", "incoming skewed clock", "pink"}}, 5);
+    CHECK(session.view.messages.back().body == "incoming skewed clock");
+    CHECK(session.sendChat("my clock is ahead", 9000));
+    CHECK(session.sendChat("clock moved backward", 400));
+    CHECK(session.view.messages.back().body == "clock moved backward");
+    CHECK(session.view.sentRevision == 3);
+    CHECK(!session.sendChat("   ", 400));
+    CHECK(session.view.sentRevision == 3);
+    session.receive({MsgType::History, {"500", "handheld", "my clock is behind", "mint"}}, 6);
+    CHECK(session.view.messages.back().body == "clock moved backward");
+
+    // Filling the bounded transcript must evict older rows, never the new send
+    // because its timestamp predates the cached history.
+    for (int i = 0; i < 150; ++i) {
+        CHECK(session.sendChat("bounded " + std::to_string(i), 50));
+        CHECK(session.view.messages.back().body == "bounded " + std::to_string(i));
+    }
+    CHECK(session.view.messages.size() == handheld::kMessageLimit);
+    session.receive({MsgType::History, {"1", "desktop", "discard old history", "pink"}}, 7);
+    CHECK(session.view.messages.back().body == "bounded 149");
+    CHECK(session.view.messages.front().body == "bounded 22");
+
+    // Rejoining retains the displayed transcript and deduplicates replayed
+    // messages, while the next local send still appears at the end.
+    session.receive({MsgType::LoginOk, {"handheld"}}, 8);
+    session.receive({MsgType::History, {"50", "handheld", "bounded 149", "mint"}}, 9);
+    CHECK(session.view.messages.size() == handheld::kMessageLimit);
+    CHECK(session.sendChat("after reconnect", 2));
+    CHECK(session.view.messages.back().body == "after reconnect");
 }
 
 void audioTest() {
@@ -253,6 +308,6 @@ void transportTest() {
 } // namespace
 
 int main() {
-    settingsTest(); sessionTest(); audioTest(); transportTest();
+    settingsTest(); sessionTest(); messageOrderTest(); audioTest(); transportTest();
     std::puts("handheld_test: ok");
 }

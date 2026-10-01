@@ -331,6 +331,7 @@ int main() {
             notice = std::string("Socket service: ") + code;
         } else if (!workerAvailable) notice = "Could not start network worker.";
         std::uint64_t revision = ~std::uint64_t(0);
+        std::uint64_t sentRevision = 0;
         std::vector<Row> rows;
         std::map<std::string, std::vector<Row>> rowCache;
         auto join = [&] {
@@ -349,6 +350,10 @@ int main() {
             const u32 down = hidKeysDown();
             if (down & KEY_START) break;
             View view = worker.snapshot();
+            if (view.sentRevision != sentRevision) {
+                scroll = 0;
+                sentRevision = view.sentRevision;
+            }
             if (view.revision != revision) {
                 const int oldSize = static_cast<int>(rows.size());
                 rows = chatRows(view, rowCache);

@@ -69,6 +69,11 @@ name, or color. Push-to-talk can change while connected. Switching to open
 microphone transmits immediately if you are in voice and neither muted nor
 deafened.
 
+Sending returns the transcript to the newest message. Live messages appear in
+arrival order, so a different date or time on the console cannot insert your
+new message into older chat. History loads above live messages, and repeated
+history records do not move messages already displayed.
+
 Settings are saved to `sdmc:/3ds/disquisition/settings.cfg`. The app never
 automatically connects on launch. You can also edit this file on a computer:
 
@@ -183,7 +188,8 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-`handheld_test` checks frame fragmentation, malformed frames, history ordering
+`handheld_test` checks frame fragmentation, malformed frames, history ordering,
+live arrival order with skewed clocks, sends during history loading,
 and deduplication, memory limits, PTT/mute/deafen, sample byte order, clipping,
 and resampling rate/pitch. `end_to_end_test` connects these same client classes
 to the real server and relay, checks text delivery both ways with a direct

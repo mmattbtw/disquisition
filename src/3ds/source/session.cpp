@@ -31,17 +31,24 @@ Member* Session::member(const std::string& name) {
     return &view.members.emplace(name, Member{name}).first->second;
 }
 
-void Session::append(chat::ChatPayload message) {
+void Session::append(chat::ChatPayload message, bool historical) {
     for (const auto& existing : view.messages) {
         if (existing.sender == message.sender && existing.timestamp == message.timestamp &&
             existing.body == message.body) return;
     }
-    const auto position = std::upper_bound(view.messages.begin(), view.messages.end(),
-        message.timestamp, [](std::int64_t time, const chat::ChatPayload& entry) {
-            return time < entry.timestamp;
-        });
-    view.messages.insert(position, std::move(message));
-    if (view.messages.size() > kMessageLimit) view.messages.erase(view.messages.begin());
+    if (historical) {
+        // A history refresh must not relocate live messages, including local
+        // sends whose device clock is behind the desktop's clock.
+        const auto historyEnd = view.messages.begin() + historyCount_;
+        const auto position = std::find_if(view.messages.begin(), historyEnd,
+            [&](const chat::ChatPayload& entry) { return entry.timestamp > message.timestamp; });
+        view.messages.insert(position, std::move(message));
+        ++historyCount_;
+    } else view.messages.push_back(std::move(message));
+    if (view.messages.size() > kMessageLimit) {
+        view.messages.erase(view.messages.begin());
+        if (historyCount_ > 0) --historyCount_;
+    }
     ++view.revision;
 }
 
@@ -56,6 +63,7 @@ void Session::receive(const chat::Message& message, std::uint64_t now) {
         view.voice = false;
         view.transmitting = false;
         view.historyLoading = true;
+        historyCount_ = view.messages.size();
         view.status = "Joined as " + view.name;
         member(view.name);
         outgoing_.push_back({MsgType::FetchHistory, {}});
@@ -115,7 +123,7 @@ void Session::receive(const chat::Message& message, std::uint64_t now) {
         const std::string color = f.size() >= 4 ? f[3] : "pink";
         chat::ChatPayload payload;
         if (chat::parsePeerChat({MsgType::PeerChat, {f[1], f[0], f[2], color}}, payload))
-            append(std::move(payload));
+            append(std::move(payload), true);
     } else if (message.type == MsgType::System && !f.empty()) {
         view.status = chat::sanitizeBody(f[0]);
     }
@@ -129,6 +137,7 @@ bool Session::sendChat(const std::string& text, std::int64_t timestamp) {
     outgoing_.push_back({chat::MsgType::Store,
         {std::to_string(timestamp), body, view.color}});
     append({view.name, timestamp, body, view.color});
+    ++view.sentRevision;
     return true;
 }
 

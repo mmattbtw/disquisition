@@ -37,6 +37,7 @@ struct View {
     std::string status = "Choose a relay and name to join.";
     std::string color = "mint";
     std::uint64_t revision = 0;
+    std::uint64_t sentRevision = 0;
     std::vector<chat::ChatPayload> messages;
     std::map<std::string, Member> members;
 };
@@ -61,8 +62,11 @@ private:
     bool held_ = false;
     bool wireMuted_ = true;
     bool wireDeafened_ = false;
+    // History occupies the prefix. Live messages keep their arrival order in
+    // the suffix regardless of clock differences between chat participants.
+    std::size_t historyCount_ = 0;
     Member* member(const std::string& name);
-    void append(chat::ChatPayload message);
+    void append(chat::ChatPayload message, bool historical = false);
     void voiceState(bool force = false);
 };
 
