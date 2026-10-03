@@ -520,7 +520,7 @@ void MainWindow::joinVoice() {
                                                   : combo->currentText();
         };
         if (!relayAudio_.start(selectedDevice(inputDevice_), selectedDevice(outputDevice_))) {
-            voiceLabel_->setText("voice: selected audio device cannot use 16 kHz mono");
+            voiceLabel_->setText("voice: selected audio input or output is unavailable");
             return;
         }
         if (usingRelay_) {
