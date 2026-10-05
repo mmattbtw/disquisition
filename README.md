@@ -63,9 +63,13 @@ platform application-data directory.
 
 ## Desktop voice chat
 
-Start the normal server, then open `disquisition-desktop` on each computer.
-Set the server address and port in Preferences (Cmd+, on macOS), enter a name,
-and choose Join to enter text chat. Voice stays off until you choose Join voice.
+Open `disquisition-desktop`, enter a name, and choose Join to enter text chat.
+Fresh installs default to server `relay.mmatt.net:9000` and relay
+`relay.mmatt.net:3333`, so they connect through the relay without changing
+Preferences. Saved connection settings take precedence over these defaults.
+For your own server, set the server address and port in Preferences (Cmd+, on
+macOS) and set the relay address, or leave it blank to connect directly.
+Voice stays off until you choose Join voice.
 Choose Leave voice to exit the call without leaving the server. Use a different
 voice SIP port in Preferences for each client running on the same machine. If
 peers cannot directly reach the address seen by the server, enter a reachable
@@ -75,8 +79,8 @@ For clients on the same LAN, select "Advertise local IP automatically" in
 Preferences to announce the local IPv4 address. This takes precedence over the
 saved public host while selected. It also applies during direct relay fallback.
 
-To keep your IP hidden from other users, set the relay address and port in
-Preferences before joining. The desktop app then connects only to the relay;
+To keep your IP hidden from other users, keep a relay address and port in
+Preferences. The desktop app then connects only to the relay;
 it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
 mono PCM frames over that TCP connection. The relay passes those frames to the
 chat server, which fans them out to the room. Direct participants keep using

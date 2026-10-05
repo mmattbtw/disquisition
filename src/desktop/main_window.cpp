@@ -140,7 +140,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     advertiseLocal_ = settings.value("server/advertiseLocal", false).toBool();
     preferredVoicePort_ = static_cast<quint16>(
         qBound(1, settings.value("voice/sipPort", 5060).toInt(), 65534));
-    relayHost_ = settings.value("relay/host").toString();
+    relayHost_ = settings.value("relay/host", relayHost_).toString();
     relayPort_ = static_cast<quint16>(qBound(1, settings.value("relay/port", 3333).toInt(), 65535));
     leakMyIp_ = settings.value("relay/leakMyIp", false).toBool();
     saveMessages_ = settings.value("messages/enabled", false).toBool();
@@ -842,7 +842,7 @@ void MainWindow::showPreferences() {
     }
     serverHost_ = host->text().trimmed();
     if (serverHost_.isEmpty()) {
-        serverHost_ = "127.0.0.1";
+        serverHost_ = "relay.mmatt.net";
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
