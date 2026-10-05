@@ -49,7 +49,7 @@ while IFS= read -r rpath; do
 done <<< "$rpaths"
 install_name_tool "${rpath_args[@]}" "$binary"
 "$deployqt" "$app" "-executable=$app/Contents/MacOS/baresip" \
-    "-libpath=$qt_libs" -no-codesign 2>&1 | tee "$staging/deployment.log"
+    "-libpath=$qt_libs" 2>&1 | tee "$staging/deployment.log"
 # macdeployqt can report missing dependencies without returning a failure status.
 if grep -q '^ERROR:' "$staging/deployment.log"; then
     echo "Qt deployment failed; see the errors above." >&2
