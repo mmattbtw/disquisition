@@ -143,14 +143,11 @@ jobs:
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: |
-          cp build-baresip/output/baresip build/disquisition-desktop.app/Contents/MacOS/
-          mkdir -p build/disquisition-desktop.app/Contents/Resources/licenses
-          cp third_party/baresip/LICENSE build/disquisition-desktop.app/Contents/Resources/licenses/baresip.LICENSE
-          cp third_party/re/LICENSE build/disquisition-desktop.app/Contents/Resources/licenses/libre.LICENSE
-          cp "$(brew --prefix openssl@3)/LICENSE.txt" build/disquisition-desktop.app/Contents/Resources/licenses/OpenSSL.LICENSE
-          macdeployqt build/disquisition-desktop.app
-          codesign --force --deep --sign - build/disquisition-desktop.app
-          ditto -c -k --sequesterRsrc --keepParent build/disquisition-desktop.app disquisition-desktop-macos-arm64.zip
+          mkdir -p build/disquisition.app/Contents/Resources/licenses
+          cp third_party/baresip/LICENSE build/disquisition.app/Contents/Resources/licenses/baresip.LICENSE
+          cp third_party/re/LICENSE build/disquisition.app/Contents/Resources/licenses/libre.LICENSE
+          cp "$(brew --prefix openssl@3)/LICENSE.txt" build/disquisition.app/Contents/Resources/licenses/OpenSSL.LICENSE
+          scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip disquisition-desktop-macos-arm64.dmg
 
       - name: Package Windows app
         if: runner.os == 'Windows'

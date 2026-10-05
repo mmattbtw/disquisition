@@ -147,13 +147,18 @@ if(BUILD_DESKTOP_APP)
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
         ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
+        OUTPUT_NAME "disquisition"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "Disquisition"
+        MACOSX_BUNDLE_BUNDLE_NAME "disquisition"
+        MACOSX_BUNDLE_ICON_FILE "disquisition.icns"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+      target_sources(disquisition-desktop PRIVATE resources/macos/disquisition.icns)
+      set_source_files_properties(resources/macos/disquisition.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources)
       add_custom_command(TARGET disquisition-desktop POST_BUILD
         COMMAND codesign --force --deep --sign "${DISQUISITION_CODESIGN_IDENTITY}"
           "$<TARGET_BUNDLE_DIR:disquisition-desktop>"
-        COMMENT "Signing Disquisition for macOS permissions")
+        COMMENT "Signing disquisition for macOS permissions")
     endif()
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.5+ not found; skipping disquisition-desktop")

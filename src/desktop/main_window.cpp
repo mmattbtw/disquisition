@@ -151,7 +151,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     buildUi();
-    setWindowTitle("Disquisition");
+    setWindowTitle("disquisition");
     resize(980, 680);
 
     reconnectTimer_.setSingleShot(true);
@@ -408,7 +408,7 @@ void MainWindow::buildUi() {
     setup->addWidget(settingsButton_);
     page->addLayout(setup);
 
-    auto* appMenu = menuBar()->addMenu("Disquisition");
+    auto* appMenu = menuBar()->addMenu("disquisition");
     auto* preferencesAction = appMenu->addAction("Preferences…");
     preferencesAction->setMenuRole(QAction::PreferencesRole);
     preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));

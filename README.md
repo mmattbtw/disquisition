@@ -52,9 +52,28 @@ cmake --build build --config Release --target disquisition-desktop
 The [desktop build workflow](.github/workflows/desktop.yml) uploads macOS
 (Apple silicon), Ubuntu (x64), and Windows (x64) builds for every pull request
 and every push to `main`. Download them from the workflow run's artifacts.
-The archives include a bundled `baresip` executable with the voice modules the
-app uses. The macOS and Windows archives include Qt. The Linux archive requires
+The downloads include a bundled `baresip` executable with the voice modules the
+app uses. The macOS DMG and Windows archive include Qt. The Linux archive requires
 a compatible Qt 6.8 runtime.
+
+On macOS, open the `.dmg` and drag `disquisition` to the Applications folder
+in the installer window. Then open `disquisition` from Applications and eject
+the disk image.
+
+To package a local macOS build, use a baresip executable built with the static
+voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
+
+```sh
+scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip build/disquisition.dmg
+```
+
+The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
+installer window layout. It bundles dependencies and signs the finished app
+with an ad-hoc signature by default. Set `DISQUISITION_CODESIGN_IDENTITY` to use
+another signing identity. The DMG is not notarized.
+The icon uses the desktop app's charcoal and mint colors, and the installer
+uses a light background for readable Finder labels. Regenerate the artwork with
+`swift scripts/generate-macos-artwork.swift`.
 
 For local builds, install a baresip build that includes `menu`, `mixminus`,
 `vumeter`, `ctrl_tcp`, `g711`, and the platform audio module (`coreaudio`,
