@@ -111,12 +111,12 @@ private:
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
     QHash<QString, Peer> peers_;
     QString myName_;
-    QString serverHost_ = "127.0.0.1";
+    QString serverHost_ = "relay.mmatt.net";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
     bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
-    QString relayHost_;
+    QString relayHost_ = "relay.mmatt.net";
     quint16 relayPort_ = 3333;
     bool leakMyIp_ = false;
     bool usingRelay_ = false;
