@@ -79,8 +79,10 @@ To keep your IP hidden from other users, set the relay address and port in
 Preferences before joining. The desktop app then connects only to the relay;
 it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
 mono PCM frames over that TCP connection. The relay passes those frames to the
-chat server, which fans them out to the room. Direct participants keep using
-baresip with other direct participants and send a second audio stream for
+chat server, which fans them out to the room. The desktop client converts
+between the relay format and each audio device's preferred format, including
+44.1 kHz and 48 kHz devices. Direct participants keep using baresip with other
+direct participants and send a second audio stream for
 relayed participants. This means relayed voice is not end-to-end encrypted and
 the relay and server can hear it. Use only a trusted relay and server.
 
