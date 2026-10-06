@@ -16,6 +16,12 @@ experimental microphone/speaker voice using the desktop's TCP audio format.
 The [3DS workflow](.github/workflows/3ds.yml) produces a Homebrew Launcher
 `.3dsx` artifact. Actual hardware audio and lifecycle behavior still need testing.
 
+A native [Wii U client](src/wiiu/README.md) builds separately with devkitPPC and
+wut. It has TV/GamePad chat, touch/controller input, saved relay settings, and
+GamePad microphone voice. The [Wii U workflow](.github/workflows/wiiu.yml)
+packages Aroma `.wuhb` and Homebrew Launcher `.rpx` builds. Hardware validation
+is still required.
+
 This is a plain TCP protocol. It does not provide encryption, authentication, private rooms, or access control. Use it only on networks and hosts you trust.
 
 ## Requirements

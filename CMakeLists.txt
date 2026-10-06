@@ -226,6 +226,22 @@ if(BUILD_TESTING)
   add_test(NAME end_to_end_test
     COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
 
+  # Exercise the Wii U's portable code on the host, including real relay
+  # interoperability. Its OS, display, and audio-service glue builds via wut.
+  add_library(wiiu_console_core STATIC
+    src/3ds/source/session.cpp src/wiiu/source/transport.cpp)
+  target_include_directories(wiiu_console_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/3ds/include")
+  target_link_libraries(wiiu_console_core PUBLIC chat_protocol)
+  target_link_libraries(end_to_end_test PRIVATE wiiu_console_core)
+  add_executable(wiiu_client_test test/wiiu_client_test.cpp
+    src/wiiu/source/settings.cpp src/wiiu/source/ui.cpp
+    src/wiiu/source/microphone_frames.cpp)
+  target_include_directories(wiiu_client_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/wiiu/include")
+  target_link_libraries(wiiu_client_test PRIVATE wiiu_console_core)
+  add_test(NAME wiiu_client_test COMMAND wiiu_client_test)
+
   set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
 endif()
 endif()

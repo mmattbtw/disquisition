@@ -1,0 +1,40 @@
+name: Wii U homebrew
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  homebrew:
+    runs-on: ubuntu-latest
+    # Multi-platform devkitPro image, pinned to the toolchain used locally.
+    # devkitPPC r50, wut 1.9.1; neither SDL nor third-party runtime assets needed.
+    container: devkitpro/devkitppc@sha256:44cb1a920e1ec3ec7c06767493c3b85f8d643d6137cc4661f0201895ac6e4967
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build native Wii U app
+        run: make -C src/wiiu -j2
+      - name: Package Aroma and Homebrew Launcher folders
+        run: |
+          mkdir -p build-wiiu/aroma/wiiu/apps/disquisition build-wiiu/hbl/wiiu/apps/disquisition
+          cp src/wiiu/disquisition.wuhb build-wiiu/aroma/wiiu/apps/disquisition/
+          cp src/wiiu/disquisition.rpx src/wiiu/meta.xml build-wiiu/hbl/wiiu/apps/disquisition/
+          cp src/wiiu/README.md build-wiiu/aroma/wiiu/apps/disquisition/README.txt
+          cp src/wiiu/README.md build-wiiu/hbl/wiiu/apps/disquisition/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: disquisition-wiiu-aroma
+          path: build-wiiu/aroma/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: disquisition-wiiu-hbl
+          path: build-wiiu/hbl/
+          if-no-files-found: error

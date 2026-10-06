@@ -25,6 +25,8 @@
 #include "client/client.h"
 #include "client/connection.h"
 #include "common/protocol.h"
+#include "session.h"
+#include "transport.h"
 
 extern char** environ;
 
@@ -314,6 +316,78 @@ void testHistoryAndRoster(std::uint16_t serverPort) {
     CHECK(history.empty());
 }
 
+// Runs the Wii U's actual session and transport against the real relay.
+// OS microphone/display/thread glue is validated separately by the wut build.
+struct ConsoleClient {
+    handheld::Session session;
+    handheld::Transport transport;
+    std::vector<std::string> audio;
+
+    explicit ConsoleClient(std::uint16_t port, const std::string& name) {
+        session.audioReceived = [&](const std::string&, const std::string& pcm) { audio.push_back(pcm); };
+        CHECK(transport.open("127.0.0.1", port, milliseconds()));
+        CHECK(waitFor([&] {
+            step(); return transport.state() == handheld::Transport::State::Connected;
+        }));
+        session.begin(name);
+        CHECK(waitFor([&] { step(); return session.view.connected && !session.view.historyLoading; }));
+    }
+    static std::uint64_t milliseconds() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+    }
+    void step() {
+        for (const auto& message : session.takeOutgoing()) CHECK(transport.queue(message));
+        std::vector<chat::Message> messages;
+        transport.poll(milliseconds(), messages);
+        CHECK(transport.state() != handheld::Transport::State::Failed);
+        for (const auto& message : messages) session.receive(message, milliseconds());
+    }
+    bool received(const std::string& body) const {
+        return std::any_of(session.view.messages.begin(), session.view.messages.end(),
+            [&](const chat::ChatPayload& message) { return message.body == body; });
+    }
+};
+
+void testWiiUChatVoiceAndReconnect(std::uint16_t relayPort) {
+    ConsoleClient console(relayPort, "wiiu"), peer(relayPort, "console_peer");
+    CHECK(waitFor([&] {
+        console.step(); peer.step();
+        return console.session.view.members.count("console_peer") && peer.session.view.members.count("wiiu");
+    }));
+    CHECK(waitFor([&] {
+        CHECK(console.session.sendChat("native Wii U chat", 1));
+        console.step(); peer.step(); return peer.received("native Wii U chat");
+    }));
+    CHECK(waitFor([&] {
+        CHECK(peer.session.sendChat("reply to Wii U", 2));
+        peer.step(); console.step(); return console.received("reply to Wii U");
+    }));
+    console.session.setVoice(true); peer.session.setVoice(true);
+    console.session.controls(false, false, true, true);
+    peer.session.controls(false, false, false, false);
+    CHECK(waitFor([&] {
+        console.step(); peer.step();
+        return console.session.view.members.at("console_peer").voice && peer.session.view.members.at("wiiu").voice;
+    }));
+    std::string pcm(640, '\0'); pcm[0] = '\x34'; pcm[1] = '\x12';
+    console.session.capture(pcm);
+    CHECK(waitFor([&] { console.step(); peer.step(); return !peer.audio.empty(); }));
+    CHECK(peer.audio.front() == pcm);
+    peer.session.capture(pcm);
+    CHECK(waitFor([&] { peer.step(); console.step(); return !console.audio.empty(); }));
+    CHECK(console.audio.front() == pcm);
+    console.transport.close(); console.session.disconnected("reconnect");
+    CHECK(!console.session.view.voice && !console.session.view.transmitting);
+    CHECK(console.transport.open("127.0.0.1", relayPort, ConsoleClient::milliseconds()));
+    CHECK(waitFor([&] {
+        console.step(); peer.step();
+        return console.transport.state() == handheld::Transport::State::Connected;
+    }));
+    console.session.begin("wiiu");
+    CHECK(waitFor([&] { console.step(); peer.step(); return console.session.view.connected; }));
+    CHECK(!console.session.view.voice && !console.session.view.transmitting);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -333,6 +407,7 @@ int main(int argc, char** argv) {
 
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
+    testWiiUChatVoiceAndReconnect(gRelay.port);
 
     {
         disquisition::Client alice(serverAddress);
