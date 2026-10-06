@@ -105,7 +105,7 @@ if(BUILD_DESKTOP_APP)
   if(APPLE)
     enable_language(OBJCXX)
   endif()
-  find_package(Qt6 6.5 COMPONENTS Widgets Network Multimedia QUIET)
+  find_package(Qt6 6.6 COMPONENTS Widgets Network Multimedia QUIET)
   # Screen sharing encodes and decodes H.264 with FFmpeg.
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
@@ -119,6 +119,9 @@ if(BUILD_DESKTOP_APP)
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
+      include/desktop/screen_stage.h
+      include/desktop/share_picker.h
+      include/desktop/share_source.h
       include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/main.cpp
@@ -126,6 +129,9 @@ if(BUILD_DESKTOP_APP)
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
+      src/desktop/screen_stage.cpp
+      src/desktop/share_picker.cpp
+      src/desktop/share_source.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_link_libraries(disquisition-desktop PRIVATE
@@ -156,7 +162,7 @@ if(BUILD_DESKTOP_APP)
         COMMENT "Signing Disquisition for macOS permissions")
     endif()
   elseif(NOT Qt6_FOUND)
-    message(STATUS "Qt 6.5+ not found; skipping disquisition-desktop")
+    message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
   else()
     message(STATUS "FFmpeg (libavcodec, libavutil, libswscale) not found; skipping disquisition-desktop")
   endif()

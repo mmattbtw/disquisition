@@ -31,7 +31,7 @@ make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app is built when Qt 6.5 or newer is available. Local builds need
+The desktop app is built when Qt 6.6 or newer is available. Local builds need
 the `baresip` executable on `PATH` at runtime. Build it explicitly with:
 
 ```sh
@@ -117,6 +117,31 @@ module supplies audio levels and `ctrl_tcp` supplies call identity and state.
 On macOS the app requests microphone access when you choose Join voice. Choose
 the microphone and speaker from the `mic` and `out` dropdowns before joining
 voice; the dropdowns refresh after permission is granted.
+
+## Desktop screen sharing
+
+Choose share screen after joining, then pick what to stream, as in Discord:
+one application window from the Applications tab, or a whole display from
+the Screens tab. Choose Go Live to start. Sharing a single window keeps the
+rest of your desktop private, and lets you watch other shares fullscreen
+without the stream capturing itself.
+Shares appear on a stage above the chat, one tile per person sharing, and the
+member list marks each sharer `LIVE`. Your own tile shows what viewers
+receive. Other people's shares start as a "watch stream" button, so nobody
+downloads video they did not ask for. Choose it, or double-click the sharer in
+the member list, to start watching, and stop watching to close the video. Choose fullscreen
+or double-click a video to fill the screen with it; press Esc or double-click
+again to return. With more than one share on the stage, choose focus to
+enlarge one above the others.
+
+The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
+when it can. Frames travel over the existing server connection, directly or
+through the relay, and the server forwards each share only to its viewers.
+Like relayed voice, video is not encrypted, so the relay and server can see
+it. A viewer who falls behind skips frames and resumes at the next keyframe,
+which arrives every two seconds. New viewers wait for one the same way.
+Screen sharing needs a server and relay built from this version; older servers
+disconnect clients that start a share.
 
 This first version is deliberately small. It works well on a LAN or between
 publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP

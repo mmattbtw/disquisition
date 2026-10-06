@@ -266,6 +266,68 @@ void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) 
           (std::vector<std::string>{"voice_direct", pcm}));
 }
 
+void signIn(RawSession& session, const std::string& name) {
+    CHECK(session.connection.send(chat::Message{chat::MsgType::Login, {name, "1", ""}}));
+    CHECK(session.next(chat::MsgType::LoginOk).fields.at(0) == name);
+}
+
+void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
+    using Fields = std::vector<std::string>;
+
+    RawSession sharer(serverPort);
+    signIn(sharer, "screen_sharer");
+    RawSession viewer(relayPort);
+    signIn(viewer, "screen_viewer");
+    RawSession bystander(serverPort);
+    signIn(bystander, "screen_bystander");
+
+    CHECK(sharer.connection.send(chat::Message{chat::MsgType::ScreenShare, {"1"}}));
+    CHECK(viewer.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "1"}));
+    CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "1"}));
+
+    // Someone who joins mid-share learns about it at sign-in.
+    {
+        RawSession late(serverPort);
+        signIn(late, "screen_late");
+        CHECK(late.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "1"}));
+    }
+
+    // Frames reach a viewer through the relay once it asks to watch. The
+    // request races the frames, so keep sending until one arrives.
+    CHECK(viewer.connection.send(chat::Message{chat::MsgType::ScreenWatch, {"screen_sharer", "1"}}));
+    const chat::Message frame{chat::MsgType::ScreenFrame, {"7", "0", "1", "1", "h264 bytes"}};
+    chat::Message received;
+    CHECK(waitFor([&] {
+        CHECK(sharer.connection.send(frame));
+        chat::Message message;
+        while (viewer.connection.poll(message)) {
+            if (message.type == chat::MsgType::ScreenFrame) {
+                received = message;
+                return true;
+            }
+        }
+        return false;
+    }));
+    CHECK(received.fields == (Fields{"screen_sharer", "7", "0", "1", "1", "h264 bytes"}));
+
+    // Nobody receives a stream they did not ask to watch.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    chat::Message message;
+    while (bystander.connection.poll(message)) {
+        CHECK(message.type != chat::MsgType::ScreenFrame);
+    }
+
+    CHECK(sharer.connection.send(chat::Message{chat::MsgType::ScreenShare, {"0"}}));
+    CHECK(viewer.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
+    CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
+
+    // Leaving ends a share too.
+    CHECK(sharer.connection.send(chat::Message{chat::MsgType::ScreenShare, {"1"}}));
+    CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "1"}));
+    sharer.connection.stop();
+    CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
+}
+
 void testHistoryAndRoster(std::uint16_t serverPort) {
     RawSession dave(serverPort);
     CHECK(dave.connection.send(chat::Message{chat::MsgType::Login, {" alice ", "1", ""}}));
@@ -333,6 +395,7 @@ int main(int argc, char** argv) {
 
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
+    testScreenSharing(gServer.port, gRelay.port);
 
     {
         disquisition::Client alice(serverAddress);

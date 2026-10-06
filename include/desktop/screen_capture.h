@@ -13,16 +13,19 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "common/protocol.h"
 #include "desktop/screen_h264.h"
+#include "desktop/share_source.h"
 
 class QMediaCaptureSession;
 class QScreen;
 class QScreenCapture;
 class QVideoFrame;
 class QVideoSink;
+class QWindowCapture;
 class MacScreenCapture;
 
 // Requests macOS Screen Recording access when needed. Other platforms return true.
@@ -44,7 +47,7 @@ class ScreenCapture final : public QObject {
 public:
     explicit ScreenCapture(QObject* parent = nullptr);
     ~ScreenCapture() override;
-    bool start(QScreen* screen = nullptr);
+    bool start(const ShareSource& source);
     void stop();
     bool running() const;
     // The encoder in use, such as "h264_nvenc".
@@ -68,8 +71,10 @@ private:
     QThreadPool encoder_;
     bool encoding_ = false;
     quint64 generation_ = 0;
+    // Set while sharing a screen whose frames leave out the mouse pointer.
     QPointer<QScreen> screen_;
-    QScreenCapture* capture_ = nullptr;
+    QScreenCapture* screenCapture_ = nullptr;
+    QWindowCapture* windowCapture_ = nullptr;
     QMediaCaptureSession* session_ = nullptr;
     QVideoSink* sink_ = nullptr;
 #if defined(Q_OS_MACOS)
@@ -103,4 +108,17 @@ private:
         QList<QByteArray> chunks;
     };
     QHash<QString, Partial> partial_;
+};
+
+// Decodes one sender's stream. A frame decoded without the one before it comes
+// out corrupted, so after any gap in frame ids the stream waits for the next
+// keyframe. Viewers who start watching mid-stream wait for one the same way.
+class ScreenStreamDecoder {
+public:
+    // Returns a null image when there is nothing new to show.
+    QImage decode(quint32 frameId, bool keyframe, const QByteArray& data);
+
+private:
+    ScreenDecoder decoder_;
+    std::optional<quint32> lastFrameId_;
 };

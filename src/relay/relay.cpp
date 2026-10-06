@@ -377,6 +377,8 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::System:
         case MsgType::VoiceAudio:
         case MsgType::VoiceState:
+        case MsgType::ScreenShare:
+        case MsgType::ScreenFrame:
             sendToClient(user, message);
             break;
 
@@ -415,6 +417,9 @@ void Relay::handleClientMessage(User& user, const Message& message) {
         case MsgType::VoicePort:
         case MsgType::VoiceAudio:
         case MsgType::VoiceState:
+        case MsgType::ScreenShare:
+        case MsgType::ScreenWatch:
+        case MsgType::ScreenFrame:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }
