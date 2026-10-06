@@ -206,6 +206,7 @@ ClientOptions parseClientOptions(int argc, char** argv) {
         if (options.advertiseHost.empty()) {
             args.fail("--local could not find an active non-loopback IPv4 address");
         }
+    }
     if (options.maxSavedMessages && options.messageFile.empty()) {
         args.fail("--max-saved-messages requires --save-messages");
     }
