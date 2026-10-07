@@ -271,6 +271,59 @@ void signIn(RawSession& session, const std::string& name) {
     CHECK(session.next(chat::MsgType::LoginOk).fields.at(0) == name);
 }
 
+void testRelayDuplicateNames(std::uint16_t relayPort) {
+    using Fields = std::vector<std::string>;
+    RawSession first(relayPort);
+    signIn(first, "relay_same");
+    RawSession second(relayPort);
+    CHECK(second.connection.send(chat::Message{chat::MsgType::Login, {"relay_same", "0", ""}}));
+    CHECK(second.next(chat::MsgType::LoginOk).fields.at(0) == "relay_same-2");
+    CHECK(!first.connection.failed());
+
+    // This name sorts before both duplicates, so its mesh dials them. If
+    // removing the suffixed user also removes the original, it cannot redial.
+    RawSession observer(relayPort);
+    signIn(observer, "relay_observer");
+    auto deliver = [](RawSession& from, const std::string& sender, RawSession& to,
+                      const std::string& body) {
+        CHECK(waitFor([&] {
+            CHECK(!from.connection.failed());
+            CHECK(!to.connection.failed());
+            CHECK(from.connection.send(chat::Message{chat::MsgType::PeerChat,
+                                                      {sender, "123456789", body, "pink"}}));
+            chat::Message message;
+            while (to.connection.poll(message)) {
+                if (message.type == chat::MsgType::PeerChat &&
+                    message.fields == Fields{sender, "123456789", body, "pink"}) return true;
+            }
+            return false;
+        }));
+    };
+    deliver(first, "relay_same", second, "first to second");
+    deliver(second, "relay_same-2", first, "second to first");
+    deliver(observer, "relay_observer", first, "observer before departure");
+
+    second.connection.stop();
+    CHECK(waitFor([&] {
+        chat::Message message;
+        while (observer.connection.poll(message)) {
+            if (message.type == chat::MsgType::PeerLeft &&
+                message.fields == Fields{"relay_same-2"}) return true;
+        }
+        return false;
+    }));
+    deliver(observer, "relay_observer", first, "observer after departure");
+    deliver(first, "relay_same", observer, "first after departure");
+
+    // Reconnecting with the original requested name creates another session
+    // without stealing the surviving client's socket or server identity.
+    RawSession reconnect(relayPort);
+    CHECK(reconnect.connection.send(chat::Message{chat::MsgType::Login, {"relay_same", "0", ""}}));
+    CHECK(reconnect.next(chat::MsgType::LoginOk).fields.at(0) == "relay_same-2");
+    deliver(first, "relay_same", reconnect, "first after reconnect");
+    deliver(reconnect, "relay_same-2", first, "reconnected second");
+}
+
 void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
     using Fields = std::vector<std::string>;
 
@@ -396,6 +449,7 @@ int main(int argc, char** argv) {
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
     testScreenSharing(gServer.port, gRelay.port);
+    testRelayDuplicateNames(gRelay.port);
 
     {
         disquisition::Client alice(serverAddress);

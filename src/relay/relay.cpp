@@ -141,7 +141,7 @@ void Relay::route(std::unique_ptr<Connection> connection, const Message& first) 
         if (requested.empty()) {
             return;
         }
-        if (users_.size() >= options_.maxUsers && users_.count(requested) == 0) {
+        if (users_.size() >= options_.maxUsers) {
             LOG_WARN("rejected {}: relay is full", requested);
             connection->send(Message{MsgType::Error, {"relay is full"}});
             return;
@@ -172,21 +172,6 @@ Relay::User* Relay::findUser(const std::string& name) {
 }
 
 void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Connection> client) {
-    const auto existing = users_.find(requestedName);
-    if (existing != users_.end()) {
-        User& user = *existing->second;
-        if (user.client != nullptr) {
-            user.client->stop();
-        }
-        user.client = std::move(client);
-        user.clientWaiting = true;
-        LOG_INFO("{} client reattached", requestedName);
-        if (user.serverReady) {
-            serveClientLogin(user);
-        }
-        return;
-    }
-
     auto user = std::make_unique<User>();
     user->requestedName = requestedName;
     user->client = std::move(client);
@@ -199,30 +184,27 @@ void Relay::attachClient(const std::string& requestedName, std::unique_ptr<Conne
         return;
     }
 
-    User& added = *users_.emplace(requestedName, std::move(user)).first->second;
+    User& added = *users_.emplace(nextSessionId_++, std::move(user)).first->second;
     LOG_INFO("{} client attached", requestedName);
     connectServer(added);
 }
 
-void Relay::dropUser(const std::string& key) {
-    const auto departing = users_.find(key);
+void Relay::dropUser(std::uint64_t sessionId) {
+    const auto departing = users_.find(sessionId);
     if (departing == users_.end()) {
         return;
     }
-    const std::string requestedName = departing->second->requestedName;
-    const std::string assignedName = departing->second->assignedName.empty()
-                                         ? requestedName
-                                         : departing->second->assignedName;
+    const std::string assignedName = departing->second->assignedName;
     users_.erase(departing);
+    // A session that never signed in has no identity in anyone else's roster.
+    if (assignedName.empty()) return;
 
     // The server announces departures, but while it is unreachable only the
     // relay knows, so update the other hosted users directly.
     for (auto& [otherKey, user] : users_) {
-        for (const std::string& name : {requestedName, assignedName}) {
-            user->roster.erase(name);
-            user->peers.removePeer(name);
-            eraseName(user->lastUsers.fields, name);
-        }
+        user->roster.erase(assignedName);
+        user->peers.removePeer(assignedName);
+        eraseName(user->lastUsers.fields, assignedName);
         if (!user->serverReady) {
             sendToClient(*user, Message{MsgType::PeerLeft, {assignedName}});
             sendToClient(*user, user->lastUsers);
@@ -234,14 +216,14 @@ void Relay::dropUser(const std::string& key) {
 // Hosted users
 
 void Relay::serviceUsers() {
-    std::vector<std::string> departed;
+    std::vector<std::uint64_t> departed;
     for (auto& [key, user] : users_) {
         if (!serviceUser(*user)) {
             LOG_INFO("{} client disconnected", user->requestedName);
             departed.push_back(key);
         }
     }
-    for (const std::string& key : departed) {
+    for (const std::uint64_t key : departed) {
         dropUser(key);
     }
 }

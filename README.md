@@ -262,7 +262,7 @@ Then connect clients to it:
 ./build/client --relay relay.example.net:3333 --name jesse
 ```
 
-The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
+The relay opens a separate server session and peer mesh for each attached user. Clients requesting the same name keep separate sessions; the server assigns a suffix such as `matt-2` to later arrivals. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
 
 If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
 
