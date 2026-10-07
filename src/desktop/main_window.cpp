@@ -663,7 +663,10 @@ void MainWindow::startScreenShare() {
         QMessageBox message(this);
         message.setWindowTitle("Screen recording permission needed");
         message.setText("Allow Disquisition to record your screen in macOS System Settings, then restart the app.");
-        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access.");
+        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access. "
+                                   "If Disquisition is already enabled, remove its entry with the minus button, "
+                                   "then add the current app again and restart it. "
+                                   "A rebuilt or replaced app can have a different signature from the one you allowed.");
         auto* settings = message.addButton("Open System Settings", QMessageBox::ActionRole);
         message.addButton(QMessageBox::Close);
         message.exec();

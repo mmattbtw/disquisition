@@ -137,8 +137,11 @@ if(BUILD_DESKTOP_APP)
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     if(APPLE)
-      set(DISQUISITION_CODESIGN_IDENTITY "-" CACHE STRING
-          "macOS signing identity for the desktop app; '-' uses ad-hoc signing")
+      set(DISQUISITION_CODESIGN_IDENTITY "AUTO" CACHE STRING
+          "macOS signing identity: AUTO prefers Apple Development; '-' uses ad-hoc signing")
+      include(cmake/MacOSCodeSigning.cmake)
+      disquisition_resolve_codesign_identity("${DISQUISITION_CODESIGN_IDENTITY}"
+        DISQUISITION_RESOLVED_CODESIGN_IDENTITY)
       target_sources(disquisition-desktop PRIVATE
         include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
@@ -156,10 +159,21 @@ if(BUILD_DESKTOP_APP)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Disquisition"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+      set(DISQUISITION_SIGN_COMMAND "${CMAKE_COMMAND}"
+          "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_RESOLVED_CODESIGN_IDENTITY}"
+          "-DDISQUISITION_APP_BUNDLE=$<TARGET_BUNDLE_DIR:disquisition-desktop>"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacOS.cmake")
       add_custom_command(TARGET disquisition-desktop POST_BUILD
-        COMMAND codesign --force --deep --sign "${DISQUISITION_CODESIGN_IDENTITY}"
-          "$<TARGET_BUNDLE_DIR:disquisition-desktop>"
-        COMMENT "Signing Disquisition for macOS permissions")
+        COMMAND ${DISQUISITION_SIGN_COMMAND}
+        COMMENT "Signing Disquisition for macOS permissions"
+        VERBATIM)
+      # macdeployqt and bundling baresip modify the app after POST_BUILD.
+      # Re-sign with the same configured identity once deployment is finished.
+      add_custom_target(disquisition-sign-macos
+        COMMAND ${DISQUISITION_SIGN_COMMAND}
+        DEPENDS disquisition-desktop
+        COMMENT "Signing deployed Disquisition for macOS permissions"
+        VERBATIM)
     endif()
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
@@ -206,6 +220,8 @@ target_link_libraries(relay PRIVATE chat_network)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME macos_codesign_test
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)

@@ -39,6 +39,23 @@ cmake -S . -B build -DBUILD_DESKTOP_APP=ON
 cmake --build build --target disquisition-desktop
 ```
 
+On macOS, local builds automatically use the first valid Apple Development
+certificate in your keychain. Its signing identity lets macOS keep screen
+recording and microphone permission grants across rebuilds. To choose a
+specific certificate, configure with
+`-DDISQUISITION_CODESIGN_IDENTITY="certificate name or SHA-1"`.
+Existing build directories configured with `-` keep that setting; pass
+`-DDISQUISITION_CODESIGN_IDENTITY=AUTO` to switch to automatic selection.
+The build prints the selected identity and fails if signing fails.
+After running `macdeployqt` or adding files to the app bundle, run
+`cmake --build build --target disquisition-sign-macos` to sign and verify it
+again with the configured identity.
+
+Without an Apple Development certificate, builds fall back to ad-hoc signing
+and print a warning. Use `-DDISQUISITION_CODESIGN_IDENTITY=-` to request this
+explicitly. CI artifacts are also ad-hoc signed unless the runner has a
+certificate. Their permissions may need to be granted again after updates.
+
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
 Install SQLite 3.24 or newer and its development headers alongside Qt 6. Run
@@ -142,6 +159,13 @@ it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
+
+On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
+& System Audio Recording, then quit and reopen the app. If it keeps asking
+despite an enabled toggle, quit the app, remove the old Disquisition entry
+with the minus button, add the current app bundle, and reopen it. An old
+permission can refer to a previous ad-hoc build's signature. Keep using the
+same certificate-backed signing identity to prevent this after rebuilds.
 
 This first version is deliberately small. It works well on a LAN or between
 publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP
