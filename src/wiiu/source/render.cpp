@@ -67,7 +67,7 @@ void editor(Canvas& canvas, const Scene& scene) {
         if (index < preview.size()) canvas.text(1, 4 + row, preview.substr(index, 50));
     }
     for (int i = 0; i < 52; ++i) canvas.button(edit.keyRect(i), edit.key(i), edit.selected == i);
-    canvas.text(1, 19, "A key  X delete  B back  + done  L/R cursor");
+    canvas.text(1, 19, "A key  X delete  B back  + done  L/R cursor  - exit");
 }
 }
 

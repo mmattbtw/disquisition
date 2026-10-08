@@ -1,12 +1,15 @@
 #include "audio.h"
+#include "lifecycle.h"
 #include "render.h"
 #include "worker.h"
 
 #include <coreinit/cache.h>
 #include <coreinit/screen.h>
 #include <coreinit/thread.h>
+#include <coreinit/title.h>
 #include <coreinit/time.h>
 #include <proc_ui/procui.h>
+#include <sysapp/launch.h>
 #include <vpad/input.h>
 #include <whb/log.h>
 #include <whb/log_cafe.h>
@@ -88,6 +91,8 @@ public:
     }
 
     void frame() {
+        // Once exit is requested, only the outer ProcUI loop keeps running.
+        if (exit_.requested()) return;
         const auto now = wiiu::nowMilliseconds();
         view_ = worker.snapshot();
         if (!view_.connected) {
@@ -100,6 +105,7 @@ public:
         }
         if (view_.sentRevision != sentRevision_) { scroll_ = 0; sentRevision_ = view_.sentRevision; }
         readInput(now);
+        if (exit_.requested()) return;
         worker.controls(muted_ || editor_.active || !inputAvailable_, deafened_, settings.pushToTalk, held_);
         auto audioView = view_;
         audioView.deafened = deafened_;
@@ -116,6 +122,7 @@ private:
     enum Edit { Message, Host, Port, Name } edit_ = Message;
     handheld::View view_;
     wiiu::Editor editor_;
+    wiiu::ExitRequest exit_;
     std::string draft_;
     bool joining_ = false, muted_ = false, deafened_ = false, held_ = false;
     bool voiceWanted_ = false, voiceAcknowledged_ = false;
@@ -226,6 +233,11 @@ private:
         }
         lastInput_ = now; inputAvailable_ = true; held_ = (pad.hold & VPAD_BUTTON_ZR) != 0;
         unsigned buttons = pad.trigger;
+        if (buttons & VPAD_BUTTON_MINUS) {
+            audio.stop(); worker.leave(); joining_ = false; voiceWanted_ = false;
+            exit_.request(OSGetTitleID(), SYSLaunchMenu, WHBProcStopRunning);
+            return;
+        }
         const unsigned directional = pad.hold & (VPAD_BUTTON_UP | VPAD_BUTTON_DOWN | VPAD_BUTTON_LEFT | VPAD_BUTTON_RIGHT);
         if (directional != repeatButton_) { repeatButton_ = directional; repeatAt_ = now + 350; }
         else if (directional && now >= repeatAt_) { buttons |= directional; repeatAt_ = now + 90; }
@@ -251,9 +263,6 @@ private:
             if (buttons & VPAD_BUTTON_PLUS) acceptEdit();
             else if ((buttons & VPAD_BUTTON_A) && editor_.press() == wiiu::Editor::Accepted) acceptEdit();
             return;
-        }
-        if (buttons & VPAD_BUTTON_MINUS) {
-            audio.stop(); worker.leave(); joining_ = false; voiceWanted_ = false; WHBProcStopRunning(); return;
         }
         if (buttons & VPAD_BUTTON_L) tab_ = static_cast<Tab>((int(tab_) + 2) % 3);
         if (buttons & VPAD_BUTTON_R) tab_ = static_cast<Tab>((int(tab_) + 1) % 3);

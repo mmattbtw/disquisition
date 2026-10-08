@@ -235,7 +235,7 @@ if(BUILD_TESTING)
   target_link_libraries(wiiu_console_core PUBLIC chat_protocol)
   target_link_libraries(end_to_end_test PRIVATE wiiu_console_core)
   add_library(wiiu_ui STATIC src/wiiu/source/settings.cpp
-    src/wiiu/source/ui.cpp src/wiiu/source/render.cpp)
+    src/wiiu/source/ui.cpp src/wiiu/source/render.cpp src/wiiu/source/lifecycle.cpp)
   target_include_directories(wiiu_ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/wiiu/include")
   target_link_libraries(wiiu_ui PUBLIC wiiu_console_core)

@@ -66,7 +66,7 @@ participants can join the same room.
 | X | Mute/unmute microphone |
 | ZL | Deafen/undeafen, also blocking microphone transmission |
 | Hold ZR | Talk when push-to-talk is selected |
-| - | Disconnect and exit |
+| - | Disconnect and exit, including from the keyboard |
 | HOME | System menu or Homebrew Launcher exit, depending on environment |
 
 In the editor, tap keys or use the D-pad and A. Y toggles Shift; X deletes;
@@ -83,6 +83,12 @@ keeps up to 128 messages in arrival order, so a console clock difference does
 not move a new message into old chat. Sending returns to the newest messages.
 The member list keeps up to 64 users and reports text/voice, speaking, muted,
 and deafened states.
+
+On Aroma, - requests the Wii U Menu and continues processing ProcUI messages
+until the system completes the exit transition. Rendering and input stop as
+soon as exit is requested. The legacy Homebrew Launcher path keeps libwhb's
+launcher relaunch behavior. Microphone/playback, audio renderer, network worker,
+and display buffers are cleaned up before the app returns.
 
 ## Voice
 
@@ -180,8 +186,12 @@ ctest --test-dir build --output-on-failure
 
 The Wii U tests cover byte order, capture pairing/reset, mute/PTT/deafen,
 reconnect voice state, message order, settings backup, keyboard input, and long
-text wrapping. The end-to-end test connects the real console session/transport
-to the real server and relay for bidirectional chat and voice frames.
+text wrapping. Exit tests check that Aroma requests the menu once without
+stopping ProcUI early, and preserve the legacy launcher path for every supported
+launcher title ID. They do not emulate the system's menu transition; the new
+exit behavior still needs a console test. The end-to-end test connects the real
+console session/transport to the real server and relay for bidirectional chat
+and voice frames.
 
 Text and borders use one pixel grid. The app draws a bundled public-domain
 [font8x8 font by Daniel Hepper](https://github.com/dhepper/font8x8) at 2x scale

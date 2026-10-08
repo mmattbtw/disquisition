@@ -1,5 +1,6 @@
 #include "check.h"
 #include "microphone_frames.h"
+#include "lifecycle.h"
 #include "settings.h"
 #include "ui.h"
 
@@ -9,6 +10,34 @@
 #include <unistd.h>
 
 namespace {
+
+int menuRequests = 0, launcherStops = 0;
+void launchMenu() { ++menuRequests; }
+void stopLauncher() { ++launcherStops; }
+
+void aromaExitRequestsMenuOnceWithoutStoppingProcuiEarly() {
+    menuRequests = launcherStops = 0;
+    wiiu::ExitRequest exit;
+    CHECK(!exit.requested());
+    exit.request(0x0005000012345678ULL, launchMenu, stopLauncher);
+    CHECK(exit.requested());
+    CHECK(menuRequests == 1 && launcherStops == 0);
+    exit.request(0x0005000012345678ULL, launchMenu, stopLauncher);
+    CHECK(menuRequests == 1 && launcherStops == 0);
+}
+
+void legacyLauncherExitKeepsLibwhbRelaunchBehavior() {
+    for (const auto title : {0x0005000013374842ULL, 0x000500101004A000ULL,
+                            0x000500101004A100ULL, 0x000500101004A200ULL}) {
+        menuRequests = launcherStops = 0;
+        wiiu::ExitRequest exit;
+        exit.request(title, launchMenu, stopLauncher);
+        CHECK(exit.requested());
+        CHECK(menuRequests == 0 && launcherStops == 1);
+        exit.request(title, launchMenu, stopLauncher);
+        CHECK(menuRequests == 0 && launcherStops == 1);
+    }
+}
 
 void pcmUsesLittleEndianOnEveryHost() {
     handheld::Samples samples{};
@@ -129,6 +158,8 @@ void transcriptWrapsLongWordsAndSanitizesOnlyDisplay() {
 }
 
 int main() {
+    aromaExitRequestsMenuOnceWithoutStoppingProcuiEarly();
+    legacyLauncherExitKeepsLibwhbRelaunchBehavior();
     pcmUsesLittleEndianOnEveryHost();
     microphonePairsAcrossChunksAndDropsMutedPartialFrame();
     voiceGatesCaptureAndReconnectLeavesVoiceOff();
