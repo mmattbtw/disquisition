@@ -22,15 +22,20 @@ void Audio::audioFrame() {
     }
 }
 
-bool Audio::start(std::string& error) {
-    stop();
+bool Audio::initialize(std::string& error) {
     if (!AXIsInit()) {
         AXInitParams parameters{};
         parameters.renderer = AX_INIT_RENDERER_48KHZ;
         AXInitWithParams(&parameters);
         ownsAx_ = true;
     }
-    if (!AXIsInit()) { error = "Could not initialize Wii U audio."; stop(); return false; }
+    if (!AXIsInit()) { error = "Could not initialize Wii U audio."; shutdown(); return false; }
+    return true;
+}
+
+bool Audio::start(std::string& error) {
+    stop();
+    if (!initialize(error)) return false;
     microphone_ = static_cast<std::int16_t*>(memalign(64, kMicSamples * 2));
     playback_ = static_cast<std::int16_t*>(memalign(64, handheld::kPcmBytes * kSegments));
     if (!microphone_ || !playback_) { error = "Not enough memory for voice."; stop(); return false; }
@@ -99,10 +104,14 @@ void Audio::stop() {
     if (current_ == this) current_ = nullptr;
     if (handle_ >= 0) { MICClose(handle_); MICUninit(handle_); handle_ = -1; }
     if (voice_) { AXSetVoiceState(voice_, AX_VOICE_STATE_STOPPED); AXFreeVoice(voice_); voice_ = nullptr; }
-    if (ownsAx_) { AXQuit(); ownsAx_ = false; }
     std::free(microphone_); std::free(playback_);
     microphone_ = playback_ = nullptr;
     frames_.reset(); mixer_.clear();
+}
+
+void Audio::shutdown() {
+    stop();
+    if (ownsAx_) { AXQuit(); ownsAx_ = false; }
 }
 
 bool Audio::tick(const handheld::View& view, Worker& worker, bool transmit,

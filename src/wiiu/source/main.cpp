@@ -75,12 +75,13 @@ public:
 
     void release() {
         foreground = false;
-        audio.stop(); voiceWanted_ = false;
+        audio.shutdown(); voiceWanted_ = false;
         worker.foreground(false);
         screens.release();
     }
     void acquire() {
         screens.acquire();
+        audio.initialize(notice);
         foreground = true;
         worker.foreground(true);
         touchHeld_ = false; held_ = false;
@@ -302,13 +303,16 @@ int main() {
             result = 1;
             ProcUIShutdown();
         } else {
+            // End the system loading jingle before the first app frame.
+            // Microphone capture still waits for an explicit Join voice.
+            app.audio.initialize(app.notice);
             ProcUIRegisterCallback(PROCUI_CALLBACK_ACQUIRE, acquired, &app, 100);
             ProcUIRegisterCallback(PROCUI_CALLBACK_RELEASE, released, &app, 100);
             while (WHBProcIsRunning()) {
                 if (app.foreground) app.frame();
                 OSSleepTicks(OSMillisecondsToTicks(16));
             }
-            app.audio.stop();
+            app.audio.shutdown();
         }
     }
     if (sd) WHBUnmountSdCard();

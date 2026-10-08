@@ -86,6 +86,12 @@ and deafened states.
 
 ## Voice
 
+The app initializes the Wii U audio renderer at startup to end the system's
+loading sound. The renderer stays active for the app's foreground lifetime;
+leaving voice or disconnecting releases microphone/playback resources without
+shutting down the renderer. HOME/background release and exit shut it down, and
+returning to the foreground initializes it again.
+
 Choose Join voice to enable the GamePad microphone and GamePad/headphone audio
 output. Voice stays off until you join it. Push-to-talk is on by default. Set
 Microphone to open mic in Settings if preferred; that setting can change while

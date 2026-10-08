@@ -12,7 +12,11 @@ class Worker;
 
 class Audio {
 public:
-    ~Audio() { stop(); }
+    ~Audio() { shutdown(); }
+    // AX takes over the system's transition audio at app startup, even when
+    // voice is off. Its foreground lifetime is separate from the microphone.
+    bool initialize(std::string& error);
+    void shutdown();
     bool start(std::string& error);
     void stop();
     bool running() const { return microphone_ != nullptr && voice_ != nullptr; }
