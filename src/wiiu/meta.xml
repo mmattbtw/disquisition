@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>Disquisition</name>
+  <coder>Disquisition contributors</coder>
+  <version>1.0</version>
+  <short_description>Native group chat and GamePad voice</short_description>
+  <long_description>Text chat, member roster, saved relay settings, and microphone voice. Connects through a Disquisition relay. Use the GamePad touchscreen or D-pad and buttons.</long_description>
+</app>
