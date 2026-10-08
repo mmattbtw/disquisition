@@ -4,8 +4,8 @@
 namespace wiiu {
 
 bool Rect::contains(int x, int y) const {
-    return x >= column * 16 && x < (column + columns) * 16 &&
-        y >= row * 24 && y < (row + rows) * 24;
+    return x >= column * cellWidth && x < (column + columns) * cellWidth &&
+        y >= row * cellHeight && y < (row + rows) * cellHeight;
 }
 
 std::string displayText(const std::string& utf8) {

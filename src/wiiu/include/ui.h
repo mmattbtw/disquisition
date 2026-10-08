@@ -8,7 +8,8 @@
 
 namespace wiiu {
 
-// Character-cell rectangles match OSScreen's 16 x 24 layout on the GamePad.
+// Text, borders and touch targets share this app-controlled pixel grid.
+constexpr int cellWidth = 16, cellHeight = 24;
 struct Rect {
     int column, row, columns, rows;
     bool contains(int x, int y) const;

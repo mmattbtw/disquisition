@@ -1,5 +1,5 @@
 #include "audio.h"
-#include "ui.h"
+#include "render.h"
 #include "worker.h"
 
 #include <coreinit/cache.h>
@@ -18,13 +18,19 @@
 #include <malloc.h>
 
 namespace {
-constexpr std::uint32_t background = 0x101C2600;
-constexpr std::uint32_t accent = 0xA8DBC700;
-constexpr std::uint32_t border = 0x43556300;
-constexpr int drcColumns = 53;
+class ScreenCanvas final : public wiiu::Canvas {
+public:
+    ScreenCanvas(OSScreenID screen, int width, int height) : Canvas(width, height), screen_(screen) {}
+private:
+    OSScreenID screen_;
+    void putPixel(int x, int y, std::uint32_t color) override {
+        OSScreenPutPixelEx(screen_, x, y, color);
+    }
+};
 
 class Screens {
 public:
+    ScreenCanvas tv{SCREEN_TV, 1280, 720}, gamepad{SCREEN_DRC, 854, 480};
     ~Screens() {
         OSScreenShutdown();
         std::free(tv_); std::free(drc_);
@@ -45,32 +51,12 @@ public:
         OSScreenEnableEx(SCREEN_TV, false); OSScreenEnableEx(SCREEN_DRC, false);
     }
     void begin() {
-        OSScreenClearBufferEx(SCREEN_TV, background);
-        OSScreenClearBufferEx(SCREEN_DRC, background);
+        OSScreenClearBufferEx(SCREEN_TV, wiiu::background);
+        OSScreenClearBufferEx(SCREEN_DRC, wiiu::background);
     }
     void end() {
         DCFlushRange(tv_, tvSize_); DCFlushRange(drc_, drcSize_);
         OSScreenFlipBuffersEx(SCREEN_TV); OSScreenFlipBuffersEx(SCREEN_DRC);
-    }
-    static void text(OSScreenID screen, int column, int row, const std::string& text,
-                     std::size_t width = 51) {
-        // User-supplied newlines/control bytes never affect the screen layout.
-        const auto visible = wiiu::displayText(text).substr(0, width);
-        OSScreenPutFontEx(screen, column, row, visible.c_str());
-    }
-    static void outline(OSScreenID screen, wiiu::Rect r, std::uint32_t color) {
-        const int left = r.column * 16, right = (r.column + r.columns) * 16 - 3;
-        const int top = r.row * 24, bottom = (r.row + r.rows) * 24 - 3;
-        for (int x = left; x <= right; ++x) {
-            OSScreenPutPixelEx(screen, x, top, color); OSScreenPutPixelEx(screen, x, bottom, color);
-        }
-        for (int y = top; y <= bottom; ++y) {
-            OSScreenPutPixelEx(screen, left, y, color); OSScreenPutPixelEx(screen, right, y, color);
-        }
-    }
-    static void button(wiiu::Rect r, const std::string& label, bool selected = false) {
-        outline(SCREEN_DRC, r, selected ? accent : border);
-        text(SCREEN_DRC, r.column + 1, r.row, label, r.columns - 2);
     }
 private:
     void* tv_ = nullptr;
@@ -286,81 +272,14 @@ private:
             if (buttons & VPAD_BUTTON_A) beginEdit(Message);
         }
     }
-    void transcript(OSScreenID screen, int columns, int first, int rows, std::size_t offset) {
-        const auto lines = wiiu::chatLines(view_.messages, columns - 2);
-        const auto maximum = lines.size() > std::size_t(rows) ? lines.size() - rows : 0;
-        offset = std::min(offset, maximum);
-        const auto end = lines.size() - offset;
-        const auto start = end > std::size_t(rows) ? end - rows : 0;
-        for (std::size_t i = start; i < end; ++i) {
-            const int row = first + int(i - start);
-            Screens::text(screen, 1, row, lines[i].text, columns - 2);
-            for (int y = row * 24 + 4; y < row * 24 + 20; ++y)
-                OSScreenPutPixelEx(screen, 5, y, wiiu::messageColor(lines[i].color));
-        }
-        if (lines.empty()) Screens::text(screen, 1, first, "Messages appear here after joining.");
-    }
-    void drawEditor() {
-        Screens::text(SCREEN_DRC, 1, 2, editor_.title);
-        Screens::text(SCREEN_DRC, 1, 3, notice);
-        std::string preview = editor_.text;
-        preview.insert(editor_.cursor(), "|");
-        const std::size_t start = editor_.cursor() > 180 ? editor_.cursor() - 180 : 0;
-        for (int row = 0; row < 4; ++row) {
-            const auto index = start + row * 50;
-            if (index < preview.size()) Screens::text(SCREEN_DRC, 1, 4 + row, preview.substr(index, 50));
-        }
-        for (int i = 0; i < 52; ++i)
-            Screens::button(editor_.keyRect(i), editor_.key(i), editor_.selected == i);
-        Screens::text(SCREEN_DRC, 1, 19, "A key  X delete  B back  + done  L/R cursor");
-    }
     void draw(std::uint64_t now) {
+        const auto lines = wiiu::chatLines(view_.messages, 51);
+        if (tab_ == Chat) scroll_ = std::min(scroll_, lines.size() > 10 ? lines.size() - 10 : 0);
+        if (tab_ == Members) memberScroll_ = std::min(memberScroll_, view_.members.size() > 10 ? view_.members.size() - 10 : 0);
         screens.begin();
-        Screens::text(SCREEN_TV, 1, 0, "DISQUISITION / WII U", 78);
-        Screens::text(SCREEN_TV, 1, 1, view_.status, 78);
-        transcript(SCREEN_TV, 80, 3, 23, scroll_);
-        Screens::text(SCREEN_TV, 1, 27, "Use the GamePad to write, view members, and change settings.", 78);
-        Screens::text(SCREEN_TV, 1, 28, notice, 78);
-        Screens::text(SCREEN_DRC, 1, 0, "DISQUISITION / WII U");
-        Screens::text(SCREEN_DRC, 1, 1, view_.status);
-        if (editor_.active) drawEditor();
-        else {
-            const char* tabs[] = {"Chat", "Members", "Settings"};
-            for (int i = 0; i < 3; ++i) Screens::button({1 + i * 17, 2, 17, 2}, tabs[i], int(tab_) == i);
-            if (tab_ == Settings) {
-                const std::string fields[] = {"Relay: " + settings.host, "Port: " + std::to_string(settings.port),
-                    "Name: " + settings.name, "Color: " + settings.color,
-                    settings.pushToTalk ? "Microphone: hold ZR to talk" : "Microphone: open mic",
-                    joining_ ? "Save & disconnect" : "Save & join relay"};
-                for (int i = 0; i < 6; ++i) Screens::button({1, 4 + i * 2, 51, 2}, fields[i], setting_ == i);
-                Screens::text(SCREEN_DRC, 1, 16, "Use a relay port, usually 3333.");
-                Screens::text(SCREEN_DRC, 1, 17, "Text settings change while disconnected.");
-            } else {
-                if (tab_ == Chat) {
-                    const auto lines = wiiu::chatLines(view_.messages, drcColumns - 2);
-                    scroll_ = std::min(scroll_, lines.size() > 10 ? lines.size() - 10 : 0);
-                    transcript(SCREEN_DRC, drcColumns, 4, 10, scroll_);
-                } else {
-                    memberScroll_ = std::min(memberScroll_, view_.members.size() > 10 ? view_.members.size() - 10 : 0);
-                    std::size_t index = 0;
-                    for (const auto& [name, member] : view_.members) {
-                        if (index++ < memberScroll_) continue;
-                        const int row = 4 + int(index - memberScroll_ - 1);
-                        if (row >= 14) break;
-                        const std::string state = member.deafened ? "deafened" : member.muted ? "muted" :
-                            member.lastAudio && now - member.lastAudio < 600 ? "speaking" : member.voice ? "voice" : "text";
-                        Screens::text(SCREEN_DRC, 1, row, name + "  " + state);
-                    }
-                    if (view_.members.empty()) Screens::text(SCREEN_DRC, 1, 4, "Join to see the room's members.");
-                }
-                Screens::button({1, 14, 51, 2}, view_.connected ? "A / tap to write a message" : joining_ ? "Connecting... + cancels" : "A / tap to join relay");
-                Screens::button({1, 16, 17, 2}, voiceWanted_ ? "Leave voice" : "Join voice", voiceWanted_);
-                Screens::button({18, 16, 17, 2}, muted_ ? "Unmute" : "Mute", muted_);
-                Screens::button({35, 16, 17, 2}, deafened_ ? "Undeafen" : "Deafen", deafened_);
-            }
-            Screens::text(SCREEN_DRC, 1, 18, notice);
-            Screens::text(SCREEN_DRC, 1, 19, "L/R tabs  + join/leave  ZR talk  - exit");
-        }
+        const wiiu::Scene scene{view_, settings, editor_, notice, static_cast<wiiu::Tab>(tab_),
+            joining_, voiceWanted_, muted_, deafened_, scroll_, memberScroll_, setting_, now};
+        wiiu::render(scene, screens.tv, screens.gamepad);
         screens.end();
     }
 };

@@ -234,13 +234,18 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/3ds/include")
   target_link_libraries(wiiu_console_core PUBLIC chat_protocol)
   target_link_libraries(end_to_end_test PRIVATE wiiu_console_core)
-  add_executable(wiiu_client_test test/wiiu_client_test.cpp
-    src/wiiu/source/settings.cpp src/wiiu/source/ui.cpp
-    src/wiiu/source/microphone_frames.cpp)
-  target_include_directories(wiiu_client_test PRIVATE
+  add_library(wiiu_ui STATIC src/wiiu/source/settings.cpp
+    src/wiiu/source/ui.cpp src/wiiu/source/render.cpp)
+  target_include_directories(wiiu_ui PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/wiiu/include")
-  target_link_libraries(wiiu_client_test PRIVATE wiiu_console_core)
+  target_link_libraries(wiiu_ui PUBLIC wiiu_console_core)
+  add_executable(wiiu_client_test test/wiiu_client_test.cpp
+    src/wiiu/source/microphone_frames.cpp)
+  target_link_libraries(wiiu_client_test PRIVATE wiiu_ui)
   add_test(NAME wiiu_client_test COMMAND wiiu_client_test)
+  add_executable(wiiu_render_test test/wiiu_render_test.cpp)
+  target_link_libraries(wiiu_render_test PRIVATE wiiu_ui)
+  add_test(NAME wiiu_render_test COMMAND wiiu_render_test)
 
   set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
 endif()

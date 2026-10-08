@@ -73,7 +73,7 @@ In the editor, tap keys or use the D-pad and A. Y toggles Shift; X deletes;
 L/R move the insertion cursor; + or Done accepts; B cancels and retains a
 message draft. The keyboard covers all printable ASCII characters, including
 spaces and punctuation. Messages are limited to 2,000 bytes and requested
-names to 20 bytes. The native OSScreen font cannot display Unicode; received
+names to 20 bytes. The bundled bitmap font displays ASCII; received
 non-ASCII characters appear as `?`. Incoming message bytes remain intact in
 the session. There is no emoji picker or external-keyboard support.
 
@@ -177,10 +177,27 @@ reconnect voice state, message order, settings backup, keyboard input, and long
 text wrapping. The end-to-end test connects the real console session/transport
 to the real server and relay for bidirectional chat and voice frames.
 
+Text and borders use one pixel grid. The app draws a bundled public-domain
+[font8x8 font by Daniel Hepper](https://github.com/dhepper/font8x8) at 2x scale
+through `OSScreenPutPixelEx`. It does not use `OSScreenPutFontEx`, whose native
+positioning caused labels to miss their touch targets and the footer to clip.
+The host preview runs the same layout and glyph renderer as the console.
+The render test checks button-label containment, printable glyphs, and complete
+footer rendering. Generate pixel previews of Chat, Members, Settings, keyboard,
+and TV with:
+
+```sh
+./build/wiiu_render_test build-wiiu/ui-preview
+```
+
+The output is portable pixmap images at the native display resolutions.
+
 ## Hardware validation
 
-The RPX and WUHB compile and link with devkitPPC r50 and wut 1.9.1. Actual Wii U
-operation has not been verified here. A native build and host protocol tests do
+The RPX and WUHB compile and link with devkitPPC r50 and wut 1.9.1. The user has
+confirmed Aroma launch and live chat on a Wii U. The updated pixel renderer has
+host visual checks; its final console appearance still needs confirmation.
+A native build and host protocol tests do
 not establish microphone timing, speaker behavior, touchscreen calibration, or
 foreground lifecycle behavior on a console.
 
