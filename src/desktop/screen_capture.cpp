@@ -10,6 +10,7 @@
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 #include <QVideoSink>
+#include <QWindowCapture>
 
 #if defined(Q_OS_MACOS)
 #include "desktop/mac_screen_capture.h"
@@ -129,20 +130,22 @@ ScreenCapture::~ScreenCapture() {
     encoder_.waitForDone();
 }
 
-bool ScreenCapture::start(QScreen* screen) {
+bool ScreenCapture::start(const ShareSource& source) {
     stop();
-    if (!screen) {
-        screen = QGuiApplication::primaryScreen();
-    }
-    if (!screen) {
+#if !defined(Q_OS_MACOS)
+    if (source.kind == ShareSource::Kind::Screen ? !source.screen : !source.window.isValid()) {
         return false;
     }
+#endif
     // A fresh encoder starts the stream with a keyframe.
     h264_ = std::make_shared<H264Encoder>();
     encoderName_.clear();
+    clock_.start();
+    nextDueMs_ = 0;
 
-    screen_ = screen;
 #if defined(Q_OS_MACOS)
+    // ScreenCaptureKit draws the mouse pointer itself.
+    screen_ = nullptr;
     const quint64 generation = generation_;
     QPointer<ScreenCapture> self(this);
     macCapture_ = std::make_unique<MacScreenCapture>(
@@ -157,22 +160,36 @@ bool ScreenCapture::start(QScreen* screen) {
                 if (self && self->generation_ == generation) self->errorOccurred(error);
             });
         });
-    clock_.start();
-    nextDueMs_ = 0;
-    macCapture_->start();
+    if (source.kind == ShareSource::Kind::Screen) {
+        macCapture_->startDisplay(source.nativeId);
+    }
+    else {
+        macCapture_->startWindow(source.nativeId);
+    }
 #else
-    capture_ = new QScreenCapture(this);
     session_ = new QMediaCaptureSession(this);
     sink_ = new QVideoSink(this);
-    capture_->setScreen(screen);
-    session_->setScreenCapture(capture_);
     session_->setVideoSink(sink_);
-    connect(capture_, &QScreenCapture::errorOccurred, this,
-            [this](QScreenCapture::Error, const QString& message) { emit errorOccurred(message); });
     connect(sink_, &QVideoSink::videoFrameChanged, this, &ScreenCapture::handleFrame);
-    clock_.start();
-    nextDueMs_ = 0;
-    capture_->start();
+    if (source.kind == ShareSource::Kind::Screen) {
+        // Screen frames leave out the pointer, so it is drawn in.
+        screen_ = source.screen;
+        screenCapture_ = new QScreenCapture(this);
+        screenCapture_->setScreen(source.screen);
+        session_->setScreenCapture(screenCapture_);
+        connect(screenCapture_, &QScreenCapture::errorOccurred, this,
+                [this](QScreenCapture::Error, const QString& message) { emit errorOccurred(message); });
+        screenCapture_->start();
+    }
+    else {
+        screen_ = nullptr;
+        windowCapture_ = new QWindowCapture(this);
+        windowCapture_->setWindow(source.window);
+        session_->setWindowCapture(windowCapture_);
+        connect(windowCapture_, &QWindowCapture::errorOccurred, this,
+                [this](QWindowCapture::Error, const QString& message) { emit errorOccurred(message); });
+        windowCapture_->start();
+    }
 #endif
     return true;
 }
@@ -182,25 +199,34 @@ void ScreenCapture::stop() {
 #if defined(Q_OS_MACOS)
     macCapture_.reset();
 #endif
-    if (capture_) {
-        capture_->stop();
-
-        capture_->disconnect(this);
+    if (screenCapture_) {
+        screenCapture_->stop();
+        screenCapture_->disconnect(this);
+        screenCapture_->deleteLater();
+    }
+    if (windowCapture_) {
+        windowCapture_->stop();
+        windowCapture_->disconnect(this);
+        windowCapture_->deleteLater();
+    }
+    if (session_) {
         sink_->disconnect(this);
         session_->deleteLater();
         sink_->deleteLater();
-        capture_->deleteLater();
     }
+    screen_ = nullptr;
+    screenCapture_ = nullptr;
+    windowCapture_ = nullptr;
     session_ = nullptr;
     sink_ = nullptr;
-    capture_ = nullptr;
 }
 
 bool ScreenCapture::running() const {
 #if defined(Q_OS_MACOS)
     return macCapture_ && macCapture_->running();
 #else
-    return capture_ && capture_->isActive();
+    return (screenCapture_ && screenCapture_->isActive()) ||
+           (windowCapture_ && windowCapture_->isActive());
 #endif
 }
 
@@ -291,4 +317,13 @@ bool ScreenFrameAssembler::add(const QString& sender, quint32 frameId, int index
     }
     partial_.remove(sender);
     return true;
+}
+
+QImage ScreenStreamDecoder::decode(quint32 frameId, bool keyframe, const QByteArray& data) {
+    if (!keyframe && (!lastFrameId_ || frameId != *lastFrameId_ + 1)) {
+        lastFrameId_.reset();
+        return {};
+    }
+    lastFrameId_ = frameId;
+    return decoder_.decode(data);
 }

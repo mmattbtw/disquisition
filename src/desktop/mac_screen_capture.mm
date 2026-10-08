@@ -46,6 +46,95 @@
 
 @end
 
+namespace {
+
+QString toQString(NSString* text) {
+    return QString::fromUtf8(text.UTF8String);
+}
+
+// Picks what to capture from the shareable content and sets the frame size
+// in points, or returns nil when it is no longer there.
+using FilterChooser = SCContentFilter* (^)(SCShareableContent* content, CGSize* size);
+
+void startStream(DisquisitionScreenOutput* output, NSString* missing, FilterChooser choose) {
+    output->active = true;
+    [SCShareableContent getShareableContentExcludingDesktopWindows:NO
+                                       onScreenWindowsOnly:NO
+                                         completionHandler:^(SCShareableContent* content, NSError* error) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (!output->active) return;
+        if (error) {
+            output->errorCallback(toQString(error.localizedDescription));
+            return;
+        }
+        CGSize size = CGSizeZero;
+        SCContentFilter* filter = choose(content, &size);
+        if (!filter || size.width < 2 || size.height < 2) {
+            output->errorCallback(toQString(missing));
+            return;
+        }
+        SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
+        configuration.width = static_cast<size_t>(size.width);
+        configuration.height = static_cast<size_t>(size.height);
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+        configuration.minimumFrameInterval = CMTimeMake(1, 30);
+        configuration.queueDepth = 3;
+        configuration.showsCursor = YES;
+        output->stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];
+        NSError* addError = nil;
+        if (![output->stream addStreamOutput:output type:SCStreamOutputTypeScreen
+                          sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0)
+                                      error:&addError]) {
+            output->errorCallback(toQString(addError.localizedDescription));
+            return;
+        }
+        [output->stream startCaptureWithCompletionHandler:^(NSError* startError) {
+            if (output->active && startError)
+                output->errorCallback(toQString(startError.localizedDescription));
+        }];
+      });
+    }];
+}
+
+QList<ShareSource> windowSources(SCShareableContent* content) {
+    const pid_t self = NSProcessInfo.processInfo.processIdentifier;
+    QList<ShareSource> sources;
+    for (SCWindow* window in content.windows) {
+        // Layer 0 holds ordinary windows, not menus, the Dock or overlays.
+        if (window.windowLayer != 0 || window.owningApplication.processID == self ||
+            window.frame.size.width < 64 || window.frame.size.height < 64) {
+            continue;
+        }
+        const QString application = toQString(window.owningApplication.applicationName);
+        const QString title = toQString(window.title);
+        if (title.isEmpty() && application.isEmpty()) continue;
+        ShareSource source;
+        source.kind = ShareSource::Kind::Window;
+        source.title = title.isEmpty() ? application : title;
+        source.detail = title.isEmpty() ? QString() : application;
+        source.nativeId = window.windowID;
+        sources.append(source);
+    }
+    return sources;
+}
+
+QList<ShareSource> displaySources(SCShareableContent* content) {
+    QList<ShareSource> sources;
+    int number = 1;
+    for (SCDisplay* display in content.displays) {
+        ShareSource source;
+        source.kind = ShareSource::Kind::Screen;
+        source.title = QString("Screen %1").arg(number++) +
+                       (display.displayID == CGMainDisplayID() ? " (main)" : "");
+        source.detail = QString("%1x%2").arg(display.width).arg(display.height);
+        source.nativeId = display.displayID;
+        sources.append(source);
+    }
+    return sources;
+}
+
+} // namespace
+
 struct MacScreenCapture::State {
     DisquisitionScreenOutput* output;
 };
@@ -63,49 +152,32 @@ MacScreenCapture::~MacScreenCapture() {
     delete state_;
 }
 
-void MacScreenCapture::start() {
-    DisquisitionScreenOutput* output = state_->output;
-    output->active = true;
-    [SCShareableContent getShareableContentExcludingDesktopWindows:NO
-                                       onScreenWindowsOnly:NO
-                                         completionHandler:^(SCShareableContent* content, NSError* error) {
-      dispatch_async(dispatch_get_main_queue(), ^{
-        if (!output->active) return;
-        if (error) {
-            output->errorCallback(QString::fromUtf8(error.localizedDescription.UTF8String));
-            return;
-        }
-        SCDisplay* display = nil;
-        for (SCDisplay* candidate in content.displays) {
-            if (candidate.displayID == CGMainDisplayID()) { display = candidate; break; }
-        }
-        if (!display) display = content.displays.firstObject;
-        if (!display) {
-            output->errorCallback(QStringLiteral("no display is available for capture"));
-            return;
-        }
-        SCContentFilter* filter = [[SCContentFilter alloc] initWithDisplay:display
-                                                     excludingApplications:@[] exceptingWindows:@[]];
-        SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
-        configuration.width = display.width;
-        configuration.height = display.height;
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA;
-        configuration.minimumFrameInterval = CMTimeMake(1, 30);
-        configuration.queueDepth = 3;
-        output->stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];
-        NSError* addError = nil;
-        if (![output->stream addStreamOutput:output type:SCStreamOutputTypeScreen
-                          sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0)
-                                      error:&addError]) {
-            output->errorCallback(QString::fromUtf8(addError.localizedDescription.UTF8String));
-            return;
-        }
-        [output->stream startCaptureWithCompletionHandler:^(NSError* startError) {
-            if (output->active && startError)
-                output->errorCallback(QString::fromUtf8(startError.localizedDescription.UTF8String));
-        }];
-      });
-    }];
+void MacScreenCapture::startDisplay(quint32 displayId) {
+    startStream(state_->output, @"the screen is no longer available",
+                ^SCContentFilter*(SCShareableContent* content, CGSize* size) {
+      for (SCDisplay* display in content.displays) {
+          if (display.displayID == displayId) {
+              *size = CGSizeMake(display.width, display.height);
+              return [[SCContentFilter alloc] initWithDisplay:display
+                                        excludingApplications:@[]
+                                             exceptingWindows:@[]];
+          }
+      }
+      return nil;
+    });
+}
+
+void MacScreenCapture::startWindow(quint32 windowId) {
+    startStream(state_->output, @"the window is no longer available",
+                ^SCContentFilter*(SCShareableContent* content, CGSize* size) {
+      for (SCWindow* window in content.windows) {
+          if (window.windowID == windowId) {
+              *size = window.frame.size;
+              return [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
+          }
+      }
+      return nil;
+    });
 }
 
 void MacScreenCapture::stop() {
@@ -118,3 +190,11 @@ void MacScreenCapture::stop() {
 }
 
 bool MacScreenCapture::running() const { return state_->output->active; }
+
+void listMacShareSources(std::function<void(QList<ShareSource>)> done) {
+    [SCShareableContent getShareableContentExcludingDesktopWindows:YES
+                                       onScreenWindowsOnly:YES
+                                         completionHandler:^(SCShareableContent* content, NSError* error) {
+      done(error ? QList<ShareSource>() : windowSources(content) + displaySources(content));
+    }];
+}

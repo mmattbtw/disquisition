@@ -149,7 +149,7 @@ jobs:
           cp third_party/re/LICENSE build/disquisition-desktop.app/Contents/Resources/licenses/libre.LICENSE
           cp "$(brew --prefix openssl@3)/LICENSE.txt" build/disquisition-desktop.app/Contents/Resources/licenses/OpenSSL.LICENSE
           macdeployqt build/disquisition-desktop.app
-          codesign --force --deep --sign - build/disquisition-desktop.app
+          cmake --build build --config Release --target disquisition-sign-macos
           ditto -c -k --sequesterRsrc --keepParent build/disquisition-desktop.app disquisition-desktop-macos-arm64.zip
 
       - name: Package Windows app

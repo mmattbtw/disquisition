@@ -43,6 +43,14 @@ enum class MsgType : std::uint8_t {
     VoiceState = 18, // [sender, muted 0|1, deafened 0|1]
     RelayProbe = 21, // client to relay: [] health check without signing in
     RelayReady = 22, // relay to client: [] server connection is available
+
+    // Screen sharing. Video travels through the server, which forwards each
+    // sharer's frames only to the users watching them.
+    ScreenShare = 23, // client: [1 sharing | 0 stopped]; server: [sharer, 1|0]
+    ScreenWatch = 24, // client to server: [sharer, 1 watch | 0 stop watching]
+    // client: [frame id, chunk index, chunk count, keyframe 0|1, H.264 bytes];
+    // server: [sharer, frame id, chunk index, chunk count, keyframe 0|1, H.264 bytes]
+    ScreenFrame = 25,
 };
 
 struct Message {

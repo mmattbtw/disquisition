@@ -58,7 +58,7 @@ private:
     void route(std::unique_ptr<Connection> connection, const Message& first);
     User* findUser(const std::string& name);
     void attachClient(const std::string& requestedName, std::unique_ptr<Connection> client);
-    void dropUser(const std::string& key);
+    void dropUser(std::uint64_t sessionId);
 
     void serviceUsers();
     void serviceHealth();
@@ -74,7 +74,10 @@ private:
     RelayOptions options_;
     int listenFd_ = -1;
     std::uint16_t boundPort_ = 0;
-    std::map<std::string, std::unique_ptr<User>> users_; // keyed by requested name
+    // A requested name can belong to several clients; the server assigns each
+    // session a unique display name.
+    std::map<std::uint64_t, std::unique_ptr<User>> users_;
+    std::uint64_t nextSessionId_ = 0;
     Connection healthServer_;
     std::chrono::steady_clock::time_point nextHealthAttempt_{};
 
