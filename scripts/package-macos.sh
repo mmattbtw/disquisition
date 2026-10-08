@@ -55,8 +55,8 @@ if grep -q '^ERROR:' "$staging/deployment.log"; then
     echo "Qt deployment failed; see the errors above." >&2
     exit 1
 fi
-codesign --force --deep --sign "${DISQUISITION_CODESIGN_IDENTITY:--}" "$app"
-codesign --verify --deep --strict "$app"
+cmake "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_CODESIGN_IDENTITY:-AUTO}" \
+    "-DDISQUISITION_APP_BUNDLE=$app" -P "$script_dir/../cmake/SignMacOS.cmake"
 
 cpack --config "$script_dir/../cmake/MacDmg.cmake" \
     -D "CPACK_INSTALLED_DIRECTORIES=$staging/payload;/" \

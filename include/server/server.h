@@ -3,6 +3,7 @@
 #include <poll.h>
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,8 @@ private:
         std::string advertisedHost; // overrides `host` when announcing the client
         std::uint16_t peerPort = 0;
         std::uint16_t voicePort = 0;
+        bool sharingScreen = false;
+        std::set<std::string> watching; // sharers whose frames this client receives
         bool authenticated = false;
         bool closing = false; // drop once `out` is flushed
     };
@@ -56,6 +59,10 @@ private:
     void handleVoicePort(Client& client, const Message& message);
     void handleVoiceAudio(Client& client, const Message& message);
     void handleVoiceState(Client& client, const Message& message);
+    void handleScreenShare(Client& client, const Message& message);
+    void handleScreenWatch(Client& client, const Message& message);
+    void handleScreenFrame(Client& client, const Message& message);
+    void endScreenShare(const Client& sharer);
     void reject(Client& client, const std::string& reason);
 
     void send(Client& client, const Message& message);

@@ -31,13 +31,30 @@ make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app is built when Qt 6.5 or newer is available. Local builds need
+The desktop app is built when Qt 6.6 or newer is available. Local builds need
 the `baresip` executable on `PATH` at runtime. Build it explicitly with:
 
 ```sh
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON
 cmake --build build --target disquisition-desktop
 ```
+
+On macOS, local builds automatically use the first valid Apple Development
+certificate in your keychain. Its signing identity lets macOS keep screen
+recording and microphone permission grants across rebuilds. To choose a
+specific certificate, configure with
+`-DDISQUISITION_CODESIGN_IDENTITY="certificate name or SHA-1"`.
+Existing build directories configured with `-` keep that setting; pass
+`-DDISQUISITION_CODESIGN_IDENTITY=AUTO` to switch to automatic selection.
+The build prints the selected identity and fails if signing fails.
+After running `macdeployqt` or adding files to the app bundle, run
+`cmake --build build --target disquisition-sign-macos` to sign and verify it
+again with the configured identity.
+
+Without an Apple Development certificate, builds fall back to ad-hoc signing
+and print a warning. Use `-DDISQUISITION_CODESIGN_IDENTITY=-` to request this
+explicitly. CI artifacts are also ad-hoc signed unless the runner has a
+certificate. Their permissions may need to be granted again after updates.
 
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
@@ -69,8 +86,10 @@ scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip bui
 
 The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
 installer window layout. It bundles dependencies and signs the finished app
-with an ad-hoc signature by default. Set `DISQUISITION_CODESIGN_IDENTITY` to use
-another signing identity. The DMG is not notarized.
+using the same automatic certificate selection as the build, with ad-hoc
+signing as a fallback. If you configured a specific signing identity, set
+`DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.
+The DMG is not notarized.
 The icon uses the desktop app's charcoal and mint colors, and the installer
 uses a light background for readable Finder labels. Regenerate the artwork with
 `swift scripts/generate-macos-artwork.swift`.
@@ -82,9 +101,13 @@ platform application-data directory.
 
 ## Desktop voice chat
 
-Start the normal server, then open `disquisition-desktop` on each computer.
-Set the server address and port in Preferences (Cmd+, on macOS), enter a name,
-and choose Join to enter text chat. Voice stays off until you choose Join voice.
+Open `disquisition-desktop`, enter a name, and choose Join to enter text chat.
+Fresh installs default to server `relay.mmatt.net:9000` and relay
+`relay.mmatt.net:3333`, so they connect through the relay without changing
+Preferences. Saved connection settings take precedence over these defaults.
+For your own server, set the server address and port in Preferences (Cmd+, on
+macOS) and set the relay address, or leave it blank to connect directly.
+Voice stays off until you choose Join voice.
 Choose Leave voice to exit the call without leaving the server. Use a different
 voice SIP port in Preferences for each client running on the same machine. If
 peers cannot directly reach the address seen by the server, enter a reachable
@@ -94,8 +117,8 @@ For clients on the same LAN, select "Advertise local IP automatically" in
 Preferences to announce the local IPv4 address. This takes precedence over the
 saved public host while selected. It also applies during direct relay fallback.
 
-To keep your IP hidden from other users, set the relay address and port in
-Preferences before joining. The desktop app then connects only to the relay;
+To keep your IP hidden from other users, keep a relay address and port in
+Preferences. The desktop app then connects only to the relay;
 it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
 mono PCM frames over that TCP connection. The relay passes those frames to the
 chat server, which fans them out to the room. The desktop client converts
@@ -132,6 +155,38 @@ module supplies audio levels and `ctrl_tcp` supplies call identity and state.
 On macOS the app requests microphone access when you choose Join voice. Choose
 the microphone and speaker from the `mic` and `out` dropdowns before joining
 voice; the dropdowns refresh after permission is granted.
+
+## Desktop screen sharing
+
+Choose share screen after joining, then pick what to stream, as in Discord:
+one application window from the Applications tab, or a whole display from
+the Screens tab. Choose Go Live to start. Sharing a single window keeps the
+rest of your desktop private, and lets you watch other shares fullscreen
+without the stream capturing itself.
+Shares appear on a stage above the chat, one tile per person sharing, and the
+member list marks each sharer `LIVE`. Your own tile shows what viewers
+receive. Other people's shares start as a "watch stream" button, so nobody
+downloads video they did not ask for. Choose it, or double-click the sharer in
+the member list, to start watching, and stop watching to close the video. Choose fullscreen
+or double-click a video to fill the screen with it; press Esc or double-click
+again to return. With more than one share on the stage, choose focus to
+enlarge one above the others.
+
+The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
+when it can. Frames travel over the existing server connection, directly or
+through the relay, and the server forwards each share only to its viewers.
+Like relayed voice, video is not encrypted, so the relay and server can see
+it. A viewer who falls behind skips frames and resumes at the next keyframe,
+which arrives every two seconds. New viewers wait for one the same way.
+Screen sharing needs a server and relay built from this version; older servers
+disconnect clients that start a share.
+
+On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
+& System Audio Recording, then quit and reopen the app. If it keeps asking
+despite an enabled toggle, quit the app, remove the old Disquisition entry
+with the minus button, add the current app bundle, and reopen it. An old
+permission can refer to a previous ad-hoc build's signature. Keep using the
+same certificate-backed signing identity to prevent this after rebuilds.
 
 This first version is deliberately small. It works well on a LAN or between
 publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP
@@ -228,7 +283,7 @@ Then connect clients to it:
 ./build/client --relay relay.example.net:3333 --name jesse
 ```
 
-The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
+The relay opens a separate server session and peer mesh for each attached user. Clients requesting the same name keep separate sessions; the server assigns a suffix such as `matt-2` to later arrivals. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
 
 If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
 

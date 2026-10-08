@@ -11,7 +11,6 @@
 #include <QAudioDevice>
 #include <QDialog>
 #include <QDesktopServices>
-#include <QPixmap>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -24,6 +23,7 @@
 #include <QMediaDevices>
 #include <QMenuBar>
 #include <QNetworkInterface>
+#include <QPointer>
 #include <QDir>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -42,6 +42,7 @@
 #include <utility>
 
 #include "desktop/audio_permission.h"
+#include "desktop/share_picker.h"
 
 namespace {
 
@@ -140,7 +141,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     advertiseLocal_ = settings.value("server/advertiseLocal", false).toBool();
     preferredVoicePort_ = static_cast<quint16>(
         qBound(1, settings.value("voice/sipPort", 5060).toInt(), 65534));
-    relayHost_ = settings.value("relay/host").toString();
+    relayHost_ = settings.value("relay/host", relayHost_).toString();
     relayPort_ = static_cast<quint16>(qBound(1, settings.value("relay/port", 3333).toInt(), 65535));
     leakMyIp_ = settings.value("relay/leakMyIp", false).toBool();
     saveMessages_ = settings.value("messages/enabled", false).toBool();
@@ -254,7 +255,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
     });
     screenCapture_.setBacklogProbe([this] { return server_.bytesToWrite(); });
-    connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::showScreenFrame);
+    connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::sendScreenFrame);
+    connect(stage_, &ScreenStage::watchRequested, this, &MainWindow::watchStream);
+    connect(stage_, &ScreenStage::stopWatchingRequested, this, &MainWindow::stopWatchingStream);
+    connect(members_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        watchStream(item->data(Qt::UserRole).toString());
+    });
     connect(&screenCapture_, &ScreenCapture::errorOccurred, this, [this](const QString& message) {
         appendChat("Screen", "capture failed: " + message, {}, true);
         stopScreenShare();
@@ -401,6 +407,7 @@ void MainWindow::buildUi() {
     voiceButton_->setEnabled(false);
     settingsButton_ = new QPushButton("settings", root);
     shareButton_ = new QPushButton("share screen", root);
+    shareButton_->setEnabled(false);
     setup->addWidget(name_, 1);
     setup->addWidget(connectButton_);
     setup->addWidget(voiceButton_);
@@ -449,12 +456,27 @@ void MainWindow::buildUi() {
     page->addLayout(state);
 
     auto* split = new QSplitter(root);
-    transcript_ = new QTextBrowser(split);
+    // Screen shares sit above the chat, like the stage of a call.
+    auto* conversation = new QSplitter(Qt::Vertical, split);
+    conversation->setChildrenCollapsible(false);
+    stage_ = new ScreenStage(conversation);
+    transcript_ = new QTextBrowser(conversation);
     transcript_->setOpenExternalLinks(false);
     transcript_->setFrameShape(QFrame::NoFrame);
+    transcript_->setMinimumHeight(120);
+    conversation->addWidget(stage_);
+    conversation->addWidget(transcript_);
+    conversation->setStretchFactor(0, 3);
+    conversation->setStretchFactor(1, 1);
+    // Give video most of the room whenever the stage appears; dragging the
+    // divider afterwards sticks until the stage closes again.
+    connect(stage_, &ScreenStage::opened, conversation, [conversation] {
+        const int total = conversation->height();
+        conversation->setSizes({total * 3 / 4, total - total * 3 / 4});
+    });
     members_ = new QListWidget(split);
     members_->setMinimumWidth(190);
-    split->addWidget(transcript_);
+    split->addWidget(conversation);
     split->addWidget(members_);
     split->setStretchFactor(0, 1);
     page->addWidget(split, 1);
@@ -483,7 +505,15 @@ void MainWindow::buildUi() {
         QPushButton#primary { background: #9dccca; color: #20262c; border-color: #9dccca; }
         QPushButton:checked { background: #e05252; color: #fff3f3; border-color: #ff8a8a; }
         QPushButton:disabled { color: #70757c; background: #2d3139; }
+        QTabWidget::pane { border: 1px solid #545b66; }
+        QTabBar::tab { background: #333842; color: #d5d7d6; border: 1px solid #545b66; padding: 6px 14px; }
+        QTabBar::tab:selected { background: #9dccca; color: #20262c; }
         QSplitter::handle { width: 1px; background: #545b66; }
+        QSplitter::handle:vertical { height: 1px; }
+        QFrame#streamTile { border: 1px solid #545b66; }
+        QLabel#streamName { font-weight: 700; }
+        QLabel#live { background: #e05252; color: #fff3f3; font-size: 11px; font-weight: 700; padding: 1px 5px; }
+        QLabel#streamStats { color: #8a9099; font-size: 12px; }
         QScrollBar:vertical { background: #282c34; width: 10px; }
         QScrollBar::handle:vertical { background: #68717c; min-height: 24px; }
     )");
@@ -624,12 +654,19 @@ void MainWindow::leaveVoice() {
 }
 
 void MainWindow::startScreenShare() {
+    if (sharingScreen_ || myName_.isEmpty() ||
+        server_.state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
 #if defined(Q_OS_MACOS)
     if (!requestScreenRecordingAccess()) {
         QMessageBox message(this);
         message.setWindowTitle("Screen recording permission needed");
         message.setText("Allow Disquisition to record your screen in macOS System Settings, then restart the app.");
-        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access.");
+        message.setInformativeText("Open Privacy & Security > Screen & System Audio Recording to enable access. "
+                                   "If Disquisition is already enabled, remove its entry with the minus button, "
+                                   "then add the current app again and restart it. "
+                                   "A rebuilt or replaced app can have a different signature from the one you allowed.");
         auto* settings = message.addButton("Open System Settings", QMessageBox::ActionRole);
         message.addButton(QMessageBox::Close);
         message.exec();
@@ -639,41 +676,41 @@ void MainWindow::startScreenShare() {
         return;
     }
 #endif
-    if (!screenPreview_) {
-        screenPreview_ = new QDialog(this);
-        screenPreview_->setWindowTitle("screen share preview");
-        screenPreview_->resize(1280, 760);
-        auto* layout = new QVBoxLayout(screenPreview_);
-        screenImage_ = new QLabel(screenPreview_);
-        screenImage_->setAlignment(Qt::AlignCenter);
-        // Ignored lets the window shrink below the size of the last frame.
-        screenImage_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-        screenStats_ = new QLabel("waiting for the first frame", screenPreview_);
-        layout->addWidget(screenImage_, 1);
-        layout->addWidget(screenStats_);
-        connect(screenPreview_, &QDialog::finished, this, &MainWindow::stopScreenShare);
-    }
-    if (!screenCapture_.start()) {
-        appendChat("Screen", "no screen to capture", {}, true);
+    SharePicker picker(this);
+    picker.setStyleSheet(styleSheet());
+    QPointer<SharePicker> openPicker(&picker);
+    listShareSources([openPicker](QList<ShareSource> sources) {
+        if (openPicker) openPicker->setSources(sources);
+    });
+    if (picker.exec() != QDialog::Accepted) {
         return;
     }
-    screenDecoder_ = std::make_unique<ScreenDecoder>();
-    screenStatsClock_.start();
-    screenStatsFrames_ = 0;
-    screenStatsBytes_ = 0;
-    screenStatsChunks_ = 0;
+    const std::optional<ShareSource> source = picker.chosen();
+    // The connection may have dropped while the picker was open.
+    if (!source || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+    if (!screenCapture_.start(*source)) {
+        appendChat("Screen", source->title + " can no longer be shared", {}, true);
+        return;
+    }
+    sharingScreen_ = true;
+    ownStreamDecoder_ = std::make_unique<ScreenStreamDecoder>();
     screenFramesSeen_ = false;
     const quint64 generation = ++screenShareGeneration_;
-    screenImage_->clear();
-    screenStats_->setText("waiting for the first frame");
-    screenPreview_->show();
+    sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
+    stage_->addStream(myName_, true);
     shareButton_->setText("stop sharing");
-    QTimer::singleShot(5000, this, [this, generation] {
+    refreshMembers();
+    const bool sharingWindow = source->kind == ShareSource::Kind::Window;
+    QTimer::singleShot(5000, this, [this, generation, sharingWindow] {
         if (generation != screenShareGeneration_ || screenFramesSeen_) return;
+        // Minimized windows send no frames.
+        const QString restore = sharingWindow ? "If the window is minimized, restore it and share again. Otherwise, " : "";
 #if defined(Q_OS_MACOS)
-        const QString detail = "ScreenCaptureKit did not deliver a frame. Quit Disquisition, check its Screen & System Audio Recording access in System Settings, then reopen it.";
+        const QString detail = restore + "ScreenCaptureKit did not deliver a frame. Quit Disquisition, check its Screen & System Audio Recording access in System Settings, then reopen it.";
 #else
-        const QString detail = "No screen frames arrived. Check that this app has permission to capture your screen.";
+        const QString detail = restore + "No frames arrived. Check that this app has permission to capture your screen.";
 #endif
         stopScreenShare();
         QMessageBox::warning(this, "Screen capture failed", detail);
@@ -681,62 +718,134 @@ void MainWindow::startScreenShare() {
 }
 
 void MainWindow::stopScreenShare() {
+    if (!sharingScreen_) {
+        return;
+    }
+    sharingScreen_ = false;
     ++screenShareGeneration_;
     screenCapture_.stop();
-    screenAssembler_.remove(myName_);
-    if (screenPreview_ && screenPreview_->isVisible()) {
-        screenPreview_->hide();
+    ownStreamDecoder_.reset();
+    if (server_.state() == QAbstractSocket::ConnectedState) {
+        sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"0"}});
     }
-    if (shareButton_) {
-        shareButton_->setText("share screen");
+    stage_->removeStream(myName_);
+    shareButton_->setText("share screen");
+    refreshMembers();
+}
+
+void MainWindow::sendScreenFrame(quint32 frameId, const QList<QByteArray>& chunks, bool keyframe) {
+    if (!sharingScreen_) {
+        return;
+    }
+    screenFramesSeen_ = true;
+    if (server_.state() == QAbstractSocket::ConnectedState) {
+        const std::string id = std::to_string(frameId);
+        const std::string count = std::to_string(chunks.size());
+        const std::string key = keyframe ? "1" : "0";
+        for (qsizetype i = 0; i < chunks.size(); ++i) {
+            const QByteArray& chunk = chunks[i];
+            sendFrame(&server_, chat::Message {chat::MsgType::ScreenFrame,
+                                               {id, std::to_string(i), count, key,
+                                                std::string(chunk.constData(),
+                                                            static_cast<std::size_t>(chunk.size()))}});
+        }
+    }
+
+    // Your own tile shows what viewers receive.
+    const QByteArray data = chunks.join();
+    const QImage image = ownStreamDecoder_->decode(frameId, keyframe, data);
+    if (!image.isNull()) {
+        stage_->setDetail(myName_, screenCapture_.encoderName());
+        stage_->showFrame(myName_, image, data.size());
     }
 }
 
-void MainWindow::showScreenFrame(quint32 frameId, const QList<QByteArray>& chunks) {
-    QImage image;
-    for (int i = 0; i < chunks.size(); ++i) {
-        const auto count = static_cast<int>(chunks.size());
-        QByteArray data;
-        if (screenAssembler_.add(myName_, frameId, i, count, chunks[i], data) && screenDecoder_) {
-            image = screenDecoder_->decode(data);
-        }
-        if (!image.isNull() && i == chunks.size() - 1) {
-            screenFramesSeen_ = true;
-            // Scale in device pixels, and only when the frame does not fit,
-            // so the preview is never softer than the frame itself.
-            const qreal ratio = screenImage_->devicePixelRatioF();
-            const QSize room = screenImage_->size() * ratio;
-            QPixmap pixmap = QPixmap::fromImage(image);
-            if (pixmap.width() > room.width() || pixmap.height() > room.height()) {
-                pixmap = pixmap.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            }
-            pixmap.setDevicePixelRatio(ratio);
-            screenImage_->setPixmap(pixmap);
-        }
-        screenStatsBytes_ += chunks[i].size();
-    }
-    ++screenStatsFrames_;
-    screenStatsChunks_ += static_cast<int>(chunks.size());
-
-    const qint64 elapsed = screenStatsClock_.elapsed();
-    if (elapsed < 1000 || image.isNull()) {
+void MainWindow::handleScreenShare(const chat::Message& message) {
+    const QString name = q(message.fields[0]);
+    if (!peers_.contains(name)) {
         return;
     }
-    const double fps = screenStatsFrames_ * 1000.0 / static_cast<double>(elapsed);
-    const double kbPerFrame = static_cast<double>(screenStatsBytes_) / 1024.0 / screenStatsFrames_;
-    const double mbps = static_cast<double>(screenStatsBytes_) * 8.0 / 1000.0 / static_cast<double>(elapsed);
-    screenStats_->setText(QString("%1  %2x%3  %4 fps  %5 KB/frame  %6 chunks/frame  %7 Mbps")
-                              .arg(screenCapture_.encoderName())
-                              .arg(image.width())
-                              .arg(image.height())
-                              .arg(fps, 0, 'f', 1)
-                              .arg(kbPerFrame, 0, 'f', 1)
-                              .arg(static_cast<double>(screenStatsChunks_) / screenStatsFrames_, 0, 'f', 1)
-                              .arg(mbps, 0, 'f', 2));
-    screenStatsClock_.restart();
-    screenStatsFrames_ = 0;
-    screenStatsBytes_ = 0;
-    screenStatsChunks_ = 0;
+    Peer& peer = peers_[name];
+    const bool sharing = message.fields[1] == "1";
+    if (peer.sharingScreen == sharing) {
+        return;
+    }
+    peer.sharingScreen = sharing;
+    if (sharing) {
+        stage_->addStream(name, false);
+        appendChat("Screen", name + " started sharing their screen", {}, true);
+    } else {
+        endRemoteStream(name);
+        appendChat("Screen", name + " stopped sharing their screen", {}, true);
+    }
+    refreshMembers();
+}
+
+void MainWindow::receiveScreenFrame(const chat::Message& message) {
+    const QString sender = q(message.fields[0]);
+    const auto stream = watchedStreams_.find(sender);
+    if (stream == watchedStreams_.end()) {
+        return;
+    }
+    bool validId = false;
+    bool validIndex = false;
+    bool validCount = false;
+    const quint32 frameId = q(message.fields[1]).toUInt(&validId);
+    const int index = q(message.fields[2]).toInt(&validIndex);
+    const int count = q(message.fields[3]).toInt(&validCount);
+    if (!validId || !validIndex || !validCount) {
+        return;
+    }
+    const std::string& chunk = message.fields[5];
+    QByteArray data;
+    if (!screenAssembler_.add(sender, frameId, index, count,
+                              QByteArray(chunk.data(), static_cast<qsizetype>(chunk.size())),
+                              data)) {
+        return;
+    }
+    const QImage image = stream->second.decode(frameId, message.fields[4] == "1", data);
+    if (!image.isNull()) {
+        stage_->showFrame(sender, image, data.size());
+    }
+}
+
+void MainWindow::watchStream(const QString& name) {
+    const auto peer = peers_.constFind(name);
+    if (peer == peers_.cend() || !peer->sharingScreen || watchedStreams_.count(name) != 0 ||
+        server_.state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+    watchedStreams_.try_emplace(name);
+    sendFrame(&server_, chat::Message {chat::MsgType::ScreenWatch, {s(name), "1"}});
+    stage_->setWatching(name, true);
+}
+
+void MainWindow::stopWatchingStream(const QString& name) {
+    if (watchedStreams_.erase(name) == 0) {
+        return;
+    }
+    screenAssembler_.remove(name);
+    if (server_.state() == QAbstractSocket::ConnectedState) {
+        sendFrame(&server_, chat::Message {chat::MsgType::ScreenWatch, {s(name), "0"}});
+    }
+    stage_->setWatching(name, false);
+}
+
+// Drops a remote share from the stage. The server has already stopped
+// sending it, so there is nobody to tell.
+void MainWindow::endRemoteStream(const QString& name) {
+    stage_->removeStream(name);
+    watchedStreams_.erase(name);
+    screenAssembler_.remove(name);
+}
+
+void MainWindow::endRemoteStreams() {
+    for (Peer& peer : peers_) {
+        if (peer.sharingScreen) {
+            peer.sharingScreen = false;
+            endRemoteStream(peer.name);
+        }
+    }
 }
 
 void MainWindow::showPreferences() {
@@ -842,7 +951,7 @@ void MainWindow::showPreferences() {
     }
     serverHost_ = host->text().trimmed();
     if (serverHost_.isEmpty()) {
-        serverHost_ = "127.0.0.1";
+        serverHost_ = "relay.mmatt.net";
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
@@ -974,6 +1083,11 @@ void MainWindow::handleTransportClosed() {
         resumeMutedBeforeDeafen_ = mutedBeforeDeafen_;
     }
     leaveVoice();
+    if (sharingScreen_) {
+        appendChat("Screen", "stopped sharing: connection lost", {}, true);
+    }
+    stopScreenShare();
+    endRemoteStreams();
     peerServer_.close();
     for (const Peer& peer : std::as_const(peers_)) {
         if (peer.socket) peer.socket->abort();
@@ -984,6 +1098,7 @@ void MainWindow::handleTransportClosed() {
     myName_.clear();
     refreshMembers();
     voiceButton_->setEnabled(false);
+    shareButton_->setEnabled(false);
     composer_->setEnabled(false);
     sendButton_->setEnabled(false);
 
@@ -1024,6 +1139,8 @@ void MainWindow::disconnectAll() {
     // Notify the room first; stopping the audio process must not delay Leave.
     server_.abort();
     leaveVoice();
+    stopScreenShare();
+    endRemoteStreams();
     peerServer_.close();
     for (const Peer& peer : std::as_const(peers_)) {
         if (peer.socket) {
@@ -1038,6 +1155,7 @@ void MainWindow::disconnectAll() {
     connectButton_->setText("Join");
     name_->setEnabled(true);
     voiceButton_->setEnabled(false);
+    shareButton_->setEnabled(false);
     composer_->setEnabled(false);
     sendButton_->setEnabled(false);
     connectionLabel_->setText("Disconnected");
@@ -1078,6 +1196,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
     if (message.type == chat::MsgType::LoginOk && !message.fields.empty()) {
         awaitingLogin_ = false;
         loginTimer_.stop();
+        const QString previousName = myName_;
         myName_ = q(message.fields[0]);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
@@ -1087,8 +1206,17 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         connectButton_->setText("Leave");
         name_->setEnabled(false);
         voiceButton_->setEnabled(true);
+        shareButton_->setEnabled(true);
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
+        // A relay signs in again after losing the server, which forgets every
+        // screen share. The server re-announces the others; announce ours.
+        endRemoteStreams();
+        if (sharingScreen_) {
+            stage_->removeStream(previousName);
+            stage_->addStream(myName_, true);
+            sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
+        }
         openSavedMessages();
         refreshMembers();
         if (resumeVoice_) {
@@ -1150,6 +1278,10 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
             peers_[sender].deafened = message.fields[2] == "1";
             refreshMembers();
         }
+    } else if (message.type == chat::MsgType::ScreenShare && message.fields.size() == 2) {
+        handleScreenShare(message);
+    } else if (message.type == chat::MsgType::ScreenFrame && message.fields.size() == 6) {
+        receiveScreenFrame(message);
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
         recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
@@ -1179,6 +1311,7 @@ void MainWindow::addPeer(const chat::Message& message) {
         peer.speaking = existing.speaking;
         peer.muted = existing.muted;
         peer.deafened = existing.deafened;
+        peer.sharingScreen = existing.sharingScreen;
     }
     peers_[peer.name] = peer;
     refreshMembers();
@@ -1196,6 +1329,7 @@ void MainWindow::removePeer(const QString& name) {
         peer.socket->disconnectFromHost();
     }
     relayAudio_.remove(name);
+    endRemoteStream(name);
     refreshMembers();
     appendChat("Room", name + " left", {}, true);
 }
@@ -1432,7 +1566,7 @@ void MainWindow::refreshMembers() {
                                   localSpeaking_ ? "  talking" :
                                   voiceWanted_ ? "  mic" : "  text";
         auto* self = new QListWidgetItem((localSpeaking_ && !muted_ ? "● " : "○ ") + myName_ +
-                                         selfState, members_);
+                                         selfState + (sharingScreen_ ? "  LIVE" : ""), members_);
         self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
                                    localSpeaking_ ? "#6ee7a2" : "#9dccca"));
     }
@@ -1446,7 +1580,12 @@ void MainWindow::refreshMembers() {
         const QString state = !inVoice ? "  text" : peer.deafened ? "  deafened" : peer.muted ? "  muted" :
                               peer.speaking ? "  talking" :
                               peer.voiceConnected ? "  voice" : "  in voice";
-        auto* item = new QListWidgetItem(marker + name + state, members_);
+        auto* item = new QListWidgetItem(marker + name + state +
+                                         (peer.sharingScreen ? "  LIVE" : ""), members_);
+        item->setData(Qt::UserRole, name);
+        if (peer.sharingScreen) {
+            item->setToolTip("double-click to watch " + name + "'s screen");
+        }
         item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
                                   peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
                                   "#9dccca"));

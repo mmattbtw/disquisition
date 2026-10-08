@@ -1,11 +1,11 @@
 #pragma once
 
-#include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
+#include <map>
 #include <memory>
 #include <optional>
 
@@ -13,11 +13,11 @@
 #include "common/recent_messages.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
+#include "desktop/screen_stage.h"
 #include "desktop/voice_engine.h"
 
 class QLabel;
 class QComboBox;
-class QDialog;
 class QLineEdit;
 class QListWidget;
 class QMediaDevices;
@@ -43,6 +43,7 @@ private:
         bool speaking = false;
         bool muted = false;
         bool deafened = false;
+        bool sharingScreen = false;
         qint64 lastAudioMs = 0;
     };
 
@@ -80,7 +81,13 @@ private:
     void probeRelay();
     void startScreenShare();
     void stopScreenShare();
-    void showScreenFrame(quint32 frameId, const QList<QByteArray>& chunks);
+    void sendScreenFrame(quint32 frameId, const QList<QByteArray>& chunks, bool keyframe);
+    void handleScreenShare(const chat::Message& message);
+    void receiveScreenFrame(const chat::Message& message);
+    void watchStream(const QString& name);
+    void stopWatchingStream(const QString& name);
+    void endRemoteStream(const QString& name);
+    void endRemoteStreams();
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -99,9 +106,7 @@ private:
     QLabel* connectionLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
-    QDialog* screenPreview_ = nullptr;
-    QLabel* screenImage_ = nullptr;
-    QLabel* screenStats_ = nullptr;
+    ScreenStage* stage_ = nullptr;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;
@@ -111,12 +116,12 @@ private:
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
     QHash<QString, Peer> peers_;
     QString myName_;
-    QString serverHost_ = "127.0.0.1";
+    QString serverHost_ = "relay.mmatt.net";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
     bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
-    QString relayHost_;
+    QString relayHost_ = "relay.mmatt.net";
     quint16 relayPort_ = 3333;
     bool leakMyIp_ = false;
     bool usingRelay_ = false;
@@ -143,17 +148,16 @@ private:
     bool mutedBeforeDeafen_ = false;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
-    // Screen sharing is local only for now: frames go through the assembler
-    // straight into a preview window instead of over the network.
+    // Screen frames travel through the server, which forwards each share
+    // only to the users watching it. Your own share is decoded locally for
+    // its tile on the stage.
     ScreenCapture screenCapture_;
-    ScreenFrameAssembler screenAssembler_;
-    std::unique_ptr<ScreenDecoder> screenDecoder_;
-    QElapsedTimer screenStatsClock_;
-    int screenStatsFrames_ = 0;
-    qint64 screenStatsBytes_ = 0;
-    int screenStatsChunks_ = 0;
+    bool sharingScreen_ = false;
+    std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;
+    ScreenFrameAssembler screenAssembler_;
+    std::map<QString, ScreenStreamDecoder> watchedStreams_;
     QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
