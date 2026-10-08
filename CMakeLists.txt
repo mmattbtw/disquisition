@@ -156,23 +156,28 @@ if(BUILD_DESKTOP_APP)
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
         ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
+        OUTPUT_NAME "disquisition"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "Disquisition"
+        MACOSX_BUNDLE_BUNDLE_NAME "disquisition"
+        MACOSX_BUNDLE_ICON_FILE "disquisition.icns"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+      target_sources(disquisition-desktop PRIVATE resources/macos/disquisition.icns)
+      set_source_files_properties(resources/macos/disquisition.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources)
       set(DISQUISITION_SIGN_COMMAND "${CMAKE_COMMAND}"
           "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_RESOLVED_CODESIGN_IDENTITY}"
           "-DDISQUISITION_APP_BUNDLE=$<TARGET_BUNDLE_DIR:disquisition-desktop>"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacOS.cmake")
       add_custom_command(TARGET disquisition-desktop POST_BUILD
         COMMAND ${DISQUISITION_SIGN_COMMAND}
-        COMMENT "Signing Disquisition for macOS permissions"
+        COMMENT "Signing disquisition for macOS permissions"
         VERBATIM)
       # macdeployqt and bundling baresip modify the app after POST_BUILD.
       # Re-sign with the same configured identity once deployment is finished.
       add_custom_target(disquisition-sign-macos
         COMMAND ${DISQUISITION_SIGN_COMMAND}
         DEPENDS disquisition-desktop
-        COMMENT "Signing deployed Disquisition for macOS permissions"
+        COMMENT "Signing deployed disquisition for macOS permissions"
         VERBATIM)
     endif()
   elseif(NOT Qt6_FOUND)

@@ -78,7 +78,7 @@ These permanent URLs download the newest successfully released `main` build:
 
 | Platform | Persistent download link |
 | --- | --- |
-| macOS, Apple silicon | [disquisition-desktop-macos-arm64.zip](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.zip) |
+| macOS, Apple silicon | [disquisition-desktop-macos-arm64.dmg](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.dmg) |
 | Windows, x64 | [disquisition-desktop-windows-x64.zip](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip) |
 | Linux, x64 | [disquisition-desktop-linux-x64.tar.gz](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz) |
 
@@ -87,9 +87,30 @@ shows the commit and all downloads. The links become available after the first
 successful release. Failed builds leave the previous release available. An
 older build finishing later does not replace a newer release as latest.
 
-The archives include a bundled `baresip` executable with the voice modules the
-app uses. The macOS and Windows archives include Qt. The Linux archive requires
+The downloads include a bundled `baresip` executable with the voice modules the
+app uses. The macOS DMG and Windows archive include Qt. The Linux archive requires
 a compatible Qt 6.8 runtime.
+
+On macOS, open the `.dmg` and drag `disquisition` to the Applications folder
+in the installer window. Then open `disquisition` from Applications and eject
+the disk image.
+
+To package a local macOS build, use a baresip executable built with the static
+voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
+
+```sh
+scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip build/disquisition.dmg
+```
+
+The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
+installer window layout. It bundles dependencies and signs the finished app
+using the same automatic certificate selection as the build, with ad-hoc
+signing as a fallback. If you configured a specific signing identity, set
+`DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.
+The DMG is not notarized.
+The icon uses the desktop app's charcoal and mint colors, and the installer
+uses a light background for readable Finder labels. Regenerate the artwork with
+`swift scripts/generate-macos-artwork.swift`.
 
 For local builds, install a baresip build that includes `menu`, `mixminus`,
 `vumeter`, `ctrl_tcp`, `g711`, and the platform audio module (`coreaudio`,
