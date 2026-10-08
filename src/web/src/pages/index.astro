@@ -1,0 +1,33 @@
+---
+const latestRelease = 'https://github.com/mmattbtw/disquisition/releases/latest';
+const downloads = [
+	{ label: 'Download for macOS, Apple silicon', file: 'disquisition-desktop-macos-arm64.dmg' },
+	{ label: 'Download for Windows, x64', file: 'disquisition-desktop-windows-x64.zip' },
+	{ label: 'Download for Linux, x64', file: 'disquisition-desktop-linux-x64.tar.gz' },
+];
+---
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="icon" href="/favicon.ico" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<title>disquisition</title>
+	</head>
+	<body>
+		<main>
+			<h1>disquisition</h1>
+			<h2>Download the desktop client</h2>
+			<p>Get the latest successful build from main.</p>
+			<ul>
+				{downloads.map(({ label, file }) => (
+					<li><a href={`${latestRelease}/download/${file}`}>{label}</a></li>
+				))}
+			</ul>
+			<p>Linux requires a compatible Qt 6.8 runtime.</p>
+			<p><a href={latestRelease}>View the latest release and build details</a></p>
+		</main>
+	</body>
+</html>

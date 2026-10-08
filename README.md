@@ -66,9 +66,27 @@ cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
 cmake --build build --config Release --target disquisition-desktop
 ```
 
-The [desktop build workflow](.github/workflows/desktop.yml) uploads macOS
-(Apple silicon), Ubuntu (x64), and Windows (x64) builds for every pull request
-and every push to `main`. Download them from the workflow run's artifacts.
+## Desktop downloads
+
+Every push to `main` publishes a [desktop release](https://github.com/mmattbtw/disquisition/releases)
+after the macOS, Windows, and Linux builds succeed. Each release has a
+`main-<workflow run number>` tag, points to the exact commit built, and includes
+download links in its release notes. Pull request and manually triggered builds
+remain available in the [desktop workflow](.github/workflows/desktop.yml) artifacts.
+
+These permanent URLs download the newest successfully released `main` build:
+
+| Platform | Persistent download link |
+| --- | --- |
+| macOS, Apple silicon | [disquisition-desktop-macos-arm64.dmg](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.dmg) |
+| Windows, x64 | [disquisition-desktop-windows-x64.zip](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip) |
+| Linux, x64 | [disquisition-desktop-linux-x64.tar.gz](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz) |
+
+The [latest release page](https://github.com/mmattbtw/disquisition/releases/latest)
+shows the commit and all downloads. The links become available after the first
+successful release. Failed builds leave the previous release available. An
+older build finishing later does not replace a newer release as latest.
+
 The downloads include a bundled `baresip` executable with the voice modules the
 app uses. The macOS DMG and Windows archive include Qt. The Linux archive requires
 a compatible Qt 6.8 runtime.

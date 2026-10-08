@@ -172,3 +172,31 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.*
           if-no-files-found: error
+
+  release:
+    name: Publish desktop release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Keep every push queued, and serialize changes to the latest release.
+    concurrency:
+      group: desktop-main-releases
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download desktop archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: disquisition-desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish release with download links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/publish-desktop-release.sh
