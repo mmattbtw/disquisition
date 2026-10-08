@@ -19,6 +19,10 @@ namespace {
 
 constexpr int kPollTimeoutMs = 500;
 constexpr std::size_t kMaxHostLength = 253;
+// Relayed voice is dropped for a recipient this far behind. Screen frames give
+// up sooner, so a busy screen share never crowds out voice.
+constexpr std::size_t kMaxVoiceBacklog = 256 * 1024;
+constexpr std::size_t kMaxScreenBacklog = 192 * 1024;
 
 // Advertised hosts are passed on verbatim, so only strip what could corrupt
 // a frame or a terminal.
@@ -204,7 +208,8 @@ bool Server::service(Client& client, short revents) {
 }
 
 bool Server::readFrom(Client& client) {
-    char buffer[4096];
+    // Screen sharing streams several megabits per second through here.
+    char buffer[64 * 1024];
     const ssize_t bytes = recv(client.fd, buffer, sizeof(buffer), 0);
     if (bytes > 0) {
         client.in.append(buffer, static_cast<std::size_t>(bytes));
@@ -270,6 +275,15 @@ bool Server::handleFrames(Client& client) {
             case MsgType::VoiceState:
                 handleVoiceState(client, message);
                 break;
+            case MsgType::ScreenShare:
+                handleScreenShare(client, message);
+                break;
+            case MsgType::ScreenWatch:
+                handleScreenWatch(client, message);
+                break;
+            case MsgType::ScreenFrame:
+                handleScreenFrame(client, message);
+                break;
             default:
                 reject(client, "unexpected message");
                 break;
@@ -315,6 +329,9 @@ void Server::handleLogin(Client& client, const Message& message) {
     for (const Client& other : clients_) {
         if (&other != &client && other.authenticated) {
             send(client, peerMessage(MsgType::Peer, addressOf(other)));
+            if (other.sharingScreen) {
+                send(client, Message{MsgType::ScreenShare, {other.name, "1"}});
+            }
         }
     }
     const PeerAddress address = addressOf(client);
@@ -382,7 +399,7 @@ void Server::handleVoiceAudio(Client& client, const Message& message) {
     const Message audio{MsgType::VoiceAudio, {client.name, message.fields[0]}};
     for (Client& recipient : clients_) {
         if (&recipient != &client && recipient.authenticated && recipient.voicePort != 0 &&
-            recipient.out.size() < 256 * 1024) {
+            recipient.out.size() < kMaxVoiceBacklog) {
             send(recipient, audio);
         }
     }
@@ -396,6 +413,83 @@ void Server::handleVoiceState(Client& client, const Message& message) {
     }
     broadcast(Message{MsgType::VoiceState,
                       {client.name, message.fields[1], message.fields[2]}}, &client);
+}
+
+void Server::handleScreenShare(Client& client, const Message& message) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
+        return;
+    }
+    if (message.fields.size() != 1 || (message.fields[0] != "0" && message.fields[0] != "1")) {
+        reject(client, "invalid screen share state");
+        return;
+    }
+    const bool sharing = message.fields[0] == "1";
+    if (client.sharingScreen == sharing) {
+        return;
+    }
+    client.sharingScreen = sharing;
+    if (sharing) {
+        LOG_INFO("{} started sharing their screen", client.name);
+        broadcast(Message{MsgType::ScreenShare, {client.name, "1"}}, &client);
+    }
+    else {
+        LOG_INFO("{} stopped sharing their screen", client.name);
+        endScreenShare(client);
+    }
+}
+
+void Server::handleScreenWatch(Client& client, const Message& message) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
+        return;
+    }
+    if (message.fields.size() != 2 || (message.fields[1] != "0" && message.fields[1] != "1")) {
+        reject(client, "invalid screen watch request");
+        return;
+    }
+    const std::string& sharer = message.fields[0];
+    if (message.fields[1] == "0") {
+        client.watching.erase(sharer);
+        return;
+    }
+    // A request that crosses the end of the share is ignored; the viewer
+    // learns from ScreenShare that it is over.
+    for (const Client& other : clients_) {
+        if (&other != &client && other.authenticated && other.sharingScreen &&
+            other.name == sharer) {
+            client.watching.insert(sharer);
+            return;
+        }
+    }
+}
+
+void Server::handleScreenFrame(Client& client, const Message& message) {
+    if (!client.authenticated || !client.sharingScreen || message.fields.size() != 5) {
+        return;
+    }
+    Message frame{MsgType::ScreenFrame, {client.name}};
+    frame.fields.insert(frame.fields.end(), message.fields.begin(), message.fields.end());
+    const std::string encoded = encode(frame);
+    // Adding the sender's name must not push the frame past what viewers accept.
+    if (encoded.size() > sizeof(std::uint32_t) + kMaxFrameSize) {
+        return;
+    }
+    // A viewer that falls behind misses frames and resumes at the next keyframe.
+    for (Client& viewer : clients_) {
+        if (viewer.watching.count(client.name) != 0 && viewer.out.size() < kMaxScreenBacklog) {
+            viewer.out.append(encoded);
+        }
+    }
+}
+
+// Tells the room the share is over and forgets its viewers, so a later user
+// who takes the same name is not watched by accident.
+void Server::endScreenShare(const Client& sharer) {
+    for (Client& client : clients_) {
+        client.watching.erase(sharer.name);
+    }
+    broadcast(Message{MsgType::ScreenShare, {sharer.name, "0"}}, &sharer);
 }
 
 // Sends the reason and closes once it is flushed. Closing straight away could
@@ -461,6 +555,9 @@ void Server::dropClient(std::size_t index) {
 
     if (client.authenticated) {
         LOG_INFO("{} left", client.name);
+        if (client.sharingScreen) {
+            endScreenShare(client);
+        }
         broadcast(Message{MsgType::PeerLeft, {client.name}});
         broadcastUsers();
     }

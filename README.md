@@ -31,13 +31,30 @@ make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app is built when Qt 6.5 or newer is available. Local builds need
+The desktop app is built when Qt 6.6 or newer is available. Local builds need
 the `baresip` executable on `PATH` at runtime. Build it explicitly with:
 
 ```sh
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON
 cmake --build build --target disquisition-desktop
 ```
+
+On macOS, local builds automatically use the first valid Apple Development
+certificate in your keychain. Its signing identity lets macOS keep screen
+recording and microphone permission grants across rebuilds. To choose a
+specific certificate, configure with
+`-DDISQUISITION_CODESIGN_IDENTITY="certificate name or SHA-1"`.
+Existing build directories configured with `-` keep that setting; pass
+`-DDISQUISITION_CODESIGN_IDENTITY=AUTO` to switch to automatic selection.
+The build prints the selected identity and fails if signing fails.
+After running `macdeployqt` or adding files to the app bundle, run
+`cmake --build build --target disquisition-sign-macos` to sign and verify it
+again with the configured identity.
+
+Without an Apple Development certificate, builds fall back to ad-hoc signing
+and print a warning. Use `-DDISQUISITION_CODESIGN_IDENTITY=-` to request this
+explicitly. CI artifacts are also ad-hoc signed unless the runner has a
+certificate. Their permissions may need to be granted again after updates.
 
 On Windows, CMake builds only the portable desktop pieces by default because
 the existing server, relay, terminal client, and library use POSIX sockets.
@@ -117,6 +134,38 @@ module supplies audio levels and `ctrl_tcp` supplies call identity and state.
 On macOS the app requests microphone access when you choose Join voice. Choose
 the microphone and speaker from the `mic` and `out` dropdowns before joining
 voice; the dropdowns refresh after permission is granted.
+
+## Desktop screen sharing
+
+Choose share screen after joining, then pick what to stream, as in Discord:
+one application window from the Applications tab, or a whole display from
+the Screens tab. Choose Go Live to start. Sharing a single window keeps the
+rest of your desktop private, and lets you watch other shares fullscreen
+without the stream capturing itself.
+Shares appear on a stage above the chat, one tile per person sharing, and the
+member list marks each sharer `LIVE`. Your own tile shows what viewers
+receive. Other people's shares start as a "watch stream" button, so nobody
+downloads video they did not ask for. Choose it, or double-click the sharer in
+the member list, to start watching, and stop watching to close the video. Choose fullscreen
+or double-click a video to fill the screen with it; press Esc or double-click
+again to return. With more than one share on the stage, choose focus to
+enlarge one above the others.
+
+The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
+when it can. Frames travel over the existing server connection, directly or
+through the relay, and the server forwards each share only to its viewers.
+Like relayed voice, video is not encrypted, so the relay and server can see
+it. A viewer who falls behind skips frames and resumes at the next keyframe,
+which arrives every two seconds. New viewers wait for one the same way.
+Screen sharing needs a server and relay built from this version; older servers
+disconnect clients that start a share.
+
+On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
+& System Audio Recording, then quit and reopen the app. If it keeps asking
+despite an enabled toggle, quit the app, remove the old Disquisition entry
+with the minus button, add the current app bundle, and reopen it. An old
+permission can refer to a previous ad-hoc build's signature. Keep using the
+same certificate-backed signing identity to prevent this after rebuilds.
 
 This first version is deliberately small. It works well on a LAN or between
 publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP
@@ -213,7 +262,7 @@ Then connect clients to it:
 ./build/client --relay relay.example.net:3333 --name jesse
 ```
 
-The relay opens a separate server session and peer mesh for each attached user. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
+The relay opens a separate server session and peer mesh for each attached user. Clients requesting the same name keep separate sessions; the server assigns a suffix such as `matt-2` to later arrivals. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
 
 If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
 
