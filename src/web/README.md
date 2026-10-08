@@ -1,43 +1,52 @@
-# Astro Starter Kit: Minimal
+# Disquisition website
+
+The desktop download page at https://disquisition.app is a static Astro site
+served by the existing `disquisition` Cloudflare Worker.
+
+Run these commands from `src/web`:
 
 ```sh
-bun create astro@latest -- --template minimal
+bun install --frozen-lockfile
+bun run astro dev --background
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+Use `bun run astro dev stop`, `status`, and `logs` to manage the dev server.
 
-## 🚀 Project Structure
+## Deploy with cf
 
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+```sh
+bun run deploy
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+This builds Astro, packages `dist` as Cloudflare static assets, and runs
+`cf deploy --prebuilt`. `cloudflare.config.ts` sets the Worker name and
+`disquisition.app` custom domain. No Astro server adapter is needed.
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+`scripts/package-worker.ts` uses Cloudflare's Build Output Specification helpers
+and validates the output before deployment. The CLI and helpers are pinned
+because the `cf` CLI and output format are currently in beta. Generated output
+lives in `.cloudflare/output` and is ignored by Git.
 
-Any static assets, like images, can be placed in the `public/` directory.
+To validate an upload without changing the deployed Worker:
 
-## 🧞 Commands
+```sh
+bun run build:worker
+bunx cf deploy --prebuilt --dry-run
+```
 
-All commands are run from the root of the project, from a terminal:
+## Cloudflare Git builds
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `bun install`             | Installs dependencies                            |
-| `bun dev`             | Starts local dev server at `localhost:4321`      |
-| `bun build`           | Build your production site to `./dist/`          |
-| `bun preview`         | Preview your build locally, before deploying     |
-| `bun astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `bun astro -- --help` | Get help using the Astro CLI                     |
+The existing Git integration watches `main`. Its production settings are:
 
-## 👀 Want to learn more?
+- Root directory: `src/web`
+- Build command: `bun install --frozen-lockfile && bun run build:worker`
+- Deploy command: `bunx cf deploy --prebuilt`
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+Preview builds use the same root directory, with these commands:
+
+- Build command: `bun install --frozen-lockfile && bun run build:worker --preview`
+- Deploy command: `bunx cf previews deploy --prebuilt`
+
+These settings require the deployment configuration in this directory to be
+present on the branch being built. Authenticate with `cf auth login` for local
+deployments; Cloudflare Git builds use their existing build token.
