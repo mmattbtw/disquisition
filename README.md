@@ -1,462 +1,68 @@
 # disquisition
 
-Disquisition is a small C++20 group chat program with peer-to-peer live delivery and a central coordination server. The server assigns names, announces peers, and does not store messages. Chat messages travel over direct TCP links between peers, either from the client itself or through an optional relay.
+Disquisition is a C++20 group chat app with desktop and terminal clients.
+The desktop app supports voice chat and screen sharing. A central server
+handles names and discovery; text messages travel between peers, directly or
+through an optional relay. The server does not store chat history.
 
-The repository builds five pieces:
+There is no encryption or authentication. Use it with people and networks you
+trust.
 
-- `server`, the discovery service
-- `client`, an ncurses terminal client
-- `relay`, a shared gateway for clients that cannot accept inbound connections
-- `disquisition::client`, a static C++ client library
-- `disquisition-desktop`, a Qt 6 desktop client with text chat and baresip voice
+## Download
 
-This is a plain TCP protocol. It does not provide encryption, authentication, private rooms, or access control. Use it only on networks and hosts you trust.
+Get the desktop app from the [latest release](https://github.com/mmattbtw/disquisition/releases/latest):
 
-## Requirements
+- [macOS, Apple silicon](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.dmg)
+- [Windows, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip)
+- [Linux, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
-- CMake 3.16 or newer
-- SQLite 3.24 or newer, including development headers
-- a C++20 compiler
-- ncurses, including development headers
-- Git and network access the first time CMake configures, to download spdlog
-- POSIX sockets and `poll`
+Open the app, enter a name and choose Join. Fresh installs use the default
+server and relay. Linux downloads need a compatible Qt 6.8 runtime.
+See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
-On macOS with Homebrew, install the dependencies with `brew install cmake sqlite ncurses`.
-Plain `make` then uses the Homebrew libraries when they are installed.
+## Build
 
-## Build and test
+For Linux or macOS, install a C++20 compiler, CMake 3.16+, SQLite 3.24+ and
+ncurses development headers. The first build also needs Git and network access.
+On macOS with Homebrew:
+
+```sh
+brew install cmake sqlite ncurses
+```
+
+Build and run the tests:
 
 ```sh
 make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app is built when Qt 6.6 or newer is available. Local builds need
-the `baresip` executable on `PATH` at runtime. Build it explicitly with:
-
-```sh
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON
-cmake --build build --target disquisition-desktop
-```
-
-On macOS, local builds automatically use the first valid Apple Development
-certificate in your keychain. Its signing identity lets macOS keep screen
-recording and microphone permission grants across rebuilds. To choose a
-specific certificate, configure with
-`-DDISQUISITION_CODESIGN_IDENTITY="certificate name or SHA-1"`.
-Existing build directories configured with `-` keep that setting; pass
-`-DDISQUISITION_CODESIGN_IDENTITY=AUTO` to switch to automatic selection.
-The build prints the selected identity and fails if signing fails.
-After running `macdeployqt` or adding files to the app bundle, run
-`cmake --build build --target disquisition-sign-macos` to sign and verify it
-again with the configured identity.
-
-Without an Apple Development certificate, builds fall back to ad-hoc signing
-and print a warning. Use `-DDISQUISITION_CODESIGN_IDENTITY=-` to request this
-explicitly. CI artifacts are also ad-hoc signed unless the runner has a
-certificate. Their permissions may need to be granted again after updates.
-
-On Windows, CMake builds only the portable desktop pieces by default because
-the existing server, relay, terminal client, and library use POSIX sockets.
-Install SQLite 3.24 or newer and its development headers alongside Qt 6. Run
-the server on Linux or macOS, then build the Windows app with:
-
-```powershell
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
-cmake --build build --config Release --target disquisition-desktop
-```
-
-## Desktop downloads
-
-Every push to `main` publishes a [desktop release](https://github.com/mmattbtw/disquisition/releases)
-after the macOS, Windows, and Linux builds succeed. Each release has a
-`main-<workflow run number>` tag, points to the exact commit built, and includes
-download links in its release notes. Pull request and manually triggered builds
-remain available in the [desktop workflow](.github/workflows/desktop.yml) artifacts.
-
-These permanent URLs download the newest successfully released `main` build:
-
-| Platform | Persistent download link |
-| --- | --- |
-| macOS, Apple silicon | [disquisition-desktop-macos-arm64.dmg](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.dmg) |
-| Windows, x64 | [disquisition-desktop-windows-x64.zip](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip) |
-| Linux, x64 | [disquisition-desktop-linux-x64.tar.gz](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz) |
-
-The [latest release page](https://github.com/mmattbtw/disquisition/releases/latest)
-shows the commit and all downloads. The links become available after the first
-successful release. Failed builds leave the previous release available. An
-older build finishing later does not replace a newer release as latest.
-
-The downloads include a bundled `baresip` executable with the voice modules the
-app uses. The macOS DMG and Windows archive include Qt. The Linux archive requires
-a compatible Qt 6.8 runtime.
-
-On macOS, open the `.dmg` and drag `disquisition` to the Applications folder
-in the installer window. Then open `disquisition` from Applications and eject
-the disk image.
-
-To package a local macOS build, use a baresip executable built with the static
-voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
-
-```sh
-scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip build/disquisition.dmg
-```
-
-The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
-installer window layout. It bundles dependencies and signs the finished app
-using the same automatic certificate selection as the build, with ad-hoc
-signing as a fallback. If you configured a specific signing identity, set
-`DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.
-The DMG is not notarized.
-The icon uses the desktop app's charcoal and mint colors, and the installer
-uses a light background for readable Finder labels. Regenerate the artwork with
-`swift scripts/generate-macos-artwork.swift`.
-
-For local builds, install a baresip build that includes `menu`, `mixminus`,
-`vumeter`, `ctrl_tcp`, `g711`, and the platform audio module (`coreaudio`,
-`wasapi`, or `alsa`). The app creates a small isolated baresip profile in the
-platform application-data directory.
-
-## Desktop voice chat
-
-Open `disquisition-desktop`, enter a name, and choose Join to enter text chat.
-Fresh installs default to server `relay.mmatt.net:9000` and relay
-`relay.mmatt.net:3333`, so they connect through the relay without changing
-Preferences. Saved connection settings take precedence over these defaults.
-For your own server, set the server address and port in Preferences (Cmd+, on
-macOS) and set the relay address, or leave it blank to connect directly.
-Voice stays off until you choose Join voice.
-Choose Leave voice to exit the call without leaving the server. Use a different
-voice SIP port in Preferences for each client running on the same machine. If
-peers cannot directly reach the address seen by the server, enter a reachable
-DNS name or IP as the public host and forward both the automatically chosen TCP
-chat port and the chosen SIP/RTP ports when connecting directly.
-For clients on the same LAN, select "Advertise local IP automatically" in
-Preferences to announce the local IPv4 address. This takes precedence over the
-saved public host while selected. It also applies during direct relay fallback.
-
-To keep your IP hidden from other users, keep a relay address and port in
-Preferences. The desktop app then connects only to the relay;
-it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
-mono PCM frames over that TCP connection. The relay passes those frames to the
-chat server, which fans them out to the room. The desktop client converts
-between the relay format and each audio device's preferred format, including
-44.1 kHz and 48 kHz devices. Direct participants keep using baresip with other
-direct participants and send a second audio stream for
-relayed participants. This means relayed voice is not end-to-end encrypted and
-the relay and server can hear it. Use only a trusted relay and server.
-
-"Connect directly if relay fails (reveals your IP)" is off by default. If
-the relay is unavailable, the desktop client retries it every three seconds
-without connecting directly. If direct fallback is enabled, a lost relay
-connection uses the server address and port in Preferences. This reveals your
-address to the server and direct peers while fallback is active. The client
-checks the relay every three seconds without leaving the direct connection.
-It switches back only after the relay confirms it can reach the chat server.
-If you were in voice, it starts direct baresip voice during fallback and
-switches back to relayed voice after that check succeeds. This reveals your IP to other
-direct voice participants while fallback is active. Mute and deafen settings
-carry over both transitions. The desktop health check requires a relay built
-from the same version of this repository. Rebuild and restart both `server`
-and `relay` after updating voice support; older servers reject voice messages.
-
-For direct participants, the app uses the server roster to form one SIP call
-per pair of users. Baresip's `mixminus` module combines those calls locally.
-The name ordering rule makes only one side dial each pair, while the other
-side auto-answers.
-
-The member list reports voice state from baresip itself. `·` means text-only,
-`○` means the SIP call is connected, and a green `●` means the microphone or
-that peer's received audio is above the speaking threshold. The `vumeter`
-module supplies audio levels and `ctrl_tcp` supplies call identity and state.
-
-On macOS the app requests microphone access when you choose Join voice. Choose
-the microphone and speaker from the `mic` and `out` dropdowns before joining
-voice; the dropdowns refresh after permission is granted.
-
-## Desktop screen sharing
-
-Choose share screen after joining, then pick what to stream, as in Discord:
-one application window from the Applications tab, or a whole display from
-the Screens tab. Choose Go Live to start. Sharing a single window keeps the
-rest of your desktop private, and lets you watch other shares fullscreen
-without the stream capturing itself.
-Shares appear on a stage above the chat, one tile per person sharing, and the
-member list marks each sharer `LIVE`. Your own tile shows what viewers
-receive. Other people's shares start as a "watch stream" button, so nobody
-downloads video they did not ask for. Choose it, or double-click the sharer in
-the member list, to start watching, and stop watching to close the video. Choose fullscreen
-or double-click a video to fill the screen with it; press Esc or double-click
-again to return. With more than one share on the stage, choose focus to
-enlarge one above the others.
-
-The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
-when it can. Frames travel over the existing server connection, directly or
-through the relay, and the server forwards each share only to its viewers.
-Like relayed voice, video is not encrypted, so the relay and server can see
-it. A viewer who falls behind skips frames and resumes at the next keyframe,
-which arrives every two seconds. New viewers wait for one the same way.
-Screen sharing needs a server and relay built from this version; older servers
-disconnect clients that start a share.
-
-On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
-& System Audio Recording, then quit and reopen the app. If it keeps asking
-despite an enabled toggle, quit the app, remove the old Disquisition entry
-with the minus button, add the current app bundle, and reopen it. An old
-permission can refer to a previous ad-hoc build's signature. Keep using the
-same certificate-backed signing identity to prevent this after rebuilds.
-
-This first version is deliberately small. It works well on a LAN or between
-publicly reachable hosts. It does not yet coordinate ICE/TURN credentials, RTP
-port forwarding, authentication, or media encryption. Use it only with people
-and networks you trust. A production internet deployment should add TURN and
-DTLS-SRTP before treating the call as private.
-
-The build creates `build/server`, `build/client`, `build/relay`, and the static client library. `make clean` removes the `build` directory.
-
-You can also use CMake directly:
-
-```sh
-cmake -S . -B build
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
+The desktop app also needs Qt and FFmpeg. See [building and packaging](docs/building.md)
+for desktop dependencies, Windows builds and macOS signing.
 
 ## Run a local chat
 
-Start the server. It creates `chat.db` if the file does not exist.
+Start the server:
 
 ```sh
 ./build/server --port 9000 --db chat.db
 ```
 
-Open another terminal for each client:
+Run each client in a separate terminal:
 
 ```sh
 ./build/client --host 127.0.0.1 --port 9000 --name matt
 ./build/client --host 127.0.0.1 --port 9000 --name jesse
 ```
 
-Each direct client opens a peer listener on an automatically selected port. On a LAN, the server announces the source address it sees. Across routed networks, pass a reachable address with `--advertise` and forward the chosen `--p2p-port` through the firewall or router.
+## Documentation
 
-Pass `--local` to announce the client's local IPv4 address automatically. This is useful when the server sees a different address, such as when it runs on the same machine. The selected address appears in the client's greeting. Use `--advertise` instead when peers need a public address. With `--relay`, `--local` applies only during direct fallback enabled by `--leak-my-ip`.
-
-```sh
-./build/client \
-  --host chat.example.net \
-  --port 9000 \
-  --name matt \
-  --advertise matt.example.net \
-  --p2p-port 9011
-```
-
-If two connected users request the same name, the server gives the later user a suffix such as `-2`.
-
-Running `./build/client` with no arguments starts an interactive setup prompt. That prompt defaults to `relay.mmatt.net:9000`. When any command-line option is present, the normal command-line defaults are `127.0.0.1:9000`.
-
-SQLite remains available for future server data. The server opens the configured database but creates no message tables and stores no chat history.
-
-## How delivery works
-
-After sign-in, the server sends the client a roster containing each user's host and peer port. For each pair of users, the lexicographically earlier name opens the connection. This produces one TCP connection per pair.
-
-The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
-
-Local saving is off by default. In the terminal client, pass
-`--save-messages <path.db>` or enter a file path during interactive setup. You
-can also enter `/save <path.db>` while connected to start saving, or `/save off`
-to stop. Pass `--max-saved-messages <count>` to retain only that many messages.
-In the desktop app, open Preferences (or use `/save`), check "Save chat messages
-locally," choose a SQLite file, and optionally enter a maximum. Leaving the
-maximum blank keeps every message. Both clients append each new chat message
-to the file as it arrives or is sent. They reopen an existing database and
-show its 1,000 most recent messages when you connect. The stored history can
-grow beyond what the UI displays. `/clear` clears the local message pane but
-does not delete saved messages.
-
-The SQLite `saved_messages` table has `timestamp` (Unix seconds), `sender`,
-`body`, and `color` columns. The clients do not save system notices or send
-saved messages to the server.
-
-The terminal client retries a lost server connection every three seconds. Existing peer links can continue carrying live messages while the server is unavailable, but discovery stops.
-
-## Use a relay
-
-A relay accepts outbound client connections and participates in the peer mesh for those clients. It is useful when clients are behind NAT or cannot expose a listening port. One relay process can host multiple users on one public port.
-
-Run the relay on a host that can accept inbound TCP connections:
-
-```sh
-./build/relay \
-  --host chat.example.net \
-  --port 9000 \
-  --advertise relay.example.net \
-  --listen 3333
-```
-
-Then connect clients to it:
-
-```sh
-./build/client --relay relay.example.net:3333 --name matt
-./build/client --relay relay.example.net:3333 --name jesse
-```
-
-The relay opens a separate server session and peer mesh for each attached user. Clients requesting the same name keep separate sessions; the server assigns a suffix such as `matt-2` to later arrivals. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
-
-If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
-
-The relay port defaults to `3333` when it is omitted from `--relay`. The relay's own `--listen` option has the same default.
-
-### Optional direct fallback
-
-`--leak-my-ip` lets a relayed terminal client fall back to a direct server connection when the relay is unavailable. It starts a local peer listener, reveals the client address to the server and other peers, and switches back to the relay when it returns.
-
-```sh
-./build/client \
-  --relay relay.example.net:3333 \
-  --host chat.example.net \
-  --port 9000 \
-  --leak-my-ip \
-  --name matt
-```
-
-If `--host` is absent, the fallback assumes that the chat server runs on the relay host at the selected server port, which defaults to `9000`.
-
-## Command-line reference
-
-### Server
-
-```text
--p, --port <port>       Listen port. Default: 9000
--d, --db <path>         SQLite file. Default: chat.db
--h, --help              Show help
-```
-
-Passing port `0` asks the operating system to select a free server port.
-
-### Client
-
-```text
--H, --host <host>          Server host. CLI default: 127.0.0.1
--p, --port <port>          Server port. Default: 9000
--n, --name <name>          Name to request at sign-in
-    --p2p-port <port>      Direct peer listener. Default: 0, an automatic port
-    --advertise <host>     Reachable address announced to peers
-    --local                Automatically announce your local IPv4 address
-    --relay <host[:port]>  Use a relay. Default relay port: 3333
-    --leak-my-ip           Fall back to direct mode if the relay is unavailable
-    --log <file>           Write a debug log to this file. Default: no log
--h, --help                 Show help
-```
-
-### Relay
-
-```text
--H, --host <host>       Chat server host. Default: 127.0.0.1
--p, --port <port>       Chat server port. Default: 9000
-    --advertise <host>  Public address announced for the relay
-    --listen <port>     Shared client and peer port. Default: 3333
--h, --help              Show help
-```
-
-For normal remote use, set `--advertise` to the relay's public DNS name or IP address.
-
-### Logging
-
-The server and relay log to stdout, one timestamped line per event, for example:
-
-```text
-[2026-09-24 01:36:07.247] [server] [info] alice joined from 127.0.0.1
-```
-
-The terminal client writes nothing to the console while its interface is open, so it logs only when given `--log <file>`. That file also includes debug detail from the networking code, such as every dial and reconnect attempt. The C++ library logs at debug level through spdlog's default logger, which is silent unless the host program enables debug output.
-
-## Terminal client controls
-
-| Input | Action |
-| --- | --- |
-| `Enter` | Send the current line |
-| `Up`, `Down` | Scroll one row |
-| `PgUp`, `PgDn` | Scroll one page |
-| `Home`, `End` | Jump to the oldest or newest message |
-| `Ctrl-C`, `Ctrl-D` | Quit |
-| `Ctrl-L` | Redraw the terminal |
-| `/users` | List users and known connection routes |
-| `/color <value>` | Set a named shade or an xterm-256 index |
-| `/clear` | Clear the local message pane |
-| `/save <path.db>`, `/save off` | Start or stop continuous local message saving |
-| `/help` | Show commands |
-| `/quit`, `/exit` | Quit |
-
-Named colors are `pink`, `mint`, `butter`, `periwinkle`, `lilac`, `aqua`, and `peach`. Numeric colors range from `0` through `255`, except `1`, `2`, and `250`, which the interface reserves for system text. Numeric colors require a 256-color terminal. Your own messages appear white in your terminal regardless of the color sent to other users.
-
-Names are trimmed, limited to 20 bytes, and have spaces changed to underscores. Message bodies are trimmed and limited to 2,000 bytes.
-
-## C++ client library
-
-CMake exposes the static library as `disquisition::client`. Include its public header with:
-
-```cpp
-#include <client/client.h>
-```
-
-A direct connection to the central server is the default:
-
-```cpp
-#include <iostream>
-#include <string>
-
-#include <client/client.h>
-
-void showMessage(std::string sender, std::string body)
-{
-    std::cout << sender << ": " << body << '\n';
-}
-
-int main()
-{
-    disquisition::Client client("chat.example.net:3333");
-    client.onMessage(showMessage);
-    client.connect();
-    client.setName("matt");
-    client.setColor(20);
-    client.sendMessage("hello");
-    client.disconnect();
-}
-```
-
-To connect through a relay, select `RELAY`:
-
-```cpp
-disquisition::Client client(
-    "relay.example.net:42069",
-    disquisition::Client::RELAY
-);
-```
-
-The current library is smaller than the terminal client. It supports live send and receive in direct or relay mode. It does not reconnect after a connection failure, expose the user roster, or report the final suffixed name. The message callback runs on the library's background service thread, so callback code must be thread-safe. The API throws standard exceptions for invalid values, invalid call order, and connection failures.
-
-See [`examples/basic_client.cpp`](examples/basic_client.cpp) for an interactive example. It uses its own Makefile and compiles the required project sources directly. Build the main project once first, so CMake has downloaded spdlog:
-
-```sh
-cd examples
-make
-./basic_client
-```
-
-## Repository layout
-
-```text
-include/client/client.h        Public C++ library API
-include/                       Headers, one folder per component below
-src/common/                    Wire protocol, socket helpers and command-line parsing
-src/server/                    Discovery server
-src/client/                    Client library, terminal UI, connection and peer mesh
-src/relay/                     Multi-user relay
-test/                          Unit and end-to-end tests (run with ctest)
-examples/                      Standalone library example
-docs/                          Contributor notes
-```
+- [Building and packaging](docs/building.md)
+- [Desktop app](docs/desktop.md)
+- [Servers, peers and relays](docs/networking.md)
+- [Terminal client and command-line reference](docs/command-line.md)
+- [C++ client library](docs/client-library.md)
+- [Git crash course](docs/git_crash_course.md)
 
 ## Contributors
 

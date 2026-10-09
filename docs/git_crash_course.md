@@ -492,7 +492,7 @@ Remember: you are pushing **your branch**, not committing directly to `main`.
 
 # Guided Tutorial: Add Your Name to `README.md`
 
-For your first practice change, add your name and GitHub account to the project's **Group Members** section.
+For your first practice change, add your name and GitHub account to the project's **Contributors** section.
 
 This exercise intentionally walks through the full workflow so you can practice making a branch and Pull Request.
 
@@ -538,7 +538,7 @@ Open `README.md` in VS Code.
 Find the section that looks like this:
 
 ```markdown
-## Group Members
+## Contributors
 
 - Matt Morris [@mmattbtw](https://github.com/mmattbtw)
 - Jack Stefl
@@ -634,7 +634,7 @@ Add Matt's GitHub account to README
 A simple description could be:
 
 ```text
-Adds my name and GitHub profile to the Group Members section of README.md.
+Adds my name and GitHub profile to the Contributors section of README.md.
 ```
 
 Then click **Create pull request**.
