@@ -724,6 +724,12 @@ void Tui::drainPeers() {
                 LOG_WARN("{}", event.body);
                 appendSystem(event.body, kColorBad);
                 break;
+            case PeerNetwork::Event::Kind::Image:
+                // The terminal cannot draw images; mention each one once.
+                if (event.image.index == 0) {
+                    appendSystem(event.name + " sent an image; open the desktop app to see it");
+                }
+                break;
         }
     }
 }

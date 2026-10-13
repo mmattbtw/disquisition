@@ -4,23 +4,32 @@
 #include <QMainWindow>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QThreadPool>
 #include <QTimer>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 
 #include "common/protocol.h"
 #include "common/recent_messages.h"
+#include "desktop/image_transfer.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
 #include "desktop/screen_stage.h"
 #include "desktop/voice_engine.h"
 
+class ChatMedia;
+class GifPicker;
+class GifSearch;
+class MediaFetcher;
 class QLabel;
 class QComboBox;
 class QLineEdit;
 class QListWidget;
 class QMediaDevices;
+class QMimeData;
+class QNetworkAccessManager;
 class QPushButton;
 class QSpinBox;
 class QTextBrowser;
@@ -31,6 +40,10 @@ class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+protected:
+    bool event(QEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     struct Peer {
@@ -51,6 +64,7 @@ private:
     void connectToServer();
     void disconnectAll();
     void sendMessage();
+    void sendChat(const QString& body);
     void runCommand(const QString& command);
     void readServer();
     void handleServerMessage(const chat::Message& message);
@@ -66,6 +80,17 @@ private:
     void appendChat(const QString& sender, const QString& body,
                     const QString& messageColor = "mint", bool system = false,
                     qint64 timestamp = -1);
+    void appendImage(const QString& sender, const QByteArray& bytes,
+                     const QString& messageColor, qint64 timestamp = -1);
+    void openGifPicker(const QString& query = {});
+    // Image drag and drop over the whole window.
+    bool handleDrag(QEvent* event);
+    bool canDropImages(const QMimeData* mime) const;
+    void dropImages(const QMimeData* mime);
+    void setDropOverlayVisible(bool visible);
+    void prepareAndSendImage(std::function<PreparedImage()> prepare);
+    void sendImage(const QByteArray& bytes);
+    void receiveImageChunk(const chat::ImageChunk& chunk);
     void openSavedMessages();
     void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
@@ -103,6 +128,13 @@ private:
     QListWidget* members_ = nullptr;
     QLineEdit* composer_ = nullptr;
     QPushButton* sendButton_ = nullptr;
+    QPushButton* gifButton_ = nullptr;
+    QLabel* dropOverlay_ = nullptr;
+    QNetworkAccessManager* network_ = nullptr;
+    MediaFetcher* mediaFetcher_ = nullptr;
+    ChatMedia* media_ = nullptr;
+    GifSearch* gifSearch_ = nullptr;
+    GifPicker* gifPicker_ = nullptr;
     QLabel* connectionLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
@@ -142,6 +174,8 @@ private:
     bool savingFailed_ = false;
     QString messageFile_;
     std::optional<std::int64_t> maxSavedMessages_;
+    QString klipyCustomerId_;
+    bool showLinkedMedia_ = true;
     bool localSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
@@ -162,4 +196,12 @@ private:
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
     QTimer loginTimer_;
+    // Dropped images are sent as PeerImage chunks, paced so voice and
+    // screen frames keep flowing, and reassembled on arrival.
+    ImageAssembler imageAssembler_;
+    FramePacer imagePacer_;
+    // Scales and encodes dropped images off the UI thread, one at a time so
+    // they arrive in the order they were dropped. Declared last so it waits
+    // for running work before anything else is destroyed.
+    QThreadPool imagePool_;
 };

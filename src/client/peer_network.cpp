@@ -210,6 +210,18 @@ void PeerNetwork::sendChat(std::int64_t timestamp, const std::string& body,
     }
 }
 
+void PeerNetwork::sendImageChunk(const ImageChunk& chunk) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ImageChunk stamped = chunk;
+    stamped.sender = myName_;
+    const Message message = peerImageMessage(stamped);
+    for (auto& [name, peer] : peers_) {
+        if (peer.connection != nullptr) {
+            peer.connection->send(message);
+        }
+    }
+}
+
 bool PeerNetwork::poll(Event& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     drainPending();
@@ -390,16 +402,31 @@ void PeerNetwork::drainPeers() {
         if (peer.connection == nullptr) {
             continue;
         }
+        // Leave frames on the link once the event queue is full rather than
+        // dropping older events: losing one image chunk loses the image.
         Message message;
-        while (peer.connection->poll(message)) {
+        while (events_.size() < kMaxQueuedEvents) {
+            if (!peer.connection->poll(message)) {
+                break;
+            }
             // Trust the name the link was established with, not the frame.
             ChatPayload payload;
+            ImageChunk chunk;
             if (parsePeerChat(message, payload)) {
                 pushEvent(Event::Kind::Chat, peer.name, payload.body, payload.timestamp,
                           payload.color);
             }
+            else if (parsePeerImage(message, chunk)) {
+                chunk.sender = peer.name;
+                Event event;
+                event.kind = Event::Kind::Image;
+                event.name = peer.name;
+                event.image = std::move(chunk);
+                events_.push_back(std::move(event));
+            }
         }
-        if (peer.connection->failed()) {
+        const bool drained = events_.size() < kMaxQueuedEvents;
+        if (drained && peer.connection->failed()) {
             LOG_DEBUG("link to {} dropped", peer.name);
             pushEvent(Event::Kind::Leave, peer.name);
             peer.connection.reset();
@@ -416,7 +443,13 @@ void PeerNetwork::pushEvent(Event::Kind kind, const std::string& name, const std
     if (events_.size() >= kMaxQueuedEvents) {
         events_.pop_front();
     }
-    events_.push_back(Event{kind, timestamp, name, body, color});
+    Event event;
+    event.kind = kind;
+    event.timestamp = timestamp;
+    event.name = name;
+    event.body = body;
+    event.color = color;
+    events_.push_back(std::move(event));
 }
 
 } // namespace chat

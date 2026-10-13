@@ -24,6 +24,16 @@ std::uint32_t readU32(const char* data) {
     return (byte(0) << 24) | (byte(1) << 16) | (byte(2) << 8) | byte(3);
 }
 
+bool parseU32(const std::string& text, std::uint32_t& out) {
+    std::int64_t value = 0;
+    if (text.empty() || text[0] == '-' || text[0] == '+' || !parseInt64(text, value) ||
+        value > 0xFFFFFFFFLL) {
+        return false;
+    }
+    out = static_cast<std::uint32_t>(value);
+    return true;
+}
+
 bool isControl(char character) {
     const auto value = static_cast<unsigned char>(character);
     return value < 0x20 || value == 0x7F;
@@ -200,6 +210,32 @@ bool parsePeerChat(const Message& message, ChatPayload& out) {
     out.body = std::move(body);
     out.color = std::move(color);
     return true;
+}
+
+bool parsePeerImage(const Message& message, ImageChunk& out) {
+    if (message.type != MsgType::PeerImage || message.fields.size() != 7) {
+        return false;
+    }
+    ImageChunk chunk;
+    if (!parseInt64(message.fields[1], chunk.timestamp) || chunk.timestamp <= 0 ||
+        !isValidColor(message.fields[2]) || !parseU32(message.fields[3], chunk.transferId) ||
+        !parseU32(message.fields[4], chunk.index) || !parseU32(message.fields[5], chunk.count) ||
+        chunk.count == 0 || chunk.count > kMaxImageChunks || chunk.index >= chunk.count ||
+        message.fields[6].empty() || message.fields[6].size() > kImageChunkSize) {
+        return false;
+    }
+    chunk.sender = message.fields[0];
+    chunk.color = message.fields[2];
+    chunk.data = message.fields[6];
+    out = std::move(chunk);
+    return true;
+}
+
+Message peerImageMessage(const ImageChunk& chunk) {
+    return Message{MsgType::PeerImage,
+                   {chunk.sender, std::to_string(chunk.timestamp), chunk.color,
+                    std::to_string(chunk.transferId), std::to_string(chunk.index),
+                    std::to_string(chunk.count), chunk.data}};
 }
 
 bool parsePeerAddress(const Message& message, PeerAddress& out) {

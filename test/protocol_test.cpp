@@ -217,6 +217,47 @@ void testPeerAnnouncement() {
     CHECK((voiced.fields == std::vector<std::string>{"bob", "h", "4000", "1", "5060"}));
 }
 
+void testPeerImage() {
+    using Fields = std::vector<std::string>;
+    const std::string bytes(chat::kImageChunkSize, 'x');
+    chat::ImageChunk chunk;
+    CHECK(chat::parsePeerImage(
+        Message{MsgType::PeerImage, {"bob", "123", "pink", "4294967295", "2", "3", bytes}}, chunk));
+    CHECK(chunk.sender == "bob");
+    CHECK(chunk.timestamp == 123);
+    CHECK(chunk.color == "pink");
+    CHECK(chunk.transferId == 4294967295u);
+    CHECK(chunk.index == 2);
+    CHECK(chunk.count == 3);
+    CHECK(chunk.data == bytes);
+
+    // The largest chunk still fits in one frame.
+    std::string buffer = chat::encode(chat::peerImageMessage(chunk));
+    Message decoded;
+    CHECK(chat::decode(buffer, decoded) == DecodeStatus::Ok);
+    CHECK((decoded.fields == Fields{"bob", "123", "pink", "4294967295", "2", "3", bytes}));
+
+    const auto rejects = [&](Fields fields) {
+        return !chat::parsePeerImage(Message{MsgType::PeerImage, std::move(fields)}, chunk);
+    };
+    const std::string count = std::to_string(chat::kMaxImageChunks);
+    CHECK(chat::parsePeerImage(
+        Message{MsgType::PeerImage, {"bob", "1", "pink", "1", "0", count, "x"}}, chunk));
+    CHECK(rejects({"bob", "1", "pink", "1", "0", std::to_string(chat::kMaxImageChunks + 1), "x"}));
+    CHECK(rejects({"bob", "1", "pink", "1", "3", "3", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "1", "0", "0", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "1", "0", "1", ""}));
+    CHECK(rejects({"bob", "1", "pink", "1", "0", "1", bytes + "x"}));
+    CHECK(rejects({"bob", "0", "pink", "1", "0", "1", "x"}));
+    CHECK(rejects({"bob", "1", "1", "1", "0", "1", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "-1", "0", "1", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "4294967296", "0", "1", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "1", "+0", "1", "x"}));
+    CHECK(rejects({"bob", "1", "pink", "1", "0", "1"}));
+    CHECK(!chat::parsePeerImage(
+        Message{MsgType::PeerChat, {"bob", "1", "pink", "1", "0", "1", "x"}}, chunk));
+}
+
 } // namespace
 
 int main() {
@@ -231,6 +272,7 @@ int main() {
     testColors();
     testPeerChat();
     testPeerAnnouncement();
+    testPeerImage();
     std::puts("protocol_test: ok");
     return 0;
 }

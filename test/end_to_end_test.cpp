@@ -381,6 +381,44 @@ void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
     CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
 }
 
+// Image chunks cross the mesh into and out of the relay. The relay stamps
+// each chunk with its hosted user's name, whatever the frame claims.
+void testRelayImages(std::uint16_t relayPort) {
+    using Fields = std::vector<std::string>;
+    RawSession sender(relayPort);
+    signIn(sender, "image_sender");
+    RawSession receiver(relayPort);
+    signIn(receiver, "image_receiver");
+
+    const std::string bytes(chat::kImageChunkSize, '\x7f');
+    const chat::Message spoofed{chat::MsgType::PeerImage,
+                                {"someone_else", "123456789", "mint", "42", "0", "2", bytes}};
+    const Fields expected{"image_sender", "123456789", "mint", "42", "0", "2", bytes};
+    CHECK(waitFor([&] {
+        CHECK(sender.connection.send(spoofed));
+        chat::Message message;
+        while (receiver.connection.poll(message)) {
+            if (message.type == chat::MsgType::PeerImage) {
+                CHECK(message.fields == expected);
+                return true;
+            }
+        }
+        return false;
+    }));
+
+    // Invalid chunks go nowhere: past the retries of transfer 42 above, the
+    // valid chunk sent after an invalid one arrives first.
+    CHECK(sender.connection.send(chat::Message{
+        chat::MsgType::PeerImage, {"image_sender", "1", "mint", "43", "2", "2", "x"}}));
+    CHECK(sender.connection.send(chat::Message{
+        chat::MsgType::PeerImage, {"image_sender", "1", "mint", "44", "1", "2", "last"}}));
+    chat::Message next;
+    do {
+        next = receiver.next(chat::MsgType::PeerImage);
+    } while (next.fields.at(3) == "42");
+    CHECK(next.fields.at(3) == "44");
+}
+
 void testHistoryAndRoster(std::uint16_t serverPort) {
     RawSession dave(serverPort);
     CHECK(dave.connection.send(chat::Message{chat::MsgType::Login, {" alice ", "1", ""}}));
@@ -450,6 +488,7 @@ int main(int argc, char** argv) {
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
     testScreenSharing(gServer.port, gRelay.port);
     testRelayDuplicateNames(gRelay.port);
+    testRelayImages(gRelay.port);
 
     {
         disquisition::Client alice(serverAddress);

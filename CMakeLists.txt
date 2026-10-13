@@ -112,9 +112,23 @@ if(BUILD_DESKTOP_APP)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
+    # GIF search, media links and image transfer, kept apart from the
+    # widgets so they can be tested without a display.
+    add_library(desktop_media STATIC
+      include/desktop/gif_search.h
+      include/desktop/image_transfer.h
+      include/desktop/remote_media.h
+      src/desktop/gif_search.cpp
+      src/desktop/image_transfer.cpp
+      src/desktop/remote_media.cpp)
+    set_target_properties(desktop_media PROPERTIES AUTOMOC ON)
+    target_link_libraries(desktop_media PUBLIC chat_protocol Qt6::Gui Qt6::Network)
+
     # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
     add_executable(disquisition-desktop MACOSX_BUNDLE
       include/desktop/audio_permission.h
+      include/desktop/chat_media.h
+      include/desktop/gif_picker.h
       include/desktop/main_window.h
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
@@ -124,6 +138,8 @@ if(BUILD_DESKTOP_APP)
       include/desktop/share_source.h
       include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
+      src/desktop/chat_media.cpp
+      src/desktop/gif_picker.cpp
       src/desktop/main.cpp
       src/desktop/main_window.cpp
       src/desktop/relay_audio.cpp
@@ -135,7 +151,13 @@ if(BUILD_DESKTOP_APP)
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
+      chat_protocol chat_recent_messages desktop_media
+      Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
+    set(DISQUISITION_GIPHY_API_KEY "" CACHE STRING "Default GIPHY API key for the GIF picker")
+    set(DISQUISITION_KLIPY_API_KEY "" CACHE STRING "Default KLIPY API key for the GIF picker")
+    target_compile_definitions(disquisition-desktop PRIVATE
+      "DISQUISITION_GIPHY_API_KEY=\"${DISQUISITION_GIPHY_API_KEY}\""
+      "DISQUISITION_KLIPY_API_KEY=\"${DISQUISITION_KLIPY_API_KEY}\"")
     if(APPLE)
       set(DISQUISITION_CODESIGN_IDENTITY "AUTO" CACHE STRING
           "macOS signing identity: AUTO prefers Apple Development; '-' uses ad-hoc signing")
@@ -255,4 +277,11 @@ if(BUILD_TESTING)
 
   set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
 endif()
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_media)
+  add_executable(desktop_media_test test/desktop_media_test.cpp)
+  target_link_libraries(desktop_media_test PRIVATE desktop_media)
+  add_test(NAME desktop_media_test COMMAND desktop_media_test)
+  set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
 endif()
