@@ -51,6 +51,11 @@ enum class MsgType : std::uint8_t {
     // client: [frame id, chunk index, chunk count, keyframe 0|1, H.264 bytes];
     // server: [sharer, frame id, chunk index, chunk count, keyframe 0|1, H.264 bytes]
     ScreenFrame = 25,
+
+    // Peer <-> peer. An image too large for one frame travels as numbered
+    // chunks of the same transfer, each carrying the whole header:
+    // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
+    PeerImage = 26,
 };
 
 struct Message {
@@ -61,6 +66,11 @@ struct Message {
 constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
+// Image chunks leave room for the header fields inside kMaxFrameSize.
+constexpr std::size_t kImageChunkSize = 12 * 1024;
+constexpr std::size_t kMaxImageBytes = 4 * 1024 * 1024;
+constexpr std::uint32_t kMaxImageChunks =
+    static_cast<std::uint32_t>((kMaxImageBytes + kImageChunkSize - 1) / kImageChunkSize);
 
 // Messages carry their color as a string: one of these names, or an
 // xterm-256 index such as "208".
@@ -106,6 +116,21 @@ struct ChatPayload {
 
 // Validates a PeerChat frame: positive timestamp, non-empty body, valid color.
 bool parsePeerChat(const Message& message, ChatPayload& out);
+
+struct ImageChunk {
+    std::string sender; // as written by the sender; not verified
+    std::int64_t timestamp = 0;
+    std::string color;
+    std::uint32_t transferId = 0;
+    std::uint32_t index = 0;
+    std::uint32_t count = 0;
+    std::string data;
+};
+
+// Validates a PeerImage frame: positive timestamp, valid color, index within
+// count, count within kMaxImageChunks, and 1 to kImageChunkSize bytes.
+bool parsePeerImage(const Message& message, ImageChunk& out);
+Message peerImageMessage(const ImageChunk& chunk);
 
 struct PeerAddress {
     std::string name;

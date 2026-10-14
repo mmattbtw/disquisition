@@ -416,6 +416,15 @@ void Relay::handleClientMessage(User& user, const Message& message) {
             break;
         }
 
+        case MsgType::PeerImage: {
+            // As with chat, the mesh stamps the user's own name.
+            ImageChunk chunk;
+            if (parsePeerImage(message, chunk)) {
+                user.peers.sendImageChunk(chunk);
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -427,6 +436,9 @@ void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
             sendToClient(user, Message{MsgType::PeerChat,
                                        {event.name, std::to_string(event.timestamp), event.body,
                                         event.color}});
+            break;
+        case PeerNetwork::Event::Kind::Image:
+            sendToClient(user, peerImageMessage(event.image));
             break;
         case PeerNetwork::Event::Kind::Join:
             LOG_INFO("{}: mesh link up with {}", user.requestedName, event.name);

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "client/connection.h"
+#include "common/protocol.h"
 
 namespace chat {
 
@@ -24,12 +25,15 @@ namespace chat {
 class PeerNetwork {
 public:
     struct Event {
-        enum class Kind { Chat, Join, Leave, Note };
+        enum class Kind { Chat, Join, Leave, Note, Image };
         Kind kind = Kind::Note;
         std::int64_t timestamp = 0;
         std::string name;
         std::string body;
         std::string color;
+        // Set for Image. Its sender is the name the link was established
+        // with, which may differ from the one written in the frame.
+        ImageChunk image;
     };
 
     PeerNetwork() = default;
@@ -66,6 +70,8 @@ public:
     bool settled() const;
 
     void sendChat(std::int64_t timestamp, const std::string& body, const std::string& color);
+    // Sends one chunk of an image to every linked peer as this user.
+    void sendImageChunk(const ImageChunk& chunk);
     // Returns the next event. Also completes inbound handshakes and notices
     // dropped links.
     bool poll(Event& out);

@@ -12,9 +12,13 @@
 #include <QDialog>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHostAddress>
+#include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -22,10 +26,13 @@
 #include <QMessageBox>
 #include <QMediaDevices>
 #include <QMenuBar>
+#include <QMimeData>
+#include <QNetworkAccessManager>
 #include <QNetworkInterface>
 #include <QPointer>
 #include <QDir>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSpinBox>
@@ -35,14 +42,27 @@
 #include <QTimer>
 #include <QUdpSocket>
 #include <QUrl>
+#include <QUuid>
 #include <QVBoxLayout>
 
 #include <exception>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "desktop/audio_permission.h"
+#include "desktop/chat_media.h"
+#include "desktop/gif_picker.h"
+#include "desktop/gif_search.h"
+#include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
+
+#ifndef DISQUISITION_GIPHY_API_KEY
+#    define DISQUISITION_GIPHY_API_KEY ""
+#endif
+#ifndef DISQUISITION_KLIPY_API_KEY
+#    define DISQUISITION_KLIPY_API_KEY ""
+#endif
 
 namespace {
 
@@ -58,6 +78,9 @@ std::string s(const QString& value) {
 QString safeHtml(const QString& value) {
     return value.toHtmlEscaped().replace("\n", "<br>");
 }
+
+// A drop of more files than this sends only the first ones.
+constexpr int kMaxDroppedImages = 10;
 
 QColor xtermColor(int index) {
     static const int basic[][3] = {
@@ -151,6 +174,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     bool validMaximum = false;
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
+    showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
+    // KLIPY asks for a stable, anonymous identifier per user.
+    klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
+    if (klipyCustomerId_.isEmpty()) {
+        klipyCustomerId_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        settings.setValue("gifs/klipyCustomerId", klipyCustomerId_);
+    }
+    imagePool_.setMaxThreadCount(1);
     buildUi();
     setWindowTitle("disquisition");
     resize(980, 680);
@@ -266,6 +297,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         stopScreenShare();
     });
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::sendMessage);
+    connect(gifButton_, &QPushButton::clicked, this, [this] { openGifPicker(); });
+    connect(gifPicker_, &GifPicker::chosen, this, [this](const QUrl& gif) {
+        sendChat(gif.toString(QUrl::FullyEncoded));
+        composer_->setFocus();
+    });
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         muted_ = !muted_;
@@ -384,6 +420,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
 }
 
 MainWindow::~MainWindow() {
+    imagePool_.clear();
+    imagePool_.waitForDone();
     stopScreenShare();
     disconnectAll();
 }
@@ -462,6 +500,7 @@ void MainWindow::buildUi() {
     stage_ = new ScreenStage(conversation);
     transcript_ = new QTextBrowser(conversation);
     transcript_->setOpenExternalLinks(false);
+    transcript_->viewport()->installEventFilter(this);
     transcript_->setFrameShape(QFrame::NoFrame);
     transcript_->setMinimumHeight(120);
     conversation->addWidget(stage_);
@@ -485,11 +524,34 @@ void MainWindow::buildUi() {
     composer_ = new QLineEdit(root);
     composer_->setPlaceholderText("> type a message");
     composer_->setEnabled(false);
+    composer_->installEventFilter(this);
+    gifButton_ = new QPushButton("gif", root);
+    gifButton_->setToolTip("search GIFs (/gif)");
+    gifButton_->setEnabled(false);
     sendButton_ = new QPushButton("send", root);
     sendButton_->setEnabled(false);
     compose->addWidget(composer_, 1);
+    compose->addWidget(gifButton_);
     compose->addWidget(sendButton_);
     page->addLayout(compose);
+
+    network_ = new QNetworkAccessManager(this);
+    mediaFetcher_ = new MediaFetcher(network_, this);
+    media_ = new ChatMedia(transcript_, mediaFetcher_, this);
+    gifSearch_ = new GifSearch(network_, this);
+    gifSearch_->setKeys(DISQUISITION_GIPHY_API_KEY, DISQUISITION_KLIPY_API_KEY, klipyCustomerId_);
+    gifButton_->setVisible(gifSearch_->hasKey(GifProvider::Giphy) ||
+                           gifSearch_->hasKey(GifProvider::Klipy));
+    gifPicker_ = new GifPicker(gifSearch_, mediaFetcher_, this);
+
+    // Shown while images are dragged over the window. It lets drag events
+    // through to the widgets beneath, which decide whether to accept them.
+    setAcceptDrops(true);
+    dropOverlay_ = new QLabel("drop images to send them to the room", root);
+    dropOverlay_->setObjectName("dropOverlay");
+    dropOverlay_->setAlignment(Qt::AlignCenter);
+    dropOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    dropOverlay_->hide();
 
     setCentralWidget(root);
     setStyleSheet(R"(
@@ -516,6 +578,11 @@ void MainWindow::buildUi() {
         QLabel#streamStats { color: #8a9099; font-size: 12px; }
         QScrollBar:vertical { background: #282c34; width: 10px; }
         QScrollBar::handle:vertical { background: #68717c; min-height: 24px; }
+        QFrame#gifPicker { border: 1px solid #777f89; }
+        QFrame#gifPicker QListWidget { border: 0; padding: 0; }
+        QFrame#gifPicker QListWidget::item:hover, QFrame#gifPicker QListWidget::item:selected { background: #9dccca; }
+        QLabel#gifStatus, QLabel#gifAttribution { color: #8a9099; font-size: 12px; }
+        QLabel#dropOverlay { background: rgba(32, 38, 44, 225); color: #9dccca; border: 2px dashed #9dccca; font-size: 16px; font-weight: 700; }
     )");
 }
 
@@ -888,6 +955,10 @@ void MainWindow::showPreferences() {
     maximum->setPlaceholderText("unlimited");
     messageFileRow->setEnabled(saveMessages_);
     maximum->setEnabled(saveMessages_);
+    auto* showMedia = new QCheckBox("Show GIFs and images from GIPHY, KLIPY and Tenor links",
+                                    &dialog);
+    showMedia->setChecked(showLinkedMedia_);
+    showMedia->setToolTip("Loading them lets those sites see your IP address.");
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -907,6 +978,7 @@ void MainWindow::showPreferences() {
     form->addRow("", saveMessages);
     form->addRow("SQLite file", messageFileRow);
     form->addRow("maximum messages", maximum);
+    form->addRow("", showMedia);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -963,6 +1035,7 @@ void MainWindow::showPreferences() {
     saveMessages_ = saveMessages->isChecked();
     messageFile_ = messageFile->text().trimmed();
     maxSavedMessages_ = chosenMaximum;
+    showLinkedMedia_ = showMedia->isChecked();
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -986,6 +1059,7 @@ void MainWindow::showPreferences() {
     settings.setValue("messages/file", messageFile_);
     settings.setValue("messages/maximum",
                       maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
+    settings.setValue("gifs/showLinkedMedia", showLinkedMedia_);
 }
 
 void MainWindow::openSavedMessages() {
@@ -1095,12 +1169,16 @@ void MainWindow::handleTransportClosed() {
     peers_.clear();
     peerBuffers_.clear();
     serverBuffer_.clear();
+    imagePacer_.clear();
+    imageAssembler_.clear();
     myName_.clear();
     refreshMembers();
     voiceButton_->setEnabled(false);
     shareButton_->setEnabled(false);
     composer_->setEnabled(false);
     sendButton_->setEnabled(false);
+    gifButton_->setEnabled(false);
+    gifPicker_->hide();
 
     if (!desiredConnected_ || intentionalDisconnect_) {
         connectionLabel_->setText("Disconnected");
@@ -1150,6 +1228,8 @@ void MainWindow::disconnectAll() {
     peers_.clear();
     peerBuffers_.clear();
     serverBuffer_.clear();
+    imagePacer_.clear();
+    imageAssembler_.clear();
     myName_.clear();
     localSpeaking_ = false;
     connectButton_->setText("Join");
@@ -1158,6 +1238,8 @@ void MainWindow::disconnectAll() {
     shareButton_->setEnabled(false);
     composer_->setEnabled(false);
     sendButton_->setEnabled(false);
+    gifButton_->setEnabled(false);
+    gifPicker_->hide();
     connectionLabel_->setText("Disconnected");
     refreshMembers();
 }
@@ -1209,6 +1291,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         shareButton_->setEnabled(true);
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
+        gifButton_->setEnabled(true);
         // A relay signs in again after losing the server, which forgets every
         // screen share. The server re-announces the others; announce ours.
         endRemoteStreams();
@@ -1291,6 +1374,10 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
         recordChat({q(message.fields[0]).toLongLong(), message.fields[1], message.fields[2],
                     message.fields.size() >= 4 ? message.fields[3] : "pink"});
+    } else if (message.type == chat::MsgType::PeerImage) {
+        // A relay names the sender of each chunk it forwards.
+        chat::ImageChunk chunk;
+        if (chat::parsePeerImage(message, chunk)) receiveImageChunk(chunk);
     } else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
         appendChat("Server", q(message.fields[0]), {}, true);
     }
@@ -1329,6 +1416,7 @@ void MainWindow::removePeer(const QString& name) {
         peer.socket->disconnectFromHost();
     }
     relayAudio_.remove(name);
+    imageAssembler_.remove(name);
     endRemoteStream(name);
     refreshMembers();
     appendChat("Room", name + " left", {}, true);
@@ -1400,6 +1488,17 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
         recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
                     message.fields[2], message.fields[3]});
+    } else if (message.type == chat::MsgType::PeerImage) {
+        // Trust the name the link was established with, not the frame.
+        chat::ImageChunk chunk;
+        if (!chat::parsePeerImage(message, chunk)) return;
+        for (const Peer& peer : std::as_const(peers_)) {
+            if (peer.socket == socket) {
+                chunk.sender = s(peer.name);
+                receiveImageChunk(chunk);
+                return;
+            }
+        }
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() >= 3) {
         const QString name = q(message.fields[0]);
         if (peers_.contains(name) && peers_[name].socket == socket &&
@@ -1422,6 +1521,14 @@ void MainWindow::sendMessage() {
         composer_->clear();
         return;
     }
+    sendChat(body);
+    composer_->clear();
+}
+
+void MainWindow::sendChat(const QString& body) {
+    if (body.isEmpty() || myName_.isEmpty()) {
+        return;
+    }
     const qint64 timestampSeconds = QDateTime::currentSecsSinceEpoch();
     const std::string timestamp = std::to_string(timestampSeconds);
     const chat::Message live {chat::MsgType::PeerChat,
@@ -1434,7 +1541,6 @@ void MainWindow::sendMessage() {
     }
     appendChat(myName_, body, "231");
     recordChat({timestampSeconds, s(myName_), s(body), s(messageColor_)});
-    composer_->clear();
 }
 
 void MainWindow::runCommand(const QString& command) {
@@ -1477,6 +1583,9 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Users", "online: " + descriptions.join("; "), {}, true);
     } else if (name == "/clear") {
         transcript_->clear();
+        media_->clear();
+    } else if (name == "/gif") {
+        openGifPicker(command.mid(parts.value(0).size()).trimmed());
     } else if (name == "/save") {
         showPreferences();
     } else if (name == "/voice") {
@@ -1540,10 +1649,12 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Help", "/unmute         unmute your microphone", {}, true);
         appendChat("Help", "/deafen         mute mic and incoming audio", {}, true);
         appendChat("Help", "/undeafen       restore incoming audio", {}, true);
+        appendChat("Help", "/gif [search]   pick a GIF to send", {}, true);
         appendChat("Help", "/clear          clear the local message pane", {}, true);
         appendChat("Help", "/save           configure continuous local message saving", {}, true);
         appendChat("Help", "/leave          leave this room", {}, true);
         appendChat("Help", "/quit, /exit    close this app window", {}, true);
+        appendChat("Help", "drag images into the window to send them to the room", {}, true);
     } else {
         appendChat("Command", "unknown command: " + name + " (try /help)", {}, true);
     }
@@ -1555,8 +1666,176 @@ void MainWindow::appendChat(const QString& sender, const QString& body,
     const QString prefix = system ? "* " :
                            (timestamp >= 0 ? QDateTime::fromSecsSinceEpoch(timestamp)
                                            : QDateTime::currentDateTime()).toString("HH:mm ");
+    const QList<MediaLink> media =
+        system || !showLinkedMedia_ ? QList<MediaLink>() : findMediaLinks(body);
+    // As in Discord, a message that is only a GIF link shows just the GIF.
+    const bool onlyMedia = media.size() == 1 && body.trimmed() == media.first().text;
     transcript_->append("<div style='margin:1px 0;color:" + color + "'>" + prefix +
-                        safeHtml(sender) + (system ? " " : ": ") + safeHtml(body) + "</div>");
+                        safeHtml(sender) + (system ? " " : ": ") +
+                        (onlyMedia ? QString() : safeHtml(body)) + "</div>");
+    for (const MediaLink& link : media) {
+        media_->appendRemote(link.url);
+    }
+}
+
+void MainWindow::appendImage(const QString& sender, const QByteArray& bytes,
+                             const QString& messageColor, qint64 timestamp) {
+    if (!isDisplayableImage(bytes)) {
+        appendChat(sender, "sent an image that cannot be shown", {}, true);
+        return;
+    }
+    appendChat(sender, QString(), messageColor, false, timestamp);
+    media_->appendImage(bytes);
+}
+
+void MainWindow::openGifPicker(const QString& query) {
+    if (gifButton_->isHidden()) {
+        appendChat("GIF", "search is not available in this build", {}, true);
+    } else if (gifButton_->isEnabled()) {
+        gifPicker_->popup(gifButton_, query);
+    }
+}
+
+bool MainWindow::event(QEvent* event) {
+    return handleDrag(event) || QMainWindow::event(event);
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    // The composer would otherwise take a dropped file as text.
+    if ((watched == composer_ || watched == transcript_->viewport()) && handleDrag(event)) {
+        return true;
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+bool MainWindow::handleDrag(QEvent* event) {
+    switch (event->type()) {
+        case QEvent::DragEnter:
+        case QEvent::DragMove: {
+            auto* drag = static_cast<QDragMoveEvent*>(event);
+            if (!canDropImages(drag->mimeData())) return false;
+            drag->acceptProposedAction();
+            setDropOverlayVisible(true);
+            return true;
+        }
+        case QEvent::DragLeave:
+            setDropOverlayVisible(false);
+            return false;
+        case QEvent::Drop: {
+            auto* drop = static_cast<QDropEvent*>(event);
+            setDropOverlayVisible(false);
+            if (!canDropImages(drop->mimeData())) return false;
+            drop->acceptProposedAction();
+            dropImages(drop->mimeData());
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+bool MainWindow::canDropImages(const QMimeData* mime) const {
+    if (mime == nullptr || myName_.isEmpty() ||
+        server_.state() != QAbstractSocket::ConnectedState) {
+        return false;
+    }
+    if (mime->hasImage()) return true;
+    const QList<QByteArray> formats = QImageReader::supportedImageFormats();
+    for (const QUrl& url : mime->urls()) {
+        if (url.isLocalFile() &&
+            formats.contains(QFileInfo(url.toLocalFile()).suffix().toLower().toLatin1())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::dropImages(const QMimeData* mime) {
+    const QList<QByteArray> formats = QImageReader::supportedImageFormats();
+    QStringList paths;
+    for (const QUrl& url : mime->urls()) {
+        const QString path = url.toLocalFile();
+        if (url.isLocalFile() && formats.contains(QFileInfo(path).suffix().toLower().toLatin1())) {
+            paths.append(path);
+        }
+    }
+    if (paths.size() > kMaxDroppedImages) {
+        appendChat("Image", "sending the first " + QString::number(kMaxDroppedImages) +
+                   " of " + QString::number(paths.size()) + " images", {}, true);
+        paths = paths.mid(0, kMaxDroppedImages);
+    }
+    for (const QString& path : std::as_const(paths)) {
+        prepareAndSendImage([path] { return prepareImageFile(path); });
+    }
+    // An image dragged from a browser or another app may carry only pixels.
+    if (paths.isEmpty() && mime->hasImage()) {
+        const QImage image = qvariant_cast<QImage>(mime->imageData());
+        prepareAndSendImage([image] { return prepareImage(image); });
+    }
+}
+
+void MainWindow::setDropOverlayVisible(bool visible) {
+    if (visible && !dropOverlay_->isVisible()) {
+        dropOverlay_->setGeometry(centralWidget()->rect());
+        dropOverlay_->raise();
+    }
+    dropOverlay_->setVisible(visible);
+}
+
+void MainWindow::prepareAndSendImage(std::function<PreparedImage()> prepare) {
+    // Decoding and scaling a large photo takes long enough to stall the UI.
+    // ~MainWindow waits for this pool, so `this` outlives the task.
+    imagePool_.start([this, prepare = std::move(prepare)] {
+        const PreparedImage prepared = prepare();
+        QMetaObject::invokeMethod(this, [this, prepared] {
+            if (!prepared.error.isEmpty()) {
+                appendChat("Image", prepared.error, {}, true);
+            } else {
+                sendImage(prepared.bytes);
+            }
+        }, Qt::QueuedConnection);
+    });
+}
+
+void MainWindow::sendImage(const QByteArray& bytes) {
+    // The connection may have dropped while the image was being prepared.
+    if (bytes.isEmpty() || myName_.isEmpty() ||
+        server_.state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+    const QList<QByteArray> pieces = splitImage(bytes);
+    chat::ImageChunk chunk;
+    chunk.sender = s(myName_);
+    chunk.timestamp = QDateTime::currentSecsSinceEpoch();
+    chunk.color = s(messageColor_);
+    chunk.transferId = QRandomGenerator::global()->generate();
+    chunk.count = static_cast<std::uint32_t>(pieces.size());
+    auto frames = std::make_shared<QList<QByteArray>>();
+    frames->reserve(pieces.size());
+    for (qsizetype i = 0; i < pieces.size(); ++i) {
+        chunk.index = static_cast<std::uint32_t>(i);
+        chunk.data.assign(pieces[i].constData(), static_cast<std::size_t>(pieces[i].size()));
+        const std::string frame = chat::encode(chat::peerImageMessage(chunk));
+        frames->append(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
+    }
+    const FramePacer::Frames shared = std::move(frames);
+    if (usingRelay_) imagePacer_.enqueue(&server_, shared);
+    for (const Peer& peer : std::as_const(peers_)) {
+        if (peer.socket && peer.socket->state() == QAbstractSocket::ConnectedState) {
+            imagePacer_.enqueue(peer.socket, shared);
+        }
+    }
+    appendImage(myName_, bytes, "231");
+}
+
+void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
+    const QString sender = q(chunk.sender);
+    if (!peers_.contains(sender)) return;
+    const std::optional<QByteArray> image = imageAssembler_.add(
+        sender, chunk.transferId, chunk.index, chunk.count,
+        QByteArray(chunk.data.data(), static_cast<qsizetype>(chunk.data.size())),
+        QDateTime::currentMSecsSinceEpoch());
+    if (image) appendImage(sender, *image, q(chunk.color), chunk.timestamp);
 }
 
 void MainWindow::refreshMembers() {
