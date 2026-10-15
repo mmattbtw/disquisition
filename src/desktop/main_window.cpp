@@ -149,9 +149,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
     showPenguins_ = settings.value("penguins/enabled", false).toBool();
     penguinsWander_ = settings.value("penguins/wander", true).toBool();
+    penguinsIdleMinutes_ = qBound(0, settings.value("penguins/idleMinutes", 10).toInt(), 1440);
     penguins_ = new PenguinOverlay(this);
     penguins_->setEnabled(showPenguins_);
     penguins_->setWandering(penguinsWander_);
+    penguins_->setIdleTimeoutMinutes(penguinsIdleMinutes_);
     // KLIPY asks for a stable, anonymous identifier per user.
     klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
     if (klipyCustomerId_.isEmpty()) {
@@ -951,6 +953,14 @@ void MainWindow::showPreferences() {
     penguinsWander->setChecked(penguinsWander_);
     penguinsWander->setEnabled(showPenguins_);
     connect(showPenguins, &QCheckBox::toggled, penguinsWander, &QWidget::setEnabled);
+    auto* penguinsIdle = new QSpinBox(&dialog);
+    penguinsIdle->setRange(0, 1440);
+    penguinsIdle->setSuffix(" min");
+    penguinsIdle->setSpecialValueText("Never");
+    penguinsIdle->setValue(penguinsIdleMinutes_);
+    penguinsIdle->setEnabled(showPenguins_);
+    penguinsIdle->setToolTip("Time since joining or the last text or image message. Choose Never to keep everyone visible.");
+    connect(showPenguins, &QCheckBox::toggled, penguinsIdle, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -973,6 +983,7 @@ void MainWindow::showPreferences() {
     form->addRow("", showMedia);
     form->addRow("desktop overlay", showPenguins);
     form->addRow("", penguinsWander);
+    form->addRow("hide inactive penguins after", penguinsIdle);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -1032,7 +1043,9 @@ void MainWindow::showPreferences() {
     showLinkedMedia_ = showMedia->isChecked();
     penguinsAction_->setChecked(showPenguins->isChecked());
     penguinsWander_ = penguinsWander->isChecked();
+    penguinsIdleMinutes_ = penguinsIdle->value();
     penguins_->setWandering(penguinsWander_);
+    penguins_->setIdleTimeoutMinutes(penguinsIdleMinutes_);
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1058,6 +1071,7 @@ void MainWindow::showPreferences() {
                       maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
     settings.setValue("gifs/showLinkedMedia", showLinkedMedia_);
     settings.setValue("penguins/wander", penguinsWander_);
+    settings.setValue("penguins/idleMinutes", penguinsIdleMinutes_);
 }
 
 void MainWindow::openSavedMessages() {
@@ -1830,6 +1844,7 @@ void MainWindow::sendImage(const QByteArray& bytes) {
         }
     }
     appendImage(myName_, bytes, "231");
+    penguins_->noteActivity(myName_);
 }
 
 void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
@@ -1840,6 +1855,7 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
         QByteArray(chunk.data.data(), static_cast<qsizetype>(chunk.data.size())),
         QDateTime::currentMSecsSinceEpoch());
     if (image) {
+        penguins_->noteActivity(sender);
         penguins_->setColor(sender, chatColor(q(chunk.color)));
         appendImage(sender, *image, q(chunk.color), chunk.timestamp);
     }

@@ -2,6 +2,7 @@
 #include "desktop/chat_color.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFontMetrics>
 #include <QImage>
@@ -80,6 +81,30 @@ QImage tintedFrame(const QImage& source, QColor color) {
 }
 
 }  // namespace
+
+void PenguinActivity::setMembers(const QStringList& names, qint64 nowMs) {
+    for (auto it = lastActivity_.begin(); it != lastActivity_.end();) {
+        if (!names.contains(it.key())) it = lastActivity_.erase(it);
+        else ++it;
+    }
+    for (const QString& name : names) {
+        if (!name.isEmpty() && !lastActivity_.contains(name)) lastActivity_.insert(name, nowMs);
+    }
+}
+
+void PenguinActivity::noteActivity(const QString& name, qint64 nowMs) {
+    auto member = lastActivity_.find(name);
+    if (member != lastActivity_.end()) member.value() = nowMs;
+}
+
+QStringList PenguinActivity::activeMembers(qint64 nowMs, int timeoutMinutes) const {
+    QStringList names;
+    const qint64 timeoutMs = static_cast<qint64>(timeoutMinutes) * 60 * 1000;
+    for (auto it = lastActivity_.cbegin(); it != lastActivity_.cend(); ++it) {
+        if (timeoutMinutes <= 0 || nowMs - it.value() < timeoutMs) names.append(it.key());
+    }
+    return names;
+}
 
 void PenguinScene::setMembers(QStringList names) {
     names.removeAll(QString());
@@ -339,8 +364,14 @@ private:
     bool hadSpeech_ = false;
 };
 
-PenguinOverlay::PenguinOverlay(QObject* parent) : QObject(parent) {
+PenguinOverlay::PenguinOverlay(QObject* parent, std::function<qint64()> now)
+    : QObject(parent), now_(now ? std::move(now) : QDateTime::currentMSecsSinceEpoch) {
     initializePenguins();
+    activityTimer_.setInterval(1000);
+    connect(&activityTimer_, &QTimer::timeout, this, [this] {
+        if (activity_.activeMembers(now_(), idleTimeoutMinutes_) != visibleMembers_) syncScreens();
+    });
+    activityTimer_.start();
     connect(qApp, &QGuiApplication::screenAdded, this, [this] { syncScreens(); });
     connect(qApp, &QGuiApplication::screenRemoved, this, [this](QScreen* screen) {
         windows_.erase(screen);
@@ -356,6 +387,7 @@ void PenguinOverlay::setMembers(QStringList names) {
     names.sort();
     if (members_ == names) return;
     members_ = std::move(names);
+    activity_.setMembers(members_, now_());
     for (auto it = colors_.begin(); it != colors_.end();) {
         if (!members_.contains(it.key())) it = colors_.erase(it);
         else ++it;
@@ -380,12 +412,25 @@ void PenguinOverlay::setWandering(bool wandering) {
     for (auto& [screen, window] : windows_) window->setWandering(wandering);
 }
 
+void PenguinOverlay::setIdleTimeoutMinutes(int minutes) {
+    idleTimeoutMinutes_ = qBound(0, minutes, 1440);
+    syncScreens();
+}
+
+void PenguinOverlay::noteActivity(const QString& name) {
+    activity_.noteActivity(name, now_());
+    if (activity_.activeMembers(now_(), idleTimeoutMinutes_) != visibleMembers_) syncScreens();
+}
+
 void PenguinOverlay::showMessage(const QString& sender, const QString& body) {
+    if (body.trimmed().isEmpty()) return;
+    noteActivity(sender);
     for (auto& [screen, window] : windows_) window->showMessage(sender, body);
 }
 
 void PenguinOverlay::syncScreens() {
-    if (!enabled_ || members_.isEmpty()) {
+    visibleMembers_ = activity_.activeMembers(now_(), idleTimeoutMinutes_);
+    if (!enabled_ || visibleMembers_.isEmpty()) {
         windows_.clear();
         return;
     }
@@ -398,7 +443,7 @@ void PenguinOverlay::syncScreens() {
         auto& window = windows_[screen];
         if (!window) window = std::make_unique<PenguinOverlayWindow>(screen);
         window->setWandering(wandering_);
-        window->setMembers(members_);
+        window->setMembers(visibleMembers_);
         for (auto it = colors_.cbegin(); it != colors_.cend(); ++it) {
             window->setColor(it.key(), it.value());
         }

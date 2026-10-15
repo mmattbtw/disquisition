@@ -42,6 +42,13 @@ Long messages show a shortened preview; the full message stays in chat. Saved
 history and system notices do not create bubbles. Leaving or losing the server
 connection clears the overlay until you reconnect.
 
+Penguins disappear after 10 minutes without a text or image message and return
+when that person sends another message. New arrivals get the same grace period.
+In Preferences, set **hide inactive penguins after** to a different number of
+minutes, or **Never** to keep everyone visible. Voice activity, saved history,
+and color changes do not reset the timeout. Hiding and reopening the overlay
+does not reset it either.
+
 The overlay lets mouse clicks and keyboard input pass through to your apps.
 Toggle **Desktop penguins** in the disquisition menu, or use Preferences.
 Uncheck **Let penguins wander** to keep characters still while retaining chat

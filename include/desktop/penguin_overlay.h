@@ -5,11 +5,25 @@
 #include <QObject>
 #include <QSizeF>
 #include <QStringList>
+#include <QTimer>
+#include <functional>
 #include <map>
 #include <memory>
 
 class QScreen;
 class PenguinOverlayWindow;
+
+// Activity belongs to the connection, not the overlay windows, so hiding the
+// overlay or adding a display does not restart everyone's inactivity timeout.
+class PenguinActivity {
+public:
+    void setMembers(const QStringList& names, qint64 nowMs);
+    void noteActivity(const QString& name, qint64 nowMs);
+    QStringList activeMembers(qint64 nowMs, int timeoutMinutes) const;
+
+private:
+    QMap<QString, qint64> lastActivity_;
+};
 
 struct DesktopPenguin {
     QColor color;
@@ -43,18 +57,25 @@ private:
 // has no QWidget parent: minimizing the chat must not minimize the penguins.
 class PenguinOverlay final : public QObject {
 public:
-    explicit PenguinOverlay(QObject* parent = nullptr);
+    explicit PenguinOverlay(QObject* parent = nullptr, std::function<qint64()> now = {});
     ~PenguinOverlay() override;
     void setMembers(QStringList names);
     void setColor(const QString& name, const QColor& color);
     void setEnabled(bool enabled);
     void setWandering(bool wandering);
+    void setIdleTimeoutMinutes(int minutes);
+    void noteActivity(const QString& name);
     void showMessage(const QString& sender, const QString& body);
 
 private:
     void syncScreens();
     QStringList members_;
     QMap<QString, QColor> colors_;
+    PenguinActivity activity_;
+    std::function<qint64()> now_;
+    QTimer activityTimer_;
+    QStringList visibleMembers_;
+    int idleTimeoutMinutes_ = 10;
     bool enabled_ = true;
     bool wandering_ = true;
     std::map<QScreen*, std::unique_ptr<PenguinOverlayWindow>> windows_;
