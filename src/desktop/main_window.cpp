@@ -51,9 +51,11 @@
 #include <utility>
 
 #include "desktop/audio_permission.h"
+#include "desktop/chat_color.h"
 #include "desktop/chat_media.h"
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
+#include "desktop/penguin_overlay.h"
 #include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
 
@@ -81,36 +83,6 @@ QString safeHtml(const QString& value) {
 
 // A drop of more files than this sends only the first ones.
 constexpr int kMaxDroppedImages = 10;
-
-QColor xtermColor(int index) {
-    static const int basic[][3] = {
-        {0, 0, 0},       {205, 49, 49},   {13, 188, 121}, {229, 229, 16},
-        {36, 114, 200},  {188, 63, 188},  {17, 168, 205}, {229, 229, 229},
-        {102, 102, 102}, {241, 76, 76},   {35, 209, 139}, {245, 245, 67},
-        {59, 142, 234},  {214, 112, 214}, {41, 184, 219}, {255, 255, 255}};
-    if (index < 16) {
-        return QColor(basic[index][0], basic[index][1], basic[index][2]);
-    }
-    if (index < 232) {
-        const int value = index - 16;
-        const int levels[] = {0, 95, 135, 175, 215, 255};
-        return QColor(levels[value / 36], levels[(value / 6) % 6], levels[value % 6]);
-    }
-    const int gray = 8 + (index - 232) * 10;
-    return QColor(gray, gray, gray);
-}
-
-QColor chatColor(const QString& value) {
-    static const QHash<QString, int> named {
-        {"pink", 211}, {"mint", 121}, {"butter", 229}, {"periwinkle", 111},
-        {"lilac", 183}, {"aqua", 159}, {"peach", 216}};
-    if (named.contains(value)) {
-        return xtermColor(named.value(value));
-    }
-    bool valid = false;
-    const int index = value.toInt(&valid);
-    return valid && index >= 0 && index <= 255 ? xtermColor(index) : xtermColor(121);
-}
 
 QString voiceReachableHost(QString host) {
     const QHostAddress address(host);
@@ -175,6 +147,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
+    showPenguins_ = settings.value("penguins/enabled", false).toBool();
+    penguinsWander_ = settings.value("penguins/wander", true).toBool();
+    penguins_ = new PenguinOverlay(this);
+    penguins_->setEnabled(showPenguins_);
+    penguins_->setWandering(penguinsWander_);
     // KLIPY asks for a stable, anonymous identifier per user.
     klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
     if (klipyCustomerId_.isEmpty()) {
@@ -460,6 +437,14 @@ void MainWindow::buildUi() {
     connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
     auto* saveAction = appMenu->addAction("Message saving…");
     connect(saveAction, &QAction::triggered, this, &MainWindow::showPreferences);
+    penguinsAction_ = appMenu->addAction("Desktop penguins");
+    penguinsAction_->setCheckable(true);
+    penguinsAction_->setChecked(showPenguins_);
+    connect(penguinsAction_, &QAction::toggled, this, [this](bool enabled) {
+        showPenguins_ = enabled;
+        penguins_->setEnabled(enabled);
+        QSettings().setValue("penguins/enabled", enabled);
+    });
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -959,6 +944,13 @@ void MainWindow::showPreferences() {
                                     &dialog);
     showMedia->setChecked(showLinkedMedia_);
     showMedia->setToolTip("Loading them lets those sites see your IP address.");
+    auto* showPenguins = new QCheckBox("Show desktop penguins for everyone in the server", &dialog);
+    showPenguins->setChecked(showPenguins_);
+    showPenguins->setToolTip("Penguins and chat bubbles appear above other apps. Clicks pass through them.");
+    auto* penguinsWander = new QCheckBox("Let penguins wander", &dialog);
+    penguinsWander->setChecked(penguinsWander_);
+    penguinsWander->setEnabled(showPenguins_);
+    connect(showPenguins, &QCheckBox::toggled, penguinsWander, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -979,6 +971,8 @@ void MainWindow::showPreferences() {
     form->addRow("SQLite file", messageFileRow);
     form->addRow("maximum messages", maximum);
     form->addRow("", showMedia);
+    form->addRow("desktop overlay", showPenguins);
+    form->addRow("", penguinsWander);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -1036,6 +1030,9 @@ void MainWindow::showPreferences() {
     messageFile_ = messageFile->text().trimmed();
     maxSavedMessages_ = chosenMaximum;
     showLinkedMedia_ = showMedia->isChecked();
+    penguinsAction_->setChecked(showPenguins->isChecked());
+    penguinsWander_ = penguinsWander->isChecked();
+    penguins_->setWandering(penguinsWander_);
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1060,6 +1057,7 @@ void MainWindow::showPreferences() {
     settings.setValue("messages/maximum",
                       maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
     settings.setValue("gifs/showLinkedMedia", showLinkedMedia_);
+    settings.setValue("penguins/wander", penguinsWander_);
 }
 
 void MainWindow::openSavedMessages() {
@@ -1367,6 +1365,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         receiveScreenFrame(message);
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        penguins_->showMessage(q(message.fields[0]), q(message.fields[2]));
+        penguins_->setColor(q(message.fields[0]), chatColor(q(message.fields[3])));
         recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
                     message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
@@ -1486,6 +1486,8 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
         }
     } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
+        penguins_->showMessage(q(message.fields[0]), q(message.fields[2]));
+        penguins_->setColor(q(message.fields[0]), chatColor(q(message.fields[3])));
         recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
                     message.fields[2], message.fields[3]});
     } else if (message.type == chat::MsgType::PeerImage) {
@@ -1540,6 +1542,7 @@ void MainWindow::sendChat(const QString& body) {
         }
     }
     appendChat(myName_, body, "231");
+    penguins_->showMessage(myName_, body);
     recordChat({timestampSeconds, s(myName_), s(body), s(messageColor_)});
 }
 
@@ -1558,6 +1561,7 @@ void MainWindow::runCommand(const QString& command) {
             appendChat("Color", "unknown or reserved color: " + requested, {}, true);
         } else {
             messageColor_ = requested;
+            penguins_->setColor(myName_, chatColor(messageColor_));
             appendChat("Color", "you chose " + requested, requested);
         }
     } else if (name == "/users") {
@@ -1835,10 +1839,20 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
         sender, chunk.transferId, chunk.index, chunk.count,
         QByteArray(chunk.data.data(), static_cast<qsizetype>(chunk.data.size())),
         QDateTime::currentMSecsSinceEpoch());
-    if (image) appendImage(sender, *image, q(chunk.color), chunk.timestamp);
+    if (image) {
+        penguins_->setColor(sender, chatColor(q(chunk.color)));
+        appendImage(sender, *image, q(chunk.color), chunk.timestamp);
+    }
 }
 
 void MainWindow::refreshMembers() {
+    QStringList penguinNames;
+    if (!myName_.isEmpty()) {
+        penguinNames = peers_.keys();
+        penguinNames.append(myName_);
+    }
+    penguins_->setMembers(penguinNames);
+    penguins_->setColor(myName_, chatColor(messageColor_));
     members_->clear();
     if (!myName_.isEmpty()) {
         const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :

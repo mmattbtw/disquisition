@@ -23,6 +23,35 @@ Preferences. Saved connection settings take precedence over these defaults.
 For your own server, set the server address and port in Preferences. Use Cmd+,
 on macOS to open it. Set the relay address, or leave it blank to connect directly.
 
+## Desktop penguins
+
+Desktop penguins are off by default. Enable **Desktop penguins** in the
+disquisition menu or Preferences. Once enabled, joining the server puts a
+little Club Penguin character for you and every
+connected member along the bottom of each display. They wander above other
+applications, including when the chat window is minimized. Names appear below
+the penguins. Their colors match their text chat colors, including named shades
+and xterm-256 colors. Your `/color` command updates your penguin immediately;
+other people's colors update when they send a text or image message. Until
+their color is known, their penguin uses the default mint. Positions are local
+to each desktop.
+
+New text messages appear in speech bubbles above their sender for 5 to 12 seconds.
+Penguins stop to speak, and a new message replaces that person's current bubble.
+Long messages show a shortened preview; the full message stays in chat. Saved
+history and system notices do not create bubbles. Leaving or losing the server
+connection clears the overlay until you reconnect.
+
+The overlay lets mouse clicks and keyboard input pass through to your apps.
+Toggle **Desktop penguins** in the disquisition menu, or use Preferences.
+Uncheck **Let penguins wander** to keep characters still while retaining chat
+bubbles. macOS Reduce Motion and Windows animation settings also stop wandering.
+These choices are saved between launches. The sprites are included in the app.
+
+On macOS, the overlay joins Spaces and can appear over fullscreen applications.
+On Linux, always-on-top behavior depends on the window manager; Wayland
+compositors may restrict overlays above other applications.
+
 ## Voice chat
 
 Voice stays off until you choose Join voice.
