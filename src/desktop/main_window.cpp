@@ -157,6 +157,9 @@ QString localAdvertiseHost(const QHostAddress& routeAddress) {
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
+    const auto colorIndex =
+        QRandomGenerator::global()->bounded(static_cast<quint32>(chat::kColorCount));
+    messageColor_ = QString::fromUtf8(chat::kColorNames[colorIndex]);
     QSettings settings;
     serverHost_ = settings.value("server/host", serverHost_).toString();
     serverPort_ = static_cast<quint16>(qBound(1, settings.value("server/port", 9000).toInt(), 65535));

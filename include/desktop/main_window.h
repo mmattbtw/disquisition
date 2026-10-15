@@ -168,7 +168,7 @@ private:
     bool awaitingLogin_ = false;
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
-    QString messageColor_ = "mint";
+    QString messageColor_;
     bool saveMessages_ = false;
     bool savedMessagesLoaded_ = false;
     bool savingFailed_ = false;
