@@ -145,6 +145,7 @@ private:
     QAction* penguinsAction_ = nullptr;
     bool showPenguins_ = false;
     bool penguinsWander_ = true;
+    int penguinsIdleMinutes_ = 10;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;

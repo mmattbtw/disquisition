@@ -1,7 +1,9 @@
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QScreen>
 #include <QTimer>
+#include <QThread>
 #include <QWidget>
 #include <cmath>
 #include <limits>
@@ -132,6 +134,70 @@ void movementStaysOnScreenAndPausesWhileSpeaking() {
     CHECK(scene.penguins()["matt"].x <= 1880);
 }
 
+void inactivityExpiresPerPersonWithoutRosterRefreshesExtendingIt() {
+    PenguinActivity activity;
+    activity.setMembers({"matt", "jesse"}, 0);
+    CHECK(activity.activeMembers(599999, 10).size() == 2);
+    CHECK(activity.activeMembers(600000, 10).isEmpty());
+    activity.noteActivity("matt", 600000);
+    CHECK(activity.activeMembers(600000, 10) == QStringList({"matt"}));
+    activity.setMembers({"matt", "jesse", "cam"}, 600001);
+    CHECK(activity.activeMembers(600001, 10) == QStringList({"cam", "matt"}));
+    CHECK(activity.activeMembers(1200000, 10) == QStringList({"cam"}));
+    CHECK(activity.activeMembers(1200001, 10).isEmpty());
+    CHECK(activity.activeMembers(1200001, 0).size() == 3);
+    CHECK(activity.activeMembers(1200001, 30).size() == 3);
+    activity.noteActivity("unknown", 1200001);
+    CHECK(activity.activeMembers(1200001, 10).isEmpty());
+    // Leaving forgets activity; rejoining starts a fresh grace period.
+    activity.setMembers({}, 1200001);
+    activity.noteActivity("matt", 1200002);
+    CHECK(activity.activeMembers(1200002, 0).isEmpty());
+    activity.setMembers({"matt"}, 1200003);
+    CHECK(activity.activeMembers(1800002, 10) == QStringList({"matt"}));
+    CHECK(activity.activeMembers(1800003, 10).isEmpty());
+}
+
+void inactivePenguinsReturnOnChatAndStayInactiveAcrossVisibilityChanges() {
+    qint64 now = 1000000;
+    PenguinOverlay overlay(nullptr, [&] { return now; });
+    overlay.setWandering(false);
+    overlay.setMembers({"matt", "jesse"});
+    CHECK(!overlayWindows().isEmpty());
+    now += 600000;
+    QElapsedTimer wait;
+    wait.start();
+    while (!overlayWindows().isEmpty() && wait.elapsed() < 3000) {
+        QApplication::processEvents();
+        QThread::msleep(5);
+    }
+    CHECK(overlayWindows().isEmpty());
+    overlay.setColor("matt", chatColor("pink"));
+    overlay.showMessage("matt", " \n ");
+    overlay.showMessage("unknown", "hello");
+    CHECK(overlayWindows().isEmpty());
+    overlay.showMessage("matt", "I'm back");
+    CHECK(!overlayWindows().isEmpty());
+    now += 600000;
+    overlay.setEnabled(false);
+    overlay.setEnabled(true);
+    CHECK(overlayWindows().isEmpty());
+    overlay.setMembers({"matt", "jesse", "cam"});
+    CHECK(!overlayWindows().isEmpty());
+    overlay.setMembers({"matt", "jesse"});
+    CHECK(overlayWindows().isEmpty());
+    overlay.setIdleTimeoutMinutes(0);
+    CHECK(!overlayWindows().isEmpty());
+    overlay.setIdleTimeoutMinutes(10);
+    CHECK(overlayWindows().isEmpty());
+    // Activity still counts while the desktop overlay is disabled.
+    overlay.setEnabled(false);
+    overlay.noteActivity("jesse");
+    CHECK(overlayWindows().isEmpty());
+    overlay.setEnabled(true);
+    CHECK(!overlayWindows().isEmpty());
+}
+
 void windowsAreTransparentAndFollowOverlayLifecycle() {
     PenguinOverlay overlay;
     overlay.setWandering(false);
@@ -193,6 +259,8 @@ int main(int argc, char** argv) {
     speechReplacesExpiresAndRemainsPlainText();
     penguinsUseChatColorsWithoutResettingState();
     movementStaysOnScreenAndPausesWhileSpeaking();
+    inactivityExpiresPerPersonWithoutRosterRefreshesExtendingIt();
+    inactivePenguinsReturnOnChatAndStayInactiveAcrossVisibilityChanges();
     windowsAreTransparentAndFollowOverlayLifecycle();
     if (app.arguments().contains("--preview")) {
         // A local preview of the actual native windows, with no server or saved
