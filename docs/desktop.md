@@ -29,10 +29,12 @@ on macOS to open it. Set the relay address, or leave it blank to connect directl
 
 ## Desktop penguins
 
-Desktop penguins are off by default. Enable **Desktop penguins** in the
-disquisition menu or Preferences. Once enabled, joining the server puts a
-little Club Penguin character for you and every
-connected member along the bottom of each display. They wander above other
+Desktop penguins are off and hidden from Preferences and the menu until you
+type `/waddleon` in chat. This enables them and permanently unlocks their
+controls on your device. After unlocking, use **Desktop penguins** in the
+disquisition menu or Preferences to turn them on or off. Once enabled, joining
+the server puts a little Club Penguin character for you and every connected
+member along the bottom of each display. They wander above other
 applications, including when the chat window is minimized. Names appear below
 the penguins. Their colors match their text chat colors, including named shades
 and xterm-256 colors. Your `/color` command updates your penguin immediately;

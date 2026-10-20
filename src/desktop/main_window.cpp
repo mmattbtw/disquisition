@@ -150,7 +150,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
-    showPenguins_ = settings.value("penguins/enabled", false).toBool();
+    penguinsUnlocked_ = settings.value("penguins/unlocked", false).toBool();
+    showPenguins_ = penguinsUnlocked_ && settings.value("penguins/enabled", false).toBool();
     penguinsWander_ = settings.value("penguins/wander", true).toBool();
     penguinsIdleMinutes_ = qBound(0, settings.value("penguins/idleMinutes", 10).toInt(), 1440);
     penguins_ = new PenguinOverlay(this);
@@ -445,6 +446,7 @@ void MainWindow::buildUi() {
     penguinsAction_ = appMenu->addAction("Desktop penguins");
     penguinsAction_->setCheckable(true);
     penguinsAction_->setChecked(showPenguins_);
+    penguinsAction_->setVisible(penguinsUnlocked_);
     connect(penguinsAction_, &QAction::toggled, this, [this](bool enabled) {
         showPenguins_ = enabled;
         penguins_->setEnabled(enabled);
@@ -987,6 +989,9 @@ void MainWindow::showPreferences() {
     form->addRow("desktop overlay", showPenguins);
     form->addRow("", penguinsWander);
     form->addRow("hide inactive penguins after", penguinsIdle);
+    form->setRowVisible(showPenguins, penguinsUnlocked_);
+    form->setRowVisible(penguinsWander, penguinsUnlocked_);
+    form->setRowVisible(penguinsIdle, penguinsUnlocked_);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -1566,7 +1571,13 @@ void MainWindow::sendChat(const QString& body) {
 void MainWindow::runCommand(const QString& command) {
     const QStringList parts = command.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
     const QString name = parts.value(0).toLower();
-    if (name == "/color") {
+    if (name == "/waddleon" && parts.size() == 1) {
+        penguinsUnlocked_ = true;
+        QSettings().setValue("penguins/unlocked", true);
+        penguinsAction_->setVisible(true);
+        penguinsAction_->setChecked(true);
+        appendChat("Penguins", "Waddle on! Desktop penguins are now available in Preferences.", {}, true);
+    } else if (name == "/color") {
         if (parts.size() < 2) {
             appendChat("Color", "usage: /color <pink|mint|butter|periwinkle|lilac|aqua|peach|0-255>",
                        {}, true);

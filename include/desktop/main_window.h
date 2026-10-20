@@ -143,6 +143,7 @@ private:
     ScreenStage* stage_ = nullptr;
     PenguinOverlay* penguins_ = nullptr;
     QAction* penguinsAction_ = nullptr;
+    bool penguinsUnlocked_ = false;
     bool showPenguins_ = false;
     bool penguinsWander_ = true;
     int penguinsIdleMinutes_ = 10;
