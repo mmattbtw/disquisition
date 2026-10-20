@@ -558,7 +558,7 @@ void MainWindow::buildUi() {
 
     setCentralWidget(root);
     setStyleSheet(R"(
-        QWidget { background: #282c34; color: #c5c8c6; font-family: Menlo, Monaco, "Courier New"; font-size: 14px; }
+        QWidget { background: #282c34; color: #c5c8c6; font-family: Inter, "Segoe UI", "Helvetica Neue", sans-serif; font-size: 14px; }
         QLabel#title { background: #9dccca; color: #20262c; font-size: 15px; font-weight: 700; padding: 3px 5px; }
         QLineEdit, QSpinBox, QComboBox, QTextBrowser, QListWidget { background: #282c34; color: #c5c8c6; border: 1px solid #545b66; border-radius: 0; padding: 5px; selection-background-color: #9dccca; selection-color: #20262c; }
         QLineEdit[invalid="true"] { background: #3b2529; color: #ffb3b3; border: 2px solid #e05252; }
@@ -578,7 +578,7 @@ void MainWindow::buildUi() {
         QFrame#streamTile { border: 1px solid #545b66; }
         QLabel#streamName { font-weight: 700; }
         QLabel#live { background: #e05252; color: #fff3f3; font-size: 11px; font-weight: 700; padding: 1px 5px; }
-        QLabel#streamStats { color: #8a9099; font-size: 12px; }
+        QLabel#streamStats { color: #8a9099; font-family: "JetBrains Mono", monospace; font-size: 12px; }
         QScrollBar:vertical { background: #282c34; width: 10px; }
         QScrollBar::handle:vertical { background: #68717c; min-height: 24px; }
         QFrame#gifPicker { border: 1px solid #777f89; }
@@ -1667,8 +1667,10 @@ void MainWindow::appendChat(const QString& sender, const QString& body,
                             const QString& messageColor, bool system, qint64 timestamp) {
     const QString color = system ? "#b5b65f" : chatColor(messageColor).name();
     const QString prefix = system ? "* " :
+                           "<span style='font-family:\"JetBrains Mono\",monospace;color:#8a9099'>" +
                            (timestamp >= 0 ? QDateTime::fromSecsSinceEpoch(timestamp)
-                                           : QDateTime::currentDateTime()).toString("HH:mm ");
+                                           : QDateTime::currentDateTime()).toString("HH:mm") +
+                           "</span> ";
     const QList<MediaLink> media =
         system || !showLinkedMedia_ ? QList<MediaLink>() : findMediaLinks(body);
     // As in Discord, a message that is only a GIF link shows just the GIF.
