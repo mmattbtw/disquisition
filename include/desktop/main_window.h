@@ -187,6 +187,7 @@ private:
     // its tile on the stage.
     ScreenCapture screenCapture_;
     bool sharingScreen_ = false;
+    std::unique_ptr<PresenterOverlay> presenterOverlay_;
     std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;

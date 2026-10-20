@@ -258,6 +258,46 @@ void testPeerImage() {
         Message{MsgType::PeerChat, {"bob", "1", "pink", "1", "0", "1", "x"}}, chunk));
 }
 
+void testScreenDraw() {
+    chat::ScreenDraw draw;
+    const Message valid{MsgType::ScreenDraw, {"alice", "7", "12", "0", "10000", "123", "456", "5"}};
+    CHECK(chat::parseScreenDraw(valid, false, draw));
+    CHECK(draw.sharer == "alice" && draw.epoch == 7 && draw.id == 12);
+    CHECK(draw.x1 == 0 && draw.y1 == 10000 && draw.x2 == 123 && draw.y2 == 456 && draw.color == 5);
+    CHECK(chat::screenDrawMessage(draw, false).fields == valid.fields);
+    draw.author = "bob";
+    const Message forwarded = chat::screenDrawMessage(draw, true);
+    CHECK(forwarded.fields[2] == "bob");
+    CHECK(chat::parseScreenDraw(forwarded, true, draw));
+    CHECK(draw.author == "bob");
+    CHECK(!chat::parseScreenDraw(forwarded, false, draw));
+    CHECK(!chat::parseScreenDraw(valid, true, draw));
+    for (std::size_t field = 1; field < valid.fields.size(); ++field) {
+        for (const std::string bad : {"", "-1", "+1", "1.5", "nan", "99999999999999999999"}) {
+            Message invalid = valid;
+            invalid.fields[field] = bad;
+            // Epochs use the existing signed decimal parser, which accepts '+'.
+            if (field == 1 && bad == "+1")
+                continue;
+            CHECK(!chat::parseScreenDraw(invalid, false, draw));
+        }
+    }
+    for (std::size_t field = 3; field <= 7; ++field) {
+        Message invalid = valid;
+        invalid.fields[field] = field == 7 ? "6" : "10001";
+        CHECK(!chat::parseScreenDraw(invalid, false, draw));
+    }
+    Message invalid = valid;
+    invalid.fields[1] = "0";
+    CHECK(!chat::parseScreenDraw(invalid, false, draw));
+    invalid = valid;
+    invalid.fields[2] = "4294967296";
+    CHECK(!chat::parseScreenDraw(invalid, false, draw));
+    invalid = valid;
+    invalid.type = MsgType::PeerChat;
+    CHECK(!chat::parseScreenDraw(invalid, false, draw));
+}
+
 } // namespace
 
 int main() {
@@ -273,6 +313,7 @@ int main() {
     testPeerChat();
     testPeerAnnouncement();
     testPeerImage();
+    testScreenDraw();
     std::puts("protocol_test: ok");
     return 0;
 }

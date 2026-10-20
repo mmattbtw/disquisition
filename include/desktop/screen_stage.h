@@ -8,12 +8,15 @@
 #include <QString>
 #include <QWidget>
 
+#include "desktop/screen_drawing.h"
+
 class QLabel;
 class QPushButton;
 class QStackedWidget;
+class QShortcut;
 
 // Draws the newest frame of a stream, scaled to fit and letterboxed.
-class StreamView final : public QWidget {
+class StreamView final : public DrawingCanvas {
     Q_OBJECT
 public:
     explicit StreamView(QWidget* parent = nullptr);
@@ -25,6 +28,7 @@ signals:
     void doubleClicked();
 
 protected:
+    QRectF drawingRect() const override;
     void paintEvent(QPaintEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
 
@@ -40,6 +44,7 @@ class StreamTile final : public QFrame {
 public:
     StreamTile(const QString& name, bool own, QWidget* parent = nullptr);
     QString name() const { return name_; }
+    bool own() const { return own_; }
     const QImage& image() const { return view_->image(); }
     void setWatching(bool watching);
     // `available` is false while the tile is alone on the stage.
@@ -47,6 +52,7 @@ public:
     // Shown before the frame statistics, such as the encoder in use.
     void setDetail(const QString& detail) { detail_ = detail; }
     void showFrame(const QImage& image, qsizetype encodedBytes);
+    ScreenDrawing* drawing() const { return drawing_; }
 
 signals:
     void watchClicked();
@@ -61,6 +67,8 @@ private:
     QStackedWidget* body_ = nullptr;
     QWidget* invitation_ = nullptr;
     StreamView* view_ = nullptr;
+    ScreenDrawing* drawing_ = nullptr;
+    DrawingControls* drawingControls_ = nullptr;
     QLabel* stats_ = nullptr;
     QPushButton* focusButton_ = nullptr;
     QPushButton* fullscreenButton_ = nullptr;
@@ -84,10 +92,14 @@ public:
     void setWatching(const QString& name, bool watching);
     void setDetail(const QString& name, const QString& detail);
     void showFrame(const QString& name, const QImage& image, qsizetype encodedBytes);
+    ScreenDrawing* drawing(const QString& name) const;
 
 signals:
     void watchRequested(const QString& name);
     void stopWatchingRequested(const QString& name);
+    void drawingPermissionRequested(bool enabled);
+    void drawingClearRequested();
+    void segmentDrawn(const QString& sharer, const chat::ScreenDraw& segment);
     // The first share appeared on an empty, hidden stage.
     void opened();
 
@@ -97,10 +109,12 @@ private:
     void toggleFullscreen(const QString& name);
     void exitFullscreen();
     void relayout();
+    void refreshEscapeShortcut();
 
     QList<StreamTile*> tiles_;
     QString focused_;
     // Closing the window with the system's own controls deletes it.
     QPointer<StreamView> fullscreen_;
     QString fullscreenName_;
+    QShortcut* escape_ = nullptr;
 };

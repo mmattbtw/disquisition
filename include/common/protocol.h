@@ -37,9 +37,9 @@ enum class MsgType : std::uint8_t {
 
     // Peer <-> peer. A relay hosts several users on one port, so Hello names
     // both the caller and the user being called, and PeerChat names its sender.
-    Hello = 15,    // [sender, target]
-    HelloOk = 17,  // [target]
-    PeerChat = 16, // [sender, timestamp, body, color]
+    Hello = 15,      // [sender, target]
+    HelloOk = 17,    // [target]
+    PeerChat = 16,   // [sender, timestamp, body, color]
     VoiceState = 18, // [sender, muted 0|1, deafened 0|1]
     RelayProbe = 21, // client to relay: [] health check without signing in
     RelayReady = 22, // relay to client: [] server connection is available
@@ -56,6 +56,15 @@ enum class MsgType : std::uint8_t {
     // chunks of the same transfer, each carrying the whole header:
     // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
     PeerImage = 26,
+
+    // Owner -> server: [enabled 0|1]; server -> owner/viewers: [sharer, enabled, epoch].
+    // Every state message resets the drawing, including snapshots before replay.
+    ScreenDrawState = 27,
+    // Client: [sharer, epoch, segment id, x1, y1, x2, y2, color];
+    // server inserts author at index 2. Author + segment id deduplicates local previews.
+    // Coordinates are normalized to 0..10000, color is an index in the pen palette.
+    ScreenDraw = 28,
+    ScreenDrawClear = 29, // owner -> server: []
 };
 
 struct Message {
@@ -131,6 +140,20 @@ struct ImageChunk {
 // count, count within kMaxImageChunks, and 1 to kImageChunkSize bytes.
 bool parsePeerImage(const Message& message, ImageChunk& out);
 Message peerImageMessage(const ImageChunk& chunk);
+
+constexpr int kDrawCoordinateMax = 10000;
+constexpr int kPenColorCount = 6;
+constexpr std::size_t kMaxDrawSegments = 4096;
+struct ScreenDraw {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::uint32_t id = 0;
+    int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    int color = 0;
+};
+bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out);
+Message screenDrawMessage(const ScreenDraw& draw, bool fromServer);
 
 struct PeerAddress {
     std::string name;

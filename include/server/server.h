@@ -41,6 +41,9 @@ private:
         std::uint16_t peerPort = 0;
         std::uint16_t voicePort = 0;
         bool sharingScreen = false;
+        bool drawingEnabled = false;
+        std::int64_t drawingEpoch = 0;
+        std::vector<Message> drawing;
         std::set<std::string> watching; // sharers whose frames this client receives
         bool authenticated = false;
         bool closing = false; // drop once `out` is flushed
@@ -62,6 +65,11 @@ private:
     void handleScreenShare(Client& client, const Message& message);
     void handleScreenWatch(Client& client, const Message& message);
     void handleScreenFrame(Client& client, const Message& message);
+    void handleScreenDrawState(Client& client, const Message& message);
+    void handleScreenDraw(Client& client, const Message& message);
+    void resetScreenDrawing(Client& client);
+    Message screenDrawingState(const Client& client) const;
+    void sendToScreenParticipants(Client& sharer, const Message& message);
     void endScreenShare(const Client& sharer);
     void reject(Client& client, const std::string& reason);
 
@@ -78,6 +86,7 @@ private:
     int listenFd_ = -1;
     std::uint16_t boundPort_ = 0;
     std::vector<Client> clients_;
+    std::int64_t nextDrawingEpoch_ = 0;
 };
 
 } // namespace chat
