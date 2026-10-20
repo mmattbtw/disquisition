@@ -159,7 +159,9 @@ if(BUILD_DESKTOP_APP)
       BASE resources/fonts
       FILES
         resources/fonts/Inter-Regular.ttf
+        resources/fonts/Inter-SemiBold.ttf
         resources/fonts/Inter-Bold.ttf
+        resources/fonts/CalSans-Regular.ttf
         resources/fonts/JetBrainsMono-Regular.ttf)
     set(DISQUISITION_GIPHY_API_KEY "" CACHE STRING "Default GIPHY API key for the GIF picker")
     set(DISQUISITION_KLIPY_API_KEY "" CACHE STRING "Default KLIPY API key for the GIF picker")
