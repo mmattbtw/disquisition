@@ -125,6 +125,26 @@ if(BUILD_DESKTOP_APP)
     set_target_properties(desktop_media PROPERTIES AUTOMOC ON)
     target_link_libraries(desktop_media PUBLIC chat_protocol Qt6::Gui Qt6::Network)
 
+    add_library(desktop_screen STATIC
+      include/desktop/screen_drawing.h
+      include/desktop/screen_stage.h
+      include/desktop/share_source.h
+      src/desktop/screen_drawing.cpp
+      src/desktop/screen_stage.cpp
+      src/desktop/share_source.cpp)
+    set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
+    target_link_libraries(desktop_screen PUBLIC chat_protocol Qt6::Widgets Qt6::Multimedia)
+    if(UNIX AND NOT APPLE)
+      pkg_check_modules(XCB QUIET IMPORTED_TARGET xcb)
+      if(XCB_FOUND)
+        target_link_libraries(desktop_screen PRIVATE PkgConfig::XCB)
+        target_compile_definitions(desktop_screen PRIVATE DISQUISITION_HAVE_XCB)
+      endif()
+    endif()
+    if(WIN32)
+      target_link_libraries(desktop_screen PRIVATE dwmapi user32)
+    endif()
+
     # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
     add_executable(disquisition-desktop MACOSX_BUNDLE
       include/desktop/audio_permission.h
@@ -134,9 +154,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
-      include/desktop/screen_stage.h
       include/desktop/share_picker.h
-      include/desktop/share_source.h
       include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
@@ -146,15 +164,13 @@ if(BUILD_DESKTOP_APP)
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
-      src/desktop/screen_stage.cpp
       src/desktop/share_picker.cpp
-      src/desktop/share_source.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages desktop_media
+      chat_protocol chat_recent_messages desktop_media desktop_screen
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -177,7 +193,7 @@ if(BUILD_DESKTOP_APP)
       include(cmake/MacOSCodeSigning.cmake)
       disquisition_resolve_codesign_identity("${DISQUISITION_CODESIGN_IDENTITY}"
         DISQUISITION_RESOLVED_CODESIGN_IDENTITY)
-      target_sources(disquisition-desktop PRIVATE
+      target_sources(desktop_screen PRIVATE
         include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
       set_source_files_properties(src/desktop/mac_screen_capture.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
@@ -190,6 +206,8 @@ if(BUILD_DESKTOP_APP)
       target_link_libraries(disquisition-desktop PRIVATE
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
         ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
+      target_link_libraries(desktop_screen PRIVATE
+        ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
         OUTPUT_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
@@ -304,4 +322,12 @@ if(BUILD_TESTING AND TARGET desktop_media)
   target_link_libraries(desktop_media_test PRIVATE desktop_media)
   add_test(NAME desktop_media_test COMMAND desktop_media_test)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_screen)
+  add_executable(screen_drawing_test test/screen_drawing_test.cpp)
+  target_link_libraries(screen_drawing_test PRIVATE desktop_screen)
+  add_test(NAME screen_drawing_test COMMAND screen_drawing_test)
+  set_tests_properties(screen_drawing_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
 endif()

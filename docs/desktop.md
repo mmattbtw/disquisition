@@ -103,6 +103,33 @@ or double-click a video to fill the screen with it; press Esc or double-click
 again to return. With more than one share on the stage, choose focus to
 enlarge one above the others.
 
+To annotate a share, the person sharing chooses **allow drawing** on their
+tile. Drawing starts off for every new share. Everyone watching can then
+choose **pen**, select a color and drag over the video. The sharer can draw
+too. Drawings stay aligned when viewers resize the video or open it
+fullscreen, and people who start watching later receive the existing ink.
+Only the sharer can **clear drawings** or turn off drawing. Turning it off,
+ending the share or losing the connection clears the ink. A full canvas
+also clears automatically after 4,096 pen segments to bound memory use.
+
+On macOS, Windows and X11, a transparent overlay shows the same drawings
+over the actual shared display or application window. A small toolbar lets
+the sharer switch the pen on and off, choose a color and clear the screen
+without returning to chat. With pen off, mouse input passes through to the
+shared application. Press Esc or turn pen off to use the mouse normally.
+For a window share, the overlay follows that window and hides while it is
+minimized. Annotations refer to positions in the shared image and stay in
+place when its contents scroll or change.
+
+Wayland does not support this presenter overlay. If a window cannot be
+identified uniquely on Windows or X11, or XCB support was unavailable at
+build time, the sharer draws in their video preview instead. The toolbar
+in the tile indicates this. The video preview and fullscreen annotations
+still work for all participants. macOS display capture leaves out
+Disquisition's own windows so the overlay is not captured a second time.
+Windows excludes the overlay using capture exclusion on Windows 10 version
+2004 and newer. X11 display capture can include the overlay in the video.
+
 The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
 when it can. Frames travel over the existing server connection, directly or
 through the relay, and the server forwards each share only to its viewers.
@@ -111,6 +138,9 @@ it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
+Drawing also needs updated desktop clients, server and relay. Annotation
+events travel through the server and relay with the same privacy limits as
+the video. They are kept in memory only for the current share.
 
 On macOS, allow the app's channel name, such as `disquisition development`,
 in System Settings > Privacy & Security > Screen

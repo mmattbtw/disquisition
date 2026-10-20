@@ -292,6 +292,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::sendScreenFrame);
     connect(stage_, &ScreenStage::watchRequested, this, &MainWindow::watchStream);
     connect(stage_, &ScreenStage::stopWatchingRequested, this, &MainWindow::stopWatchingStream);
+    connect(stage_, &ScreenStage::drawingPermissionRequested, this, [this](bool enabled) {
+        if (sharingScreen_)
+            sendFrame(&server_, {chat::MsgType::ScreenDrawState, {enabled ? "1" : "0"}});
+    });
+    connect(stage_, &ScreenStage::drawingClearRequested, this, [this] {
+        if (sharingScreen_)
+            sendFrame(&server_, {chat::MsgType::ScreenDrawClear, {}});
+    });
+    connect(stage_, &ScreenStage::segmentDrawn, this,
+            [this](const QString& sharer, chat::ScreenDraw segment) {
+                ScreenDrawing* drawing = stage_->drawing(sharer);
+                if (!drawing || !drawing->enabled() ||
+                    server_.state() != QAbstractSocket::ConnectedState ||
+                    server_.bytesToWrite() > kMaxScreenBacklogBytes)
+                    return;
+                segment.sharer = s(sharer);
+                segment.author = s(myName_);
+                drawing->add(segment);
+                sendFrame(&server_, chat::screenDrawMessage(segment, false));
+            });
     connect(members_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         watchStream(item->data(Qt::UserRole).toString());
     });
@@ -770,6 +790,7 @@ void MainWindow::startScreenShare() {
     const quint64 generation = ++screenShareGeneration_;
     sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
     stage_->addStream(myName_, true);
+    presenterOverlay_ = std::make_unique<PresenterOverlay>(*source, stage_->drawing(myName_), this);
     shareButton_->setText("Stop Sharing");
     refreshMembers();
     const bool sharingWindow = source->kind == ShareSource::Kind::Window;
@@ -792,6 +813,7 @@ void MainWindow::stopScreenShare() {
         return;
     }
     sharingScreen_ = false;
+    presenterOverlay_.reset();
     ++screenShareGeneration_;
     screenCapture_.stop();
     ownStreamDecoder_.reset();
@@ -1368,20 +1390,42 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         handleScreenShare(message);
     } else if (message.type == chat::MsgType::ScreenFrame && message.fields.size() == 6) {
         receiveScreenFrame(message);
-    } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
+    }
+    else if (message.type == chat::MsgType::ScreenDrawState && message.fields.size() == 3) {
+        const QString sharer = q(message.fields[0]);
+        std::int64_t epoch = 0;
+        if ((sharer == myName_ && sharingScreen_) || watchedStreams_.count(sharer)) {
+            if (ScreenDrawing* drawing = stage_->drawing(sharer);
+                drawing && (message.fields[1] == "0" || message.fields[1] == "1") &&
+                chat::parseInt64(message.fields[2], epoch) && epoch > 0) {
+                drawing->setState(message.fields[1] == "1", epoch);
+            }
+        }
+    }
+    else if (message.type == chat::MsgType::ScreenDraw) {
+        chat::ScreenDraw segment;
+        if (chat::parseScreenDraw(message, true, segment)) {
+            if (ScreenDrawing* drawing = stage_->drawing(q(segment.sharer)))
+                drawing->add(segment);
+        }
+    }
+    else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
         appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
         recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
                     message.fields[2], message.fields[3]});
-    } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
+    }
+    else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
         recordChat({q(message.fields[0]).toLongLong(), message.fields[1], message.fields[2],
                     message.fields.size() >= 4 ? message.fields[3] : "pink"});
-    } else if (message.type == chat::MsgType::PeerImage) {
+    }
+    else if (message.type == chat::MsgType::PeerImage) {
         // A relay names the sender of each chunk it forwards.
         chat::ImageChunk chunk;
         if (chat::parsePeerImage(message, chunk)) receiveImageChunk(chunk);
-    } else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
+    }
+    else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
         appendChat("Server", q(message.fields[0]), {}, true);
     }
 }

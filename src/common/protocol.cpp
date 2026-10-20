@@ -238,6 +238,45 @@ Message peerImageMessage(const ImageChunk& chunk) {
                     std::to_string(chunk.count), chunk.data}};
 }
 
+bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out) {
+    if (message.type != MsgType::ScreenDraw || message.fields.size() != (fromServer ? 9 : 8)) {
+        return false;
+    }
+    ScreenDraw draw;
+    draw.sharer = message.fields[0];
+    if (draw.sharer.empty() || draw.sharer.size() > kMaxNameLength ||
+        !parseInt64(message.fields[1], draw.epoch) || draw.epoch <= 0)
+        return false;
+    const std::size_t idIndex = fromServer ? 3 : 2;
+    if (!parseU32(message.fields[idIndex], draw.id))
+        return false;
+    const std::size_t start = idIndex + 1;
+    if (fromServer)
+        draw.author = message.fields[2];
+    int* values[] = {&draw.x1, &draw.y1, &draw.x2, &draw.y2, &draw.color};
+    for (std::size_t i = 0; i < 5; ++i) {
+        std::uint32_t value = 0;
+        if (!parseU32(message.fields[start + i], value) ||
+            value > static_cast<std::uint32_t>(i == 4 ? kPenColorCount - 1 : kDrawCoordinateMax)) {
+            return false;
+        }
+        *values[i] = static_cast<int>(value);
+    }
+    out = std::move(draw);
+    return true;
+}
+
+Message screenDrawMessage(const ScreenDraw& draw, bool fromServer) {
+    Message message{MsgType::ScreenDraw, {draw.sharer, std::to_string(draw.epoch)}};
+    if (fromServer)
+        message.fields.push_back(draw.author);
+    message.fields.push_back(std::to_string(draw.id));
+    for (int value : {draw.x1, draw.y1, draw.x2, draw.y2, draw.color}) {
+        message.fields.push_back(std::to_string(value));
+    }
+    return message;
+}
+
 bool parsePeerAddress(const Message& message, PeerAddress& out) {
     if ((message.type != MsgType::Peer && message.type != MsgType::PeerJoined) ||
         message.fields.size() < 4) {
