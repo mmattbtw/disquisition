@@ -11,6 +11,9 @@
 #include "desktop/share_source.h"
 
 class QPainter;
+#if defined(Q_OS_MACOS)
+class MacDrawingPanel;
+#endif
 
 // One drawing shared by the tile, fullscreen view and presenter's overlay.
 class ScreenDrawing final : public QObject {
@@ -89,12 +92,17 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void refresh();
     ShareSource source_;
     QWidget* tools_ = nullptr;
     QTimer positionTimer_;
+#if defined(Q_OS_MACOS)
+    MacDrawingPanel* canvasPanel_ = nullptr;
+    MacDrawingPanel* toolsPanel_ = nullptr;
+#endif
 };
 
 QColor screenPenColor(int index);

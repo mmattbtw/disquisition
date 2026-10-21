@@ -175,6 +175,25 @@ void testEscapeFromAnotherControl() {
     CHECK(!stage->drawing("alice")->penActive());
 }
 
+void testEscapeFromPresenterWindows() {
+    QWidget window;
+    ScreenDrawing drawing;
+    PresenterOverlay overlay(ShareSource{}, &drawing, &window);
+    auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
+    CHECK(tools);
+    auto* control = tools->findChild<QPushButton*>();
+    CHECK(control);
+    drawing.setState(true, 1);
+    drawing.setPenActive(true);
+    QKeyEvent toolbarEscape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QApplication::sendEvent(control, &toolbarEscape);
+    CHECK(!drawing.penActive());
+    drawing.setPenActive(true);
+    QKeyEvent canvasEscape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QApplication::sendEvent(&overlay, &canvasEscape);
+    CHECK(!drawing.penActive());
+}
+
 void testClosingFullscreenRestoresEscape() {
     QWidget window;
     auto* layout = new QVBoxLayout(&window);
@@ -312,6 +331,7 @@ int main(int argc, char** argv) {
     testDragAndStopWatching();
     testAccessibleControls();
     testEscapeFromAnotherControl();
+    testEscapeFromPresenterWindows();
     testClosingFullscreenRestoresEscape();
     testClientOwnedDrawing();
     testDrawingHistoryLimitAndMissingPeer();

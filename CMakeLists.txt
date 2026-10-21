@@ -196,11 +196,15 @@ if(BUILD_DESKTOP_APP)
       disquisition_resolve_codesign_identity("${DISQUISITION_CODESIGN_IDENTITY}"
         DISQUISITION_RESOLVED_CODESIGN_IDENTITY)
       target_sources(desktop_screen PRIVATE
-        include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm)
+        include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm
+        include/desktop/mac_drawing_panel.h src/desktop/mac_drawing_panel.mm)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
-      set_source_files_properties(src/desktop/mac_screen_capture.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+      set_source_files_properties(
+        src/desktop/mac_screen_capture.mm src/desktop/mac_drawing_panel.mm
+        PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+      find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
       find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
       find_library(SCREENCAPTUREKIT_FRAMEWORK ScreenCaptureKit REQUIRED)
       find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
@@ -209,7 +213,7 @@ if(BUILD_DESKTOP_APP)
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
         ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       target_link_libraries(desktop_screen PRIVATE
-        ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
+        ${APPKIT_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
         OUTPUT_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
@@ -332,6 +336,14 @@ if(BUILD_TESTING AND TARGET desktop_screen)
   add_test(NAME screen_drawing_test COMMAND screen_drawing_test)
   set_tests_properties(screen_drawing_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+endif()
+
+# Run this explicitly in a macOS desktop session; the regular drawing test
+# remains headless so CI does not need access to WindowServer.
+if(BUILD_TESTING AND APPLE AND TARGET desktop_screen)
+  add_executable(mac_drawing_panel_test EXCLUDE_FROM_ALL test/mac_drawing_panel_test.mm)
+  target_compile_options(mac_drawing_panel_test PRIVATE -fobjc-arc)
+  target_link_libraries(mac_drawing_panel_test PRIVATE desktop_screen ${APPKIT_FRAMEWORK})
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_network)
