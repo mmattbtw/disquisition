@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "check.h"
+#include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
 
 namespace {
@@ -133,6 +134,7 @@ void testDragAndStopWatching() {
 
 void testAccessibleControls() {
     ScreenDrawing drawing;
+    ScreenDrawingSession session("alice", "alice", &drawing, true);
     DrawingControls controls(&drawing, true);
     QPushButton* allow = nullptr;
     for (auto* button : controls.findChildren<QPushButton*>()) {
@@ -148,10 +150,9 @@ void testAccessibleControls() {
     // Qt's accessible toggle action changes the checked state directly.
     allow->setChecked(true);
     CHECK(requests == 1);
-    CHECK(!drawing.enabled()); // waits for the server's permission state
-    drawing.setState(true, 1);
-    CHECK(allow->isChecked() && requests == 1); // no request loop on server updates
-    drawing.setState(false, 2);
+    CHECK(drawing.enabled()); // the presenting client applies permission immediately
+    CHECK(allow->isChecked() && requests == 1);
+    drawing.setState(false, drawing.epoch() + 1);
     CHECK(!allow->isChecked() && requests == 1);
 }
 
@@ -200,6 +201,108 @@ void testClosingFullscreenRestoresEscape() {
     CHECK(!stage->findChild<QShortcut*>()->isEnabled());
 }
 
+void testClientOwnedDrawing() {
+    ScreenDrawing own, viewer, late;
+    ScreenDrawingSession host("alice", "alice", &own, true);
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    ScreenDrawingSession lateGuest("carol", "alice", &late, false);
+    QObject::connect(&host, &ScreenDrawingSession::sendToPeer, &guest,
+                     [&](const QString& target, const chat::Message& message) {
+                         if (target == "bob")
+                             guest.receive("alice", message);
+                         else if (target == "carol")
+                             lateGuest.receive("alice", message);
+                         else
+                             CHECK(false);
+                     });
+    QObject::connect(&guest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString& target, const chat::Message& message) {
+                         CHECK(target == "alice");
+                         host.receive("bob", message);
+                     });
+    QObject::connect(&lateGuest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) {
+                         host.receive("carol", message);
+                     });
+    guest.start();
+    CHECK(!own.enabled() && !viewer.enabled());
+    CHECK(viewer.status().isEmpty()); // the owner confirmed drawing is off
+    own.permissionRequested(true);
+    CHECK(own.enabled() && viewer.enabled()); // no server acknowledgement
+    const auto epoch = own.epoch();
+    CHECK(epoch > 0 && epoch == viewer.epoch());
+    chat::ScreenDraw pen;
+    pen.epoch = epoch;
+    pen.id = 1;
+    pen.x1 = 500;
+    pen.x2 = 4000;
+    pen.y1 = 100;
+    pen.y2 = 5000;
+    viewer.segmentDrawn(pen);
+    CHECK(own.segments().size() == 1 && viewer.segments().size() == 1);
+    CHECK(own.segments()[0].author == "bob");
+    pen.sharer = "alice";
+    // A nonparticipant's strokes and another peer's permission updates are ignored.
+    host.receive("outsider", chat::screenDrawMessage(pen, false));
+    guest.receive("outsider", {chat::MsgType::ScreenDrawState, {"alice", "0", "1"}});
+    host.receive("bob", {chat::MsgType::ScreenDrawState, {"alice", "0", "1"}});
+    CHECK(own.enabled() && viewer.enabled() && own.segments().size() == 1);
+    // A duplicate proposal is not added or broadcast twice.
+    host.receive("bob", chat::screenDrawMessage(pen, false));
+    CHECK(own.segments().size() == 1);
+    lateGuest.start();
+    CHECK(late.enabled() && late.segments().size() == 1);
+    pen.id = 2;
+    own.segmentDrawn(pen);
+    CHECK(own.segments().size() == 2 && viewer.segments().size() == 2 &&
+          late.segments().size() == 2);
+    CHECK(viewer.segments()[1].author == "alice");
+    own.clearRequested();
+    CHECK(own.enabled() && own.epoch() != epoch);
+    CHECK(own.segments().isEmpty() && viewer.segments().isEmpty() && late.segments().isEmpty());
+    host.receive("bob", chat::screenDrawMessage(pen, false)); // delayed pre-clear event
+    CHECK(own.segments().isEmpty());
+    guest.stop();
+    pen.epoch = own.epoch();
+    pen.id = 3;
+    host.receive("bob", chat::screenDrawMessage(pen, false));
+    CHECK(own.segments().isEmpty()); // unsubscribed viewers cannot draw
+    own.segmentDrawn(pen);
+    CHECK(late.segments().size() == 1 && viewer.segments().isEmpty());
+    own.permissionRequested(false);
+    CHECK(!own.enabled() && !late.enabled() && own.segments().isEmpty() &&
+          late.segments().isEmpty());
+    guest.start();
+    CHECK(!viewer.enabled() && viewer.epoch() == own.epoch());
+    own.permissionRequested(true);
+    host.peerChanged("bob", false);
+    own.clearRequested();
+    guest.peerChanged("alice", true);
+    CHECK(viewer.epoch() == own.epoch()); // link recovery resubscribes and resynchronizes
+}
+
+void testDrawingHistoryLimitAndMissingPeer() {
+    ScreenDrawing own;
+    ScreenDrawingSession host("alice", "alice", &own, true);
+    own.permissionRequested(true);
+    const auto epoch = own.epoch();
+    chat::ScreenDraw segment;
+    for (std::size_t i = 0; i <= chat::kMaxDrawSegments; ++i) {
+        segment.id = static_cast<std::uint32_t>(i);
+        own.segmentDrawn(segment);
+    }
+    CHECK(own.enabled() && own.epoch() != epoch && own.segments().isEmpty());
+    ScreenDrawing viewer;
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    guest.start(); // no compatible client/relay responds
+    CHECK(!viewer.status().isEmpty());
+    guest.expireRequest();
+    CHECK(!viewer.enabled() && viewer.status().contains("unavailable"));
+    // An unrelated peer cannot acknowledge the request or enable the pen.
+    guest.receive("mallory", {chat::MsgType::ScreenDrawState, {"alice", "1", "42"}});
+    CHECK(!viewer.enabled());
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -210,5 +313,7 @@ int main(int argc, char** argv) {
     testAccessibleControls();
     testEscapeFromAnotherControl();
     testClosingFullscreenRestoresEscape();
+    testClientOwnedDrawing();
+    testDrawingHistoryLimitAndMissingPeer();
     std::puts("screen_drawing_test: ok");
 }

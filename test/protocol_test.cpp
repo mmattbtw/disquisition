@@ -258,6 +258,40 @@ void testPeerImage() {
         Message{MsgType::PeerChat, {"bob", "1", "pink", "1", "0", "1", "x"}}, chunk));
 }
 
+void testPeerData() {
+    const chat::PeerData original{"alice", "bob", "screen-drawing", std::string("x\0y", 3)};
+    const Message message = chat::peerDataMessage(original);
+    chat::PeerData parsed;
+    CHECK(chat::parsePeerData(message, parsed));
+    CHECK(parsed.sender == "alice" && parsed.target == "bob" && parsed.channel == "screen-drawing");
+    CHECK(parsed.data == original.data);
+    Message largest = message;
+    largest.fields[2] = std::string(64, 'c');
+    largest.fields[3] = std::string(chat::kMaxPeerDataBytes, 'x');
+    CHECK(chat::parsePeerData(largest, parsed));
+    std::string wire = chat::encode(largest);
+    Message decoded;
+    CHECK(chat::decode(wire, decoded) == DecodeStatus::Ok);
+    CHECK(decoded.fields == largest.fields);
+    for (std::size_t field = 0; field < 4; ++field) {
+        Message invalid = message;
+        invalid.fields[field].clear();
+        CHECK(!chat::parsePeerData(invalid, parsed));
+        invalid = message;
+        const std::size_t limit = field < 2    ? chat::kMaxNameLength
+                                  : field == 2 ? 64
+                                               : chat::kMaxPeerDataBytes;
+        invalid.fields[field] = std::string(limit + 1, 'x');
+        CHECK(!chat::parsePeerData(invalid, parsed));
+    }
+    Message invalid = message;
+    invalid.type = MsgType::PeerChat;
+    CHECK(!chat::parsePeerData(invalid, parsed));
+    invalid = message;
+    invalid.fields.push_back("extra");
+    CHECK(!chat::parsePeerData(invalid, parsed));
+}
+
 void testScreenDraw() {
     chat::ScreenDraw draw;
     const Message valid{MsgType::ScreenDraw, {"alice", "7", "12", "0", "10000", "123", "456", "5"}};
@@ -314,6 +348,7 @@ int main() {
     testPeerAnnouncement();
     testPeerImage();
     testScreenDraw();
+    testPeerData();
     std::puts("protocol_test: ok");
     return 0;
 }

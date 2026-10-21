@@ -22,6 +22,8 @@ public:
     void setPenActive(bool active);
     void setColor(int color);
     void setPresenterOverlayAvailable(bool available);
+    void setStatus(const QString& status);
+    QString status() const { return status_; }
     bool presenterOverlayAvailable() const { return presenterOverlayAvailable_; }
     bool enabled() const { return enabled_; }
     bool penActive() const { return penActive_; }
@@ -41,6 +43,7 @@ private:
     bool enabled_ = false;
     bool penActive_ = false;
     bool presenterOverlayAvailable_ = true;
+    QString status_;
     int color_ = 0;
     std::int64_t epoch_ = 0;
     QList<chat::ScreenDraw> segments_;

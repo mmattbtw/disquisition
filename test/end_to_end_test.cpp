@@ -381,116 +381,81 @@ void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
     CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
 }
 
-// Annotations use the real server and relay. State replies fence earlier
-// messages on the same TCP connection, avoiding sleeps for rejection checks.
-void testScreenDrawing(std::uint16_t serverPort, std::uint16_t relayPort) {
+// Drawing is an opaque peer channel. The discovery server only introduces
+// peers; no annotation messages go to it, and it owns no drawing state.
+void testRelayPeerData(std::uint16_t serverPort, std::uint16_t relayPort) {
     using chat::Message;
     using chat::MsgType;
-    using Fields = std::vector<std::string>;
-    RawSession owner(serverPort), viewer(relayPort), outsider(serverPort);
-    signIn(owner, "draw_owner");
-    signIn(viewer, "draw_viewer");
-    signIn(outsider, "draw_outsider");
-    const auto stateWithoutDraw = [](RawSession& session) {
-        Message state;
-        CHECK(waitFor([&] {
-            Message message;
-            while (session.connection.poll(message)) {
-                CHECK(message.type != MsgType::ScreenDraw);
-                if (message.type == MsgType::ScreenDrawState) {
-                    state = message;
-                    return true;
-                }
+    RawSession alice(relayPort), bob(relayPort), bystander(relayPort);
+    signIn(alice, "data_alice");
+    signIn(bob, "data_bob");
+    signIn(bystander, "data_bystander");
+    const std::string payload("opaque\0drawing bytes", 20);
+    const Message forged = chat::peerDataMessage(
+        {"forged_sender", "data_bob", "screen-drawing", payload});
+    Message received;
+    CHECK(waitFor([&] {
+        CHECK(alice.connection.send(forged));
+        Message message;
+        while (bob.connection.poll(message)) {
+            if (message.type == MsgType::PeerData) {
+                received = message;
+                return true;
             }
-            return false;
-        }));
-        return state;
-    };
-    const auto watch = [](RawSession& session, bool enabled) {
-        CHECK(session.connection.send({MsgType::ScreenWatch, {"draw_owner", enabled ? "1" : "0"}}));
-    };
-    CHECK(owner.connection.send({MsgType::ScreenShare, {"1"}}));
-    Message state = stateWithoutDraw(owner);
-    CHECK(state.fields[1] == "0");
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-    auto pen = [&](const std::string& epoch, const std::string& id = "1") {
-        return Message{MsgType::ScreenDraw,
-                       {"draw_owner", epoch, id, "0", "100", "10000", "9999", "2"}};
-    };
-    // Drawing starts disabled. A repeated watch returns an empty snapshot.
-    CHECK(viewer.connection.send(pen(state.fields[2])));
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-    CHECK(owner.connection.send({MsgType::ScreenDrawState, {"1"}}));
-    state = stateWithoutDraw(owner);
-    CHECK(state.fields[1] == "1");
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
+        }
+        return false;
+    }));
+    chat::PeerData data;
+    CHECK(chat::parsePeerData(received, data));
+    CHECK(data.sender == "data_alice" && data.target == "data_bob");
+    CHECK(data.channel == "screen-drawing" && data.data == payload);
+    // Targeting is generic; the relay does not interpret the channel or bytes.
+    CHECK(bob.connection.send(
+        chat::peerDataMessage({"spoof", "data_alice", "another-channel", "reply"})));
+    CHECK(chat::parsePeerData(alice.next(MsgType::PeerData), data));
+    CHECK(data.sender == "data_bob" && data.data == "reply" && data.channel == "another-channel");
+    // The reply fences forwarding of the first message; nobody else receives it.
+    Message unexpected;
+    while (bystander.connection.poll(unexpected))
+        CHECK(unexpected.type != MsgType::PeerData);
 
-    // An uninvited participant cannot draw, enable drawing for another user,
-    // or clear their ink. It joins afterwards to fence these attempts.
-    CHECK(outsider.connection.send(pen(state.fields[2])));
-    CHECK(outsider.connection.send({MsgType::ScreenDrawState, {"0"}}));
-    CHECK(outsider.connection.send({MsgType::ScreenDrawClear, {}}));
-    watch(outsider, true);
-    CHECK(stateWithoutDraw(outsider).fields == state.fields);
-    CHECK(viewer.connection.send(pen(state.fields[2])));
-    const auto received = owner.next(MsgType::ScreenDraw);
-    CHECK(received.fields == (Fields{"draw_owner", state.fields[2], "draw_viewer", "1", "0", "100",
-                                     "10000", "9999", "2"}));
-    CHECK(viewer.next(MsgType::ScreenDraw).fields == received.fields);
-    CHECK(outsider.next(MsgType::ScreenDraw).fields == received.fields);
-
-    // Late viewers receive the permission state and existing ink through the relay.
-    RawSession late(relayPort);
-    signIn(late, "draw_late");
-    watch(late, true);
-    CHECK(stateWithoutDraw(late).fields == state.fields);
-    CHECK(late.next(MsgType::ScreenDraw).fields == received.fields);
-    CHECK(owner.connection.send(pen(state.fields[2], "2")));
-    const auto own = owner.next(MsgType::ScreenDraw);
-    CHECK(own.fields[2] == "draw_owner");
-    CHECK(viewer.next(MsgType::ScreenDraw).fields == own.fields);
-    CHECK(outsider.next(MsgType::ScreenDraw).fields == own.fields);
-    CHECK(late.next(MsgType::ScreenDraw).fields == own.fields);
-
-    // Clearing advances the epoch. Stale and malformed events cannot restore ink.
-    const std::string oldEpoch = state.fields[2];
-    CHECK(owner.connection.send({MsgType::ScreenDrawClear, {}}));
-    state = stateWithoutDraw(owner);
-    CHECK(state.fields[2] != oldEpoch && state.fields[1] == "1");
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-    CHECK(stateWithoutDraw(outsider).fields == state.fields);
-    CHECK(stateWithoutDraw(late).fields == state.fields);
-    CHECK(viewer.connection.send(pen(oldEpoch)));
-    auto malformed = pen(state.fields[2]);
-    malformed.fields[3] = "10001";
-    CHECK(viewer.connection.send(malformed));
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-    // A viewer cannot disable drawing, even while watching.
-    CHECK(viewer.connection.send({MsgType::ScreenDrawState, {"0"}}));
-    CHECK(viewer.connection.send({MsgType::ScreenDrawClear, {}}));
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-
-    CHECK(owner.connection.send({MsgType::ScreenDrawState, {"0"}}));
-    state = stateWithoutDraw(owner);
-    CHECK(state.fields[1] == "0");
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-    CHECK(stateWithoutDraw(outsider).fields == state.fields);
-    CHECK(stateWithoutDraw(late).fields == state.fields);
-    CHECK(viewer.connection.send(pen(state.fields[2])));
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == state.fields);
-
-    // New shares start disabled with a fresh epoch and no previous viewers.
-    CHECK(owner.connection.send({MsgType::ScreenShare, {"0"}}));
-    CHECK(owner.connection.send({MsgType::ScreenShare, {"1"}}));
-    const Message restarted = stateWithoutDraw(owner);
-    CHECK(restarted.fields[1] == "0" && restarted.fields[2] != state.fields[2]);
-    watch(viewer, true);
-    CHECK(stateWithoutDraw(viewer).fields == restarted.fields);
+    // A real peer mesh exchanges the same opaque data with a hosted user.
+    chat::PeerNetwork direct;
+    std::string error;
+    CHECK(direct.start(0, error));
+    direct.setMyName("data_direct");
+    RawSession roster(serverPort);
+    CHECK(roster.connection.send(
+        {MsgType::Login, {"data_direct", std::to_string(direct.port()), ""}}));
+    CHECK(roster.next(MsgType::LoginOk).fields[0] == "data_direct");
+    chat::PeerAddress address;
+    CHECK(waitFor([&] {
+        Message message;
+        while (roster.connection.poll(message)) {
+            if (chat::parsePeerAddress(message, address))
+                direct.addPeer(address.name, address.host, address.port, address.advertised);
+        }
+        chat::PeerNetwork::Event event;
+        while (direct.poll(event)) {
+        }
+        return direct.connectedTo("data_alice");
+    }));
+    CHECK(direct.sendData("data_alice", "screen-drawing", "direct to relay"));
+    CHECK(chat::parsePeerData(alice.next(MsgType::PeerData), data));
+    CHECK(data.sender == "data_direct" && data.data == "direct to relay");
+    CHECK(alice.connection.send(
+        chat::peerDataMessage({"spoof", "data_direct", "screen-drawing", "relay to direct"})));
+    bool delivered = false;
+    CHECK(waitFor([&] {
+        chat::PeerNetwork::Event event;
+        while (direct.poll(event)) {
+            if (event.kind == chat::PeerNetwork::Event::Kind::Data) {
+                CHECK(event.data.sender == "data_alice" && event.data.data == "relay to direct");
+                delivered = true;
+            }
+        }
+        return delivered;
+    }));
 }
 
 // Image chunks cross the mesh into and out of the relay. The relay stamps
@@ -599,7 +564,7 @@ int main(int argc, char** argv) {
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
     testScreenSharing(gServer.port, gRelay.port);
-    testScreenDrawing(gServer.port, gRelay.port);
+    testRelayPeerData(gServer.port, gRelay.port);
     testRelayDuplicateNames(gRelay.port);
     testRelayImages(gRelay.port);
 

@@ -284,17 +284,6 @@ bool Server::handleFrames(Client& client) {
             case MsgType::ScreenFrame:
                 handleScreenFrame(client, message);
                 break;
-            case MsgType::ScreenDrawState:
-                handleScreenDrawState(client, message);
-                break;
-            case MsgType::ScreenDraw:
-                handleScreenDraw(client, message);
-                break;
-            case MsgType::ScreenDrawClear:
-                if (client.authenticated && client.sharingScreen && message.fields.empty()) {
-                    resetScreenDrawing(client);
-                }
-                break;
             default:
                 reject(client, "unexpected message");
                 break;
@@ -441,14 +430,10 @@ void Server::handleScreenShare(Client& client, const Message& message) {
     }
     client.sharingScreen = sharing;
     if (sharing) {
-        client.drawingEnabled = false;
-        resetScreenDrawing(client);
         LOG_INFO("{} started sharing their screen", client.name);
         broadcast(Message{MsgType::ScreenShare, {client.name, "1"}}, &client);
     }
     else {
-        client.drawingEnabled = false;
-        client.drawing.clear();
         LOG_INFO("{} stopped sharing their screen", client.name);
         endScreenShare(client);
     }
@@ -474,9 +459,6 @@ void Server::handleScreenWatch(Client& client, const Message& message) {
         if (&other != &client && other.authenticated && other.sharingScreen &&
             other.name == sharer) {
             client.watching.insert(sharer);
-            send(client, screenDrawingState(other));
-            for (const Message& segment : other.drawing)
-                send(client, segment);
             return;
         }
     }
@@ -498,56 +480,6 @@ void Server::handleScreenFrame(Client& client, const Message& message) {
         if (viewer.watching.count(client.name) != 0 && viewer.out.size() < kMaxScreenBacklog) {
             viewer.out.append(encoded);
         }
-    }
-}
-
-Message Server::screenDrawingState(const Client& client) const {
-    return Message{MsgType::ScreenDrawState,
-                   {client.name, client.drawingEnabled ? "1" : "0",
-                    std::to_string(client.drawingEpoch)}};
-}
-
-void Server::sendToScreenParticipants(Client& sharer, const Message& message) {
-    for (Client& recipient : clients_) {
-        if (&recipient == &sharer || recipient.watching.count(sharer.name))
-            send(recipient, message);
-    }
-}
-
-void Server::resetScreenDrawing(Client& client) {
-    client.drawing.clear();
-    client.drawingEpoch = ++nextDrawingEpoch_;
-    sendToScreenParticipants(client, screenDrawingState(client));
-}
-
-void Server::handleScreenDrawState(Client& client, const Message& message) {
-    if (!client.authenticated || !client.sharingScreen || message.fields.size() != 1 ||
-        (message.fields[0] != "0" && message.fields[0] != "1"))
-        return;
-    client.drawingEnabled = message.fields[0] == "1";
-    resetScreenDrawing(client);
-}
-
-void Server::handleScreenDraw(Client& client, const Message& message) {
-    ScreenDraw draw;
-    if (!client.authenticated || !parseScreenDraw(message, false, draw))
-        return;
-    for (Client& sharer : clients_) {
-        if (!sharer.sharingScreen || !sharer.drawingEnabled || sharer.name != draw.sharer ||
-            sharer.drawingEpoch != draw.epoch ||
-            (&client != &sharer && !client.watching.count(sharer.name)))
-            continue;
-        // Bound memory and replay size. A full drawing starts a fresh canvas;
-        // old in-flight pen events are discarded by the new epoch.
-        if (sharer.drawing.size() >= kMaxDrawSegments) {
-            resetScreenDrawing(sharer);
-            return;
-        }
-        draw.author = client.name;
-        Message segment = screenDrawMessage(draw, true);
-        sharer.drawing.push_back(segment);
-        sendToScreenParticipants(sharer, segment);
-        return;
     }
 }
 

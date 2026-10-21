@@ -97,9 +97,6 @@ public:
 signals:
     void watchRequested(const QString& name);
     void stopWatchingRequested(const QString& name);
-    void drawingPermissionRequested(bool enabled);
-    void drawingClearRequested();
-    void segmentDrawn(const QString& sharer, const chat::ScreenDraw& segment);
     // The first share appeared on an empty, hidden stage.
     void opened();
 

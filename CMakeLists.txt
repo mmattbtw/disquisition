@@ -127,9 +127,11 @@ if(BUILD_DESKTOP_APP)
 
     add_library(desktop_screen STATIC
       include/desktop/screen_drawing.h
+      include/desktop/screen_drawing_session.h
       include/desktop/screen_stage.h
       include/desktop/share_source.h
       src/desktop/screen_drawing.cpp
+      src/desktop/screen_drawing_session.cpp
       src/desktop/screen_stage.cpp
       src/desktop/share_source.cpp)
     set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
@@ -330,4 +332,12 @@ if(BUILD_TESTING AND TARGET desktop_screen)
   add_test(NAME screen_drawing_test COMMAND screen_drawing_test)
   set_tests_properties(screen_drawing_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_network)
+  add_executable(screen_drawing_network_test test/screen_drawing_network_test.cpp)
+  target_link_libraries(screen_drawing_network_test PRIVATE desktop_screen chat_network)
+  add_test(NAME screen_drawing_network_test
+    COMMAND screen_drawing_network_test $<TARGET_FILE:server> $<TARGET_FILE:relay>)
+  set_tests_properties(screen_drawing_network_test PROPERTIES TIMEOUT 60)
 endif()
