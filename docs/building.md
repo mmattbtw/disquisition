@@ -94,6 +94,23 @@ cmake --build build --config Release --target disquisition-desktop
 The [desktop workflow](../.github/workflows/desktop.yml) has the full dependency
 setup for all three platforms.
 
+### Native macOS drawing test
+
+The regular drawing tests use Qt's offscreen platform. To also check the
+presenter panels against AppKit, run this from a macOS desktop session:
+
+```sh
+cmake --build build --target mac_drawing_panel_test
+./build/mac_drawing_panel_test
+```
+
+This test checks that enabling the overlay and pen leaves the app inactive,
+forwards native strokes to the shared drawing, and restores click-through on
+Escape. It briefly shows native windows, so it runs separately from `ctest`.
+For a manual check, put another app over Disquisition, enable the presenter
+pen, draw, change colors, and press Escape. The client should stay behind the
+shared app, and Escape should let clicks reach that app again.
+
 ### macOS signing
 
 On macOS, local builds automatically use the first valid Apple Development

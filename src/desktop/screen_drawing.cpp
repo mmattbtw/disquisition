@@ -1,12 +1,18 @@
 #include "desktop/screen_drawing.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QSignalBlocker>
+
+#if defined(Q_OS_MACOS)
+#    include "desktop/mac_drawing_panel.h"
+#endif
 
 #if defined(Q_OS_WIN)
 #    include <qt_windows.h>
@@ -214,8 +220,10 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
                                    QWidget* parent) : DrawingCanvas(parent), source_(source) {
     setObjectName("screenDrawingOverlay");
     setWindowTitle("Screen drawing overlay");
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
-                   Qt::WindowTransparentForInput);
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+#if !defined(Q_OS_MACOS)
+    setWindowFlag(Qt::WindowTransparentForInput);
+#endif
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
     setAttribute(Qt::WA_MacAlwaysShowToolWindow);
@@ -225,6 +233,8 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
     tools_->setObjectName("screenDrawingToolbar");
     tools_->setWindowTitle("Screen drawing");
     tools_->setAttribute(Qt::WA_MacAlwaysShowToolWindow);
+    tools_->setAttribute(Qt::WA_ShowWithoutActivating);
+    qApp->installEventFilter(this);
     auto* layout = new QHBoxLayout(tools_);
     layout->setContentsMargins(10, 8, 10, 8);
     layout->addWidget(new DrawingControls(drawing, true, tools_));
@@ -233,6 +243,14 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
                           "#f3f4f6; } QPushButton, QComboBox { background: #343943; padding: 5px "
                           "8px; border: 1px solid #606874; border-radius: 4px; } "
                           "QPushButton:checked { background: #365e51; border-color: #67e8a5; }");
+#if defined(Q_OS_MACOS)
+    if (QGuiApplication::platformName() == "cocoa") {
+        canvasPanel_ = new MacDrawingPanel(this, drawing);
+        connect(drawing, &ScreenDrawing::updated, canvasPanel_, &MacDrawingPanel::update);
+        connect(drawing, &ScreenDrawing::changed, canvasPanel_, &MacDrawingPanel::update);
+        toolsPanel_ = new MacDrawingPanel(tools_);
+    }
+#endif
     connect(drawing, &ScreenDrawing::changed, this, &PresenterOverlay::refresh);
     positionTimer_.setInterval(100);
     connect(&positionTimer_, &QTimer::timeout, this, &PresenterOverlay::refresh);
@@ -248,25 +266,59 @@ void PresenterOverlay::refresh() {
     const QRect bounds = shareSourceSupportsOverlay(source_) ? shareSourceGeometry(source_)
                                                              : QRect();
     if (!drawing() || !drawing()->enabled() || bounds.isEmpty()) {
+#if defined(Q_OS_MACOS)
+        if (canvasPanel_) {
+            canvasPanel_->hide();
+            toolsPanel_->hide();
+            return;
+        }
+#endif
         hide();
         tools_->hide();
         return;
     }
+    const bool transparent = !drawing()->penActive();
+    tools_->adjustSize();
+    const QRect toolsBounds(bounds.center().x() - tools_->width() / 2, bounds.top() + 12,
+                            tools_->width(), tools_->height());
+#if defined(Q_OS_MACOS)
+    if (canvasPanel_) {
+        canvasPanel_->show(bounds, transparent);
+        toolsPanel_->show(toolsBounds);
+        return;
+    }
+#endif
     if (geometry() != bounds)
         setGeometry(bounds);
-    const bool transparent = !drawing()->penActive();
     if (windowFlags().testFlag(Qt::WindowTransparentForInput) != transparent) {
         setWindowFlag(Qt::WindowTransparentForInput, transparent);
     }
-    show();
-    tools_->adjustSize();
-    tools_->move(bounds.center().x() - tools_->width() / 2, bounds.top() + 12);
-    tools_->show();
+    if (!isVisible())
+        show();
+    tools_->move(toolsBounds.topLeft());
+    if (!tools_->isVisible())
+        tools_->show();
 #if defined(Q_OS_WIN)
     SetWindowDisplayAffinity(reinterpret_cast<HWND>(winId()),
                              0x00000011 /* WDA_EXCLUDEFROMCAPTURE */);
     SetWindowDisplayAffinity(reinterpret_cast<HWND>(tools_->winId()), 0x00000011);
 #endif
+}
+
+bool PresenterOverlay::eventFilter(QObject* watched, QEvent* event) {
+    // Nonactivating macOS panels can receive keys while another application
+    // stays active, so application-wide Qt shortcuts are not sufficient here.
+    const auto* widget = qobject_cast<QWidget*>(watched);
+    if (widget && (widget->window() == this || widget->window() == tools_) &&
+        drawing() && drawing()->penActive() &&
+        (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) &&
+        static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+        if (event->type() == QEvent::KeyPress)
+            drawing()->setPenActive(false);
+        event->accept();
+        return true;
+    }
+    return DrawingCanvas::eventFilter(watched, event);
 }
 
 void PresenterOverlay::paintEvent(QPaintEvent*) {
