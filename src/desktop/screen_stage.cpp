@@ -197,14 +197,6 @@ void ScreenStage::addStream(const QString& name, bool own) {
     }
     auto* tile = new StreamTile(name, own, this);
     connect(tile->drawing(), &ScreenDrawing::changed, this, &ScreenStage::refreshEscapeShortcut);
-    connect(tile->drawing(), &ScreenDrawing::segmentDrawn, this,
-            [this, name](const chat::ScreenDraw& segment) { emit segmentDrawn(name, segment); });
-    if (own) {
-        connect(tile->drawing(), &ScreenDrawing::permissionRequested, this,
-                &ScreenStage::drawingPermissionRequested);
-        connect(tile->drawing(), &ScreenDrawing::clearRequested, this,
-                &ScreenStage::drawingClearRequested);
-    }
     connect(tile, &StreamTile::watchClicked, this, [this, name] { emit watchRequested(name); });
     connect(tile, &StreamTile::stopWatchingClicked, this,
             [this, name] { emit stopWatchingRequested(name); });

@@ -361,8 +361,6 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::VoiceState:
         case MsgType::ScreenShare:
         case MsgType::ScreenFrame:
-        case MsgType::ScreenDrawState:
-        case MsgType::ScreenDraw:
             sendToClient(user, message);
             break;
 
@@ -404,13 +402,17 @@ void Relay::handleClientMessage(User& user, const Message& message) {
         case MsgType::ScreenShare:
         case MsgType::ScreenWatch:
         case MsgType::ScreenFrame:
-        case MsgType::ScreenDrawState:
-        case MsgType::ScreenDraw:
-        case MsgType::ScreenDrawClear:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }
             break;
+
+        case MsgType::PeerData: {
+            PeerData data;
+            if (parsePeerData(message, data))
+                user.peers.sendData(data.target, data.channel, data.data);
+            break;
+        }
 
         case MsgType::PeerChat: {
             // The mesh stamps the user's own name on outgoing chat.
@@ -445,10 +447,15 @@ void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
         case PeerNetwork::Event::Kind::Image:
             sendToClient(user, peerImageMessage(event.image));
             break;
+        case PeerNetwork::Event::Kind::Data:
+            sendToClient(user, peerDataMessage(event.data));
+            break;
         case PeerNetwork::Event::Kind::Join:
+            sendToClient(user, Message{MsgType::PeerLink, {event.name, "1"}});
             LOG_INFO("{}: mesh link up with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Leave:
+            sendToClient(user, Message{MsgType::PeerLink, {event.name, "0"}});
             LOG_INFO("{}: mesh link down with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Note:

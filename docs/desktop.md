@@ -138,9 +138,20 @@ it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
-Drawing also needs updated desktop clients, server and relay. Annotation
-events travel through the server and relay with the same privacy limits as
-the video. They are kept in memory only for the current share.
+Drawing needs updated desktop clients and, for relayed participants, an
+updated relay. A server that already supports screen sharing needs no
+drawing update. The sharing client owns drawing permissions and history,
+validates incoming strokes and sends the current drawing to new viewers.
+Choosing allow drawing takes effect locally immediately. Annotations travel
+over direct peer connections or the relay's generic peer-data channel,
+separately from video. The discovery server receives no annotation events
+and stores no drawing state. Peer data is not encrypted. Drawing history
+is kept only in the sharing client's memory for the current share.
+
+If the sharing client or relay does not support drawing, the viewer shows
+"drawing unavailable: update both apps and the relay" instead of silently
+waiting for permission. Clients resubscribe and receive a fresh drawing
+snapshot when their peer link reconnects.
 
 On macOS, allow the app's channel name, such as `disquisition development`,
 in System Settings > Privacy & Security > Screen

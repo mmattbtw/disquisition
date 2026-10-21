@@ -55,6 +55,11 @@ void ScreenDrawing::setPresenterOverlayAvailable(bool available) {
     emit changed();
 }
 
+void ScreenDrawing::setStatus(const QString& status) {
+    status_ = status;
+    emit changed();
+}
+
 DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent) :
     QWidget(parent) {
     auto* row = new QHBoxLayout(this);
@@ -98,9 +103,10 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
         colors->setVisible(drawing->enabled());
         clear->setEnabled(drawing->enabled());
         const bool previewOnly = owner && !drawing->presenterOverlayAvailable();
-        hint->setText(previewOnly && drawing->enabled() ? "draw in the video preview"
-                                                        : "drawing is off");
-        hint->setVisible(!drawing->enabled() || previewOnly);
+        hint->setText(!drawing->status().isEmpty()        ? drawing->status()
+                      : previewOnly && drawing->enabled() ? "draw in the video preview"
+                                                          : "drawing is off");
+        hint->setVisible(!drawing->enabled() || previewOnly || !drawing->status().isEmpty());
     };
     connect(drawing, &ScreenDrawing::changed, this, refresh);
     refresh();

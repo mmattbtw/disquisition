@@ -16,6 +16,7 @@
 #include "desktop/image_transfer.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
+#include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
 #include "desktop/voice_engine.h"
 
@@ -113,6 +114,9 @@ private:
     void stopWatchingStream(const QString& name);
     void endRemoteStream(const QString& name);
     void endRemoteStreams();
+    void startDrawingSession(const QString& sharer, bool owner);
+    void receivePeerData(const chat::Message& message, const QString& linkedPeer = {});
+    void drawingPeerChanged(const QString& peer, bool connected);
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -188,6 +192,8 @@ private:
     ScreenCapture screenCapture_;
     bool sharingScreen_ = false;
     std::unique_ptr<PresenterOverlay> presenterOverlay_;
+    std::optional<ShareSource> sharedSource_;
+    std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawingSessions_;
     std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;

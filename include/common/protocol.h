@@ -57,14 +57,19 @@ enum class MsgType : std::uint8_t {
     // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
     PeerImage = 26,
 
-    // Owner -> server: [enabled 0|1]; server -> owner/viewers: [sharer, enabled, epoch].
-    // Every state message resets the drawing, including snapshots before replay.
+    // Drawing messages are client-owned and travel inside PeerData, never to
+    // the discovery server. State resets the drawing before any history replay.
+    // Owner -> viewer: [sharer, enabled 0|1, epoch].
     ScreenDrawState = 27,
-    // Client: [sharer, epoch, segment id, x1, y1, x2, y2, color];
-    // server inserts author at index 2. Author + segment id deduplicates local previews.
+    // Viewer -> owner: [sharer, epoch, segment id, x1, y1, x2, y2, color];
+    // owner -> viewers inserts author at index 2. Author + id deduplicates previews.
     // Coordinates are normalized to 0..10000, color is an index in the pen palette.
     ScreenDraw = 28,
-    ScreenDrawClear = 29, // owner -> server: []
+    ScreenDrawWatch = 29, // viewer -> owner: [sharer, 1 subscribe | 0 unsubscribe]
+    // Generic targeted peer channel: [sender, target, channel, binary payload].
+    // The relay stamps sender using the established peer/client identity.
+    PeerData = 30,
+    PeerLink = 31, // relay -> client: [peer, connected 0|1], for resuming peer channels
 };
 
 struct Message {
@@ -73,6 +78,7 @@ struct Message {
 };
 
 constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
+constexpr std::size_t kMaxPeerDataBytes = kMaxFrameSize - 256;
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
 // Image chunks leave room for the header fields inside kMaxFrameSize.
@@ -141,6 +147,15 @@ struct ImageChunk {
 bool parsePeerImage(const Message& message, ImageChunk& out);
 Message peerImageMessage(const ImageChunk& chunk);
 
+struct PeerData {
+    std::string sender;
+    std::string target;
+    std::string channel;
+    std::string data;
+};
+bool parsePeerData(const Message& message, PeerData& out);
+Message peerDataMessage(const PeerData& data);
+
 constexpr int kDrawCoordinateMax = 10000;
 constexpr int kPenColorCount = 6;
 constexpr std::size_t kMaxDrawSegments = 4096;
@@ -152,8 +167,8 @@ struct ScreenDraw {
     int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
     int color = 0;
 };
-bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out);
-Message screenDrawMessage(const ScreenDraw& draw, bool fromServer);
+bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out);
+Message screenDrawMessage(const ScreenDraw& draw, bool fromOwner);
 
 struct PeerAddress {
     std::string name;

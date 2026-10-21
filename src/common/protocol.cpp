@@ -238,8 +238,24 @@ Message peerImageMessage(const ImageChunk& chunk) {
                     std::to_string(chunk.count), chunk.data}};
 }
 
-bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out) {
-    if (message.type != MsgType::ScreenDraw || message.fields.size() != (fromServer ? 9 : 8)) {
+bool parsePeerData(const Message& message, PeerData& out) {
+    if (message.type != MsgType::PeerData || message.fields.size() != 4)
+        return false;
+    const auto& fields = message.fields;
+    if (fields[0].empty() || fields[0].size() > kMaxNameLength || fields[1].empty() ||
+        fields[1].size() > kMaxNameLength || fields[2].empty() || fields[2].size() > 64 ||
+        fields[3].empty() || fields[3].size() > kMaxPeerDataBytes)
+        return false;
+    out = PeerData{fields[0], fields[1], fields[2], fields[3]};
+    return true;
+}
+
+Message peerDataMessage(const PeerData& data) {
+    return Message{MsgType::PeerData, {data.sender, data.target, data.channel, data.data}};
+}
+
+bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out) {
+    if (message.type != MsgType::ScreenDraw || message.fields.size() != (fromOwner ? 9 : 8)) {
         return false;
     }
     ScreenDraw draw;
@@ -247,11 +263,11 @@ bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out) {
     if (draw.sharer.empty() || draw.sharer.size() > kMaxNameLength ||
         !parseInt64(message.fields[1], draw.epoch) || draw.epoch <= 0)
         return false;
-    const std::size_t idIndex = fromServer ? 3 : 2;
+    const std::size_t idIndex = fromOwner ? 3 : 2;
     if (!parseU32(message.fields[idIndex], draw.id))
         return false;
     const std::size_t start = idIndex + 1;
-    if (fromServer)
+    if (fromOwner)
         draw.author = message.fields[2];
     int* values[] = {&draw.x1, &draw.y1, &draw.x2, &draw.y2, &draw.color};
     for (std::size_t i = 0; i < 5; ++i) {
@@ -266,9 +282,9 @@ bool parseScreenDraw(const Message& message, bool fromServer, ScreenDraw& out) {
     return true;
 }
 
-Message screenDrawMessage(const ScreenDraw& draw, bool fromServer) {
+Message screenDrawMessage(const ScreenDraw& draw, bool fromOwner) {
     Message message{MsgType::ScreenDraw, {draw.sharer, std::to_string(draw.epoch)}};
-    if (fromServer)
+    if (fromOwner)
         message.fields.push_back(draw.author);
     message.fields.push_back(std::to_string(draw.id));
     for (int value : {draw.x1, draw.y1, draw.x2, draw.y2, draw.color}) {
