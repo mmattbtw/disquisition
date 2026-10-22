@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QMainWindow>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QThreadPool>
@@ -95,6 +96,7 @@ private:
     void openSavedMessages();
     void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
+    void showMemberMenu(const QPoint& position);
     void refreshAudioDevices();
     void startJoining();
     void joinVoice();
@@ -194,6 +196,7 @@ private:
     std::unique_ptr<PresenterOverlay> presenterOverlay_;
     std::optional<ShareSource> sharedSource_;
     std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawingSessions_;
+    QSet<QString> drawingBans_;
     std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;

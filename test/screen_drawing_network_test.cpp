@@ -156,6 +156,27 @@ int main(int argc, char** argv) {
         late.poll();
         return late.drawing.segments().size() == 601;
     }));
+    owner.session.setBanned("viewer", true);
+    CHECK(waitFor([&] { pump(); late.poll(); return viewer.drawing.banned(); }));
+    CHECK(!late.drawing.banned() && late.drawing.drawingAllowed());
+    CHECK(viewer.drawing.enabled()); // the ban does not stop watching
+    segment.id = 55; segment.stroke = 55; segment.sharer = "presenter";
+    segment.epoch = owner.drawing.epoch();
+    // Send through the actual relay while bypassing the local drawing controls.
+    viewer.session.sendToPeer("presenter", chat::screenDrawMessage(segment, false));
+    viewer.session.start(); // ordered after the proposal, confirms canonical history
+    CHECK(waitFor([&] {
+        pump(); late.poll();
+        return viewer.drawing.banned() && viewer.drawing.segments().size() == 601;
+    }));
+    CHECK(owner.drawing.segments().size() == 601 && late.drawing.segments().size() == 601);
+    owner.session.setBanned("viewer", false);
+    CHECK(waitFor([&] { pump(); late.poll(); return !viewer.drawing.banned(); }));
+    viewer.drawing.segmentDrawn(segment);
+    CHECK(waitFor([&] {
+        pump(); late.poll();
+        return owner.drawing.segments().size() == 602 && late.drawing.segments().size() == 602;
+    }));
     // Per-author clearing and batched stroke deletion use the same generic
     // peer transport through an unchanged discovery server and relay.
     viewer.drawing.clearMineRequested();

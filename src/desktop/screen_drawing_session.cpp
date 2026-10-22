@@ -41,10 +41,15 @@ ScreenDrawingSession::ScreenDrawingSession(const QString& localName, const QStri
         reset(false);
 }
 
-chat::Message ScreenDrawingSession::state() const {
-    return {chat::MsgType::ScreenDrawState,
-            {sharer_.toStdString(), drawing_->enabled() ? "1" : "0",
-             std::to_string(drawing_->epoch())}};
+chat::Message ScreenDrawingSession::state(const QString& viewer) const {
+    chat::Message message{chat::MsgType::ScreenDrawState,
+                          {sharer_.toStdString(), drawing_->enabled() ? "1" : "0",
+                           std::to_string(drawing_->epoch())}};
+    // Preserve the existing state shape for unrestricted viewers. Updated
+    // clients interpret a missing personal permission as permission to draw.
+    if (isBanned(viewer))
+        message.fields.push_back("0");
+    return message;
 }
 
 chat::Message ScreenDrawingSession::watch(bool enabled) const {
@@ -62,7 +67,28 @@ void ScreenDrawingSession::reset(bool enabled) {
         return;
     drawing_->setStatus({});
     drawing_->setState(enabled, nextEpoch());
-    broadcast(state());
+    const auto recipients = viewers_;
+    for (const auto& viewer : recipients)
+        emit sendToPeer(viewer, state(viewer));
+}
+
+void ScreenDrawingSession::sendSnapshot(const QString& viewer) {
+    emit sendToPeer(viewer, state(viewer));
+    const auto history = drawing_->segments();
+    for (const auto& segment : history)
+        emit sendToPeer(viewer, chat::screenDrawMessage(segment, true));
+}
+
+void ScreenDrawingSession::setBanned(const QString& peer, bool banned) {
+    if (!owner_ || !drawing_ || peer.isEmpty() || peer == localName_ || isBanned(peer) == banned)
+        return;
+    if (banned)
+        banned_.insert(peer);
+    else
+        banned_.remove(peer);
+    // Replay confirmed ink to discard any optimistic stroke rejected by the ban.
+    if (viewers_.contains(peer))
+        sendSnapshot(peer);
 }
 
 void ScreenDrawingSession::start() {
@@ -105,7 +131,7 @@ void ScreenDrawingSession::peerChanged(const QString& peer, bool connected) {
 }
 
 void ScreenDrawingSession::submit(chat::ScreenDraw segment) {
-    if (!drawing_ || !drawing_->enabled())
+    if (!drawing_ || !drawing_->drawingAllowed())
         return;
     segment.sharer = sharer_.toStdString();
     segment.author = localName_.toStdString();
@@ -132,7 +158,7 @@ void ScreenDrawingSession::accept(chat::ScreenDraw segment) {
 }
 
 void ScreenDrawingSession::erase(const QString& author, const QList<quint32>& strokes) {
-    if (!drawing_ || !drawing_->enabled() || (!owner_ && (!watching_ || author != localName_)))
+    if (!drawing_ || !drawing_->enabled() || (!owner_ && (!watching_ || drawing_->banned() || author != localName_)))
         return;
     for (qsizetype offset = 0; offset < strokes.size(); offset += chat::kMaxEraseStrokes) {
         chat::ScreenErase request;
@@ -159,14 +185,10 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
                 viewers_.remove(sender);
             else if (message.fields[1] == "1") {
                 viewers_.insert(sender);
-                emit sendToPeer(sender, state());
-                // A copy also permits synchronous delivery in tests or local transports.
-                const auto history = drawing_->segments();
-                for (const auto& segment : history)
-                    emit sendToPeer(sender, chat::screenDrawMessage(segment, true));
+                sendSnapshot(sender);
             }
         }
-        else if (message.type == chat::MsgType::ScreenDraw && viewers_.contains(sender)) {
+        else if (message.type == chat::MsgType::ScreenDraw && viewers_.contains(sender) && !isBanned(sender)) {
             chat::ScreenDraw segment;
             if (chat::parseScreenDraw(message, false, segment) &&
                 segment.sharer == sharer_.toStdString()) {
@@ -174,7 +196,7 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
                 accept(segment);
             }
         }
-        else if (message.type == chat::MsgType::ScreenDrawErase && viewers_.contains(sender)) {
+        else if (message.type == chat::MsgType::ScreenDrawErase && viewers_.contains(sender) && !isBanned(sender)) {
             chat::ScreenErase request;
             if (chat::parseScreenErase(message, request) && request.sharer == sharer_.toStdString() &&
                 request.epoch == drawing_->epoch() && request.author == sender.toStdString()) {
@@ -186,13 +208,16 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
     }
     if (!watching_ || sender != sharer_)
         return;
-    if (message.type == chat::MsgType::ScreenDrawState && message.fields.size() == 3 &&
+    if (message.type == chat::MsgType::ScreenDrawState &&
+        (message.fields.size() == 3 || message.fields.size() == 4) &&
+        (message.fields.size() == 3 || message.fields[3] == "0" || message.fields[3] == "1") &&
         message.fields[0] == sharer_.toStdString() &&
         (message.fields[1] == "0" || message.fields[1] == "1")) {
         std::int64_t epoch = 0;
         if (!chat::parseInt64(message.fields[2], epoch) || epoch <= 0)
             return;
         retry_.stop();
+        drawing_->setBanned(message.fields.size() == 4 && message.fields[3] == "0");
         drawing_->setStatus({});
         drawing_->setState(message.fields[1] == "1", epoch);
     }

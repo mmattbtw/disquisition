@@ -3,6 +3,7 @@
 #include <QEventLoop>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QShortcut>
@@ -417,6 +418,84 @@ void testEraserAndSelection() {
     CHECK(drawing.segments().isEmpty());
 }
 
+void testDrawingBans() {
+    ScreenDrawing owner, viewer;
+    ScreenDrawingSession host("alice", "alice", &owner, true);
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    QObject::connect(&host, &ScreenDrawingSession::sendToPeer, &guest,
+                     [&](const QString& peer, const chat::Message& message) {
+                         CHECK(peer == "bob");
+                         guest.receive("alice", message);
+                     });
+    QObject::connect(&guest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("bob", message); });
+    guest.start();
+    owner.permissionRequested(true);
+    viewer.setPenActive(true);
+    chat::ScreenDraw pen;
+    pen.id = 1; pen.stroke = 1;
+    viewer.segmentDrawn(pen);
+    CHECK(owner.segments().size() == 1);
+    // An optimistic local segment that has not reached the presenter is
+    // discarded by the canonical snapshot sent alongside the ban.
+    pen.id = 2; pen.stroke = 2; pen.author = "bob"; pen.epoch = viewer.epoch();
+    viewer.add(pen);
+    CHECK(viewer.segments().size() == 2);
+    host.setBanned("bob", true);
+    CHECK(host.isBanned("bob") && viewer.banned());
+    CHECK(viewer.enabled() && !viewer.drawingAllowed() && !viewer.penActive());
+    CHECK(viewer.segments().size() == 1); // watching and confirmed ink remain
+    DrawingControls controls(&viewer, false);
+    bool notice = false;
+    for (const auto* label : controls.findChildren<QLabel*>())
+        notice |= label->text().contains("banned from drawing");
+    CHECK(notice);
+    for (const auto* button : controls.findChildren<QPushButton*>()) {
+        if (button->text() == "pen" || button->text() == "eraser")
+            CHECK(button->isHidden());
+        if (button->text() == "clear mine")
+            CHECK(!button->isEnabled());
+    }
+    viewer.setPenActive(true);
+    CHECK(!viewer.penActive());
+    viewer.segmentDrawn(pen);
+    host.receive("bob", chat::screenDrawMessage(pen, false)); // bypass the controls
+    viewer.clearMineRequested();
+    host.receive("bob", {chat::MsgType::ScreenDrawErase,
+                         {"alice", std::to_string(owner.epoch()), "bob", "1"}});
+    CHECK(owner.segments().size() == 1 && viewer.segments().size() == 1);
+    pen.id = 3; pen.stroke = 3;
+    owner.segmentDrawn(pen);
+    CHECK(viewer.segments().size() == 2); // banned people still see everyone else's ink
+    guest.setBanned("alice", true);
+    host.setBanned("alice", true); // cannot ban the presenter
+    CHECK(!guest.isBanned("alice") && !host.isBanned("alice"));
+    guest.receive("mallory", {chat::MsgType::ScreenDrawState,
+                              {"alice", "1", std::to_string(owner.epoch()), "1"}});
+    CHECK(viewer.banned());
+    guest.receive("alice", {chat::MsgType::ScreenDrawState,
+                            {"alice", "1", std::to_string(owner.epoch()), "bad"}});
+    CHECK(viewer.banned());
+    guest.stop(); guest.start();
+    CHECK(viewer.banned() && viewer.segments().size() == 2);
+    host.peerChanged("bob", false);
+    guest.peerChanged("alice", true);
+    CHECK(viewer.banned());
+    owner.clearRequested();
+    CHECK(viewer.banned() && viewer.enabled() && viewer.segments().isEmpty());
+    owner.permissionRequested(false);
+    owner.permissionRequested(true);
+    CHECK(viewer.banned());
+    host.setBanned("bob", false);
+    CHECK(!viewer.banned() && viewer.drawingAllowed());
+    pen.id = 4; pen.stroke = 4;
+    viewer.segmentDrawn(pen);
+    CHECK(owner.segments().size() == 1 && owner.segments()[0].author == "bob");
+    host.receive("bob", {chat::MsgType::ScreenDrawState,
+                         {"alice", "1", std::to_string(owner.epoch()), "0"}});
+    CHECK(!owner.banned()); // viewers cannot moderate the presenter
+}
+
 void testAttributionAndPalette() {
     ScreenDrawing drawing;
     ScreenDrawingSession session("alice", "alice", &drawing, true);
@@ -486,6 +565,7 @@ int main(int argc, char** argv) {
     testClientOwnedDrawing();
     testEditingAndIdentity();
     testEraserAndSelection();
+    testDrawingBans();
     testAttributionAndPalette();
     testDrawingHistoryLimitAndMissingPeer();
     std::puts("screen_drawing_test: ok");

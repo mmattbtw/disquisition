@@ -119,6 +119,15 @@ then choose **delete selected** or press Delete. Selected strokes are
 highlighted and show their authors' names. **Clear all** removes everyone's
 ink. Press Esc to leave any drawing or selection tool.
 
+While sharing, right-click a person in the chat sidebar and choose
+**Ban from drawing on my stream** to block their pen and eraser. The menu
+changes to **Unban from drawing on my stream** to restore access. A banned
+viewer can still watch and see other people's ink, and their existing ink
+stays until it is erased. Bans apply to that chat name for the current stream,
+survive reconnects and clearing or toggling drawing, and end when the stream
+stops. The presenting client enforces them, so hiding the viewer's controls
+is not the only protection.
+
 Only the sharer can turn off drawing. Turning it off, ending the share or
 losing the connection clears the ink. The drawing also clears automatically
 after 4,096 accepted pen segments, including erased segments, to bound memory.

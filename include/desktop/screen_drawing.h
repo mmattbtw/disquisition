@@ -51,6 +51,9 @@ public:
     QString status() const { return status_; }
     bool presenterOverlayAvailable() const { return presenterOverlayAvailable_; }
     bool enabled() const { return enabled_; }
+    bool banned() const { return banned_; }
+    bool drawingAllowed() const { return enabled_ && !banned_; }
+    void setBanned(bool banned);
     bool penActive() const { return tool_ != Tool::None; }
     int color() const { return color_; }
     std::int64_t epoch() const { return epoch_; }
@@ -68,6 +71,7 @@ signals:
 
 private:
     bool enabled_ = false;
+    bool banned_ = false;
     Tool tool_ = Tool::None;
     QString localName_;
     bool owner_ = false;

@@ -112,7 +112,7 @@ QList<chat::ScreenDraw> ScreenDrawing::activeAuthors() const {
 }
 
 bool ScreenDrawing::canErase(const chat::ScreenDraw& segment) const {
-    return owner_ || QString::fromStdString(segment.author) == localName_;
+    return !banned_ && (owner_ || QString::fromStdString(segment.author) == localName_);
 }
 
 QList<quint32> ScreenDrawing::strokeIds(const QString& author) const {
@@ -160,7 +160,7 @@ void ScreenDrawing::select(const QSet<QString>& strokes) {
 }
 
 void ScreenDrawing::deleteSelection() {
-    if (owner_ && enabled_)
+    if (owner_ && drawingAllowed())
         requestErase(selected_);
 }
 
@@ -169,8 +169,20 @@ void ScreenDrawing::setSelectionBox(const QRectF& box) {
     emit updated();
 }
 
+void ScreenDrawing::setBanned(bool banned) {
+    if (banned_ == banned)
+        return;
+    banned_ = banned;
+    if (banned_) {
+        tool_ = Tool::None;
+        selected_.clear();
+        selectionBox_ = {};
+    }
+    emit changed();
+}
+
 void ScreenDrawing::setTool(Tool tool) {
-    if (!enabled_ || (tool == Tool::Select && !owner_))
+    if (!drawingAllowed() || (tool == Tool::Select && !owner_))
         tool = Tool::None;
     tool_ = tool;
     selected_.clear();
@@ -275,12 +287,12 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
         QPixmap swatch(12, 12);
         swatch.fill(drawing->chatColor());
         colors->setItemIcon(0, QIcon(swatch));
-        pen->setVisible(drawing->enabled());
-        eraser->setVisible(drawing->enabled());
-        select->setVisible(owner && drawing->enabled());
-        colors->setVisible(drawing->enabled());
+        pen->setVisible(drawing->drawingAllowed());
+        eraser->setVisible(drawing->drawingAllowed());
+        select->setVisible(owner && drawing->drawingAllowed());
+        colors->setVisible(drawing->drawingAllowed());
         clearMine->setVisible(drawing->enabled());
-        clearMine->setEnabled(!drawing->strokeIds(drawing->localName()).isEmpty());
+        clearMine->setEnabled(drawing->drawingAllowed() && !drawing->strokeIds(drawing->localName()).isEmpty());
         deleteSelected->setVisible(owner && drawing->tool() == ScreenDrawing::Tool::Select);
         deleteSelected->setEnabled(!drawing->selectedStrokes().isEmpty());
         deleteSelected->setText(drawing->selectedStrokes().isEmpty() ? "delete selected" :
@@ -290,6 +302,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
         const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
                                  drawing->tool() == ScreenDrawing::Tool::Eraser ? (owner ? "erase strokes; Esc exits" : "erase your strokes; Esc exits") : QString();
         hint->setText(!drawing->status().isEmpty() ? drawing->status() :
+                      drawing->banned() ? "you are banned from drawing on this stream" :
                       !drawing->enabled() ? "drawing is off" :
                       previewOnly ? "draw in the video preview" : toolHint);
         hint->setVisible(!hint->text().isEmpty());
@@ -431,7 +444,7 @@ QPointF DrawingCanvas::normalized(const QPointF& position) const {
 }
 
 void DrawingCanvas::drawTo(const QPointF& position, bool first) {
-    if (!drawing_ || !drawing_->enabled() || drawing_->tool() != ScreenDrawing::Tool::Pen)
+    if (!drawing_ || !drawing_->drawingAllowed() || drawing_->tool() != ScreenDrawing::Tool::Pen)
         return;
     const QRectF area = drawingRect();
     if (area.isEmpty() || !area.contains(position)) {

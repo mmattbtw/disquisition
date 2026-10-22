@@ -25,6 +25,7 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QMediaDevices>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMimeData>
 #include <QNetworkAccessManager>
@@ -292,6 +293,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::sendScreenFrame);
     connect(stage_, &ScreenStage::watchRequested, this, &MainWindow::watchStream);
     connect(stage_, &ScreenStage::stopWatchingRequested, this, &MainWindow::stopWatchingStream);
+    members_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(members_, &QListWidget::customContextMenuRequested, this, &MainWindow::showMemberMenu);
     connect(members_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         watchStream(item->data(Qt::UserRole).toString());
     });
@@ -795,6 +798,7 @@ void MainWindow::stopScreenShare() {
         return;
     }
     sharingScreen_ = false;
+    drawingBans_.clear();
     presenterOverlay_.reset();
     sharedSource_.reset();
     drawingSessions_.erase(myName_);
@@ -936,6 +940,10 @@ void MainWindow::startDrawingSession(const QString& sharer, bool owner) {
         return;
     drawing->setChatColor(chatColor(messageColor_));
     auto session = std::make_unique<ScreenDrawingSession>(myName_, sharer, drawing, owner);
+    if (owner) {
+        for (const auto& peer : drawingBans_)
+            session->setBanned(peer, true);
+    }
     connect(session.get(), &ScreenDrawingSession::sendToPeer, this,
             [this](const QString& target, const chat::Message& payload) {
                 const chat::PeerData data{s(myName_), s(target), "screen-drawing",
@@ -1944,6 +1952,31 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
     if (image) appendImage(sender, *image, q(chunk.color), chunk.timestamp);
 }
 
+void MainWindow::showMemberMenu(const QPoint& position) {
+    const auto* item = members_->itemAt(position);
+    const QString peer = item ? item->data(Qt::UserRole).toString() : QString();
+    if (!sharingScreen_ || peer.isEmpty() || peer == myName_ || !peers_.contains(peer))
+        return;
+    const bool banned = drawingBans_.contains(peer);
+    const quint64 generation = screenShareGeneration_;
+    QMenu menu(this);
+    QAction* toggle = menu.addAction(banned ? "Unban from drawing on my stream" :
+                                             "Ban from drawing on my stream");
+    if (menu.exec(members_->viewport()->mapToGlobal(position)) != toggle)
+        return;
+    // Sidebar rows and sessions may change while the menu's event loop runs.
+    const auto session = drawingSessions_.find(myName_);
+    if (!sharingScreen_ || screenShareGeneration_ != generation ||
+        !peers_.contains(peer) || session == drawingSessions_.end())
+        return;
+    if (banned)
+        drawingBans_.remove(peer);
+    else
+        drawingBans_.insert(peer);
+    session->second->setBanned(peer, !banned);
+    refreshMembers();
+}
+
 void MainWindow::refreshMembers() {
     members_->clear();
     if (!myName_.isEmpty()) {
@@ -1966,11 +1999,16 @@ void MainWindow::refreshMembers() {
                               peer.speaking ? "  talking" :
                               peer.voiceConnected ? "  voice" : "  in voice";
         auto* item = new QListWidgetItem(marker + name + state +
-                                         (peer.sharingScreen ? "  LIVE" : ""), members_);
+                                         (peer.sharingScreen ? "  LIVE" : "") +
+                                         (sharingScreen_ && drawingBans_.contains(name) ? "  drawing banned" : ""), members_);
         item->setData(Qt::UserRole, name);
-        if (peer.sharingScreen) {
-            item->setToolTip("double-click to watch " + name + "'s screen");
-        }
+        QStringList tips;
+        if (peer.sharingScreen)
+            tips.append("double-click to watch " + name + "'s screen");
+        if (sharingScreen_)
+            tips.append(drawingBans_.contains(name) ? "banned from drawing on your stream; right-click to unban" :
+                                                   "right-click to ban drawing on your stream");
+        item->setToolTip(tips.join('\n'));
         item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
                                   peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
                                   "#9dccca"));

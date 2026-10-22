@@ -59,7 +59,7 @@ enum class MsgType : std::uint8_t {
 
     // Drawing messages are client-owned and travel inside PeerData, never to
     // the discovery server. State resets the drawing before any history replay.
-    // Owner -> viewer: [sharer, enabled 0|1, epoch].
+    // Owner -> viewer: [sharer, enabled 0|1, epoch, optional may-draw 0|1].
     ScreenDrawState = 27,
     // Viewer -> owner: [sharer, epoch, segment id, x1, y1, x2, y2, color];
     // owner -> viewers inserts author at index 2. Author + id deduplicates previews.
