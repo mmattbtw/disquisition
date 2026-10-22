@@ -1,4 +1,7 @@
 #include "desktop/main_window.h"
+#if defined(DISQUISITION_COMMUNITIES)
+#include "desktop/community_panel.h"
+#endif
 
 #include <QDateTime>
 #include <QColor>
@@ -556,7 +559,19 @@ void MainWindow::buildUi() {
     dropOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
     dropOverlay_->hide();
 
+#if defined(DISQUISITION_COMMUNITIES)
+    auto* tabs = new QTabWidget(this);
+    auto* communities = new CommunityPanel(tabs);
+    tabs->addTab(communities, "Communities");
+    tabs->addTab(root, "Legacy room");
+    connect(communities, &CommunityPanel::activated, tabs, [tabs, communities] { tabs->setCurrentWidget(communities); });
+    connect(tabs, &QTabWidget::currentChanged, communities, [tabs, communities] {
+        if (tabs->currentWidget() == communities) communities->reloadSavingSettings();
+    });
+    setCentralWidget(tabs);
+#else
     setCentralWidget(root);
+#endif
     setStyleSheet(R"(
         QWidget { background: #282c34; color: #c5c8c6; font-family: Menlo, Monaco, "Courier New"; font-size: 14px; }
         QLabel#title { background: #9dccca; color: #20262c; font-size: 15px; font-weight: 700; padding: 3px 5px; }
@@ -919,6 +934,11 @@ void MainWindow::endRemoteStreams() {
 }
 
 void MainWindow::showPreferences() {
+#if defined(DISQUISITION_COMMUNITIES)
+    if (auto* tabs = qobject_cast<QTabWidget*>(centralWidget())) {
+        if (auto* panel = qobject_cast<CommunityPanel*>(tabs->currentWidget())) { panel->showSettings(); return; }
+    }
+#endif
     QDialog dialog(this);
     dialog.setWindowTitle("Preferences");
     dialog.setStyleSheet(styleSheet());

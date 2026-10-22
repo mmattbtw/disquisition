@@ -1,12 +1,13 @@
 # disquisition
 
 Disquisition is a C++20 group chat app with desktop and terminal clients.
-The desktop app supports voice chat and screen sharing. A central server
-handles names and discovery; text messages travel between peers, directly or
-through an optional relay. The server does not store chat history.
+Communities live on member devices, with text channels, channel voice and
+screen sharing, invite links and QR codes, and automatic hosting by online
+members. Peers connect directly or through a community relay; no discovery
+server is needed. Chat is live-only, with optional local saving.
 
-There is no encryption or authentication. Use it with people and networks you
-trust.
+Community connections use authenticated TLS and signed metadata. The separate
+legacy room mode still uses unencrypted, unauthenticated connections.
 
 ## Download
 
@@ -16,8 +17,10 @@ Get the desktop app from the [latest release](https://github.com/mmattbtw/disqui
 - [Windows, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip)
 - [Linux, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
-Open the app, enter a name and choose Join. Fresh installs use the default
-server and relay. Linux downloads need a compatible Qt 6.8 runtime.
+Open the Communities tab, enter a name and select Connect, then create a
+community or join with an invite. See the [community guide](docs/communities.md)
+for direct connections, relay setup, hosting, and permissions.
+Linux downloads need a compatible Qt 6.8 runtime.
 See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
@@ -59,6 +62,7 @@ Run each client in a separate terminal:
 
 - [Building and packaging](docs/building.md)
 - [Desktop app](docs/desktop.md)
+- [Communities, channels, invites and hosting](docs/communities.md)
 - [Servers, peers and relays](docs/networking.md)
 - [Terminal client and command-line reference](docs/command-line.md)
 - [C++ client library](docs/client-library.md)

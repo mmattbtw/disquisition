@@ -16,10 +16,10 @@ jobs:
             artifact: disquisition-linux-x64
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libncurses-dev libsqlite3-dev
+              sudo apt-get install -y libncurses-dev libsqlite3-dev libssl-dev
           - os: macos-latest
             artifact: disquisition-macos-arm64
-            deps: brew install sqlite ncurses
+            deps: brew install sqlite ncurses openssl@3
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         if: ${{ matrix.deps != '' }}
         run: ${{ matrix.deps }}
+
+      - name: Install Qt for communities
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
 
       - name: Build
         run: make
@@ -39,3 +45,4 @@ jobs:
             build/client
             build/server
             build/relay
+            build/community-relay

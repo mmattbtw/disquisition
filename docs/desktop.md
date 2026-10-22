@@ -1,5 +1,10 @@
 # Desktop app
 
+The desktop opens on the Communities tab. See [the community guide](communities.md)
+for creation, invites, channels, voice, hosting, and local message saving.
+The existing discovery-server interface is available on the Legacy room tab;
+the instructions below describe that interface.
+
 Download the app from the [latest release](https://github.com/mmattbtw/disquisition/releases/latest).
 For a local build, see [building and packaging](building.md#desktop-app).
 

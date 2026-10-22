@@ -1,0 +1,186 @@
+# Communities
+
+Communities live on member devices. The creator owns the community; any member
+can host its metadata and admit peers with an existing valid invite. The
+discovery `server` process is not involved in community connections.
+
+The desktop app's **Communities** tab and `client community` use the same
+community protocol. The **Legacy room** tab, original terminal mode, `server`,
+and original `relay` keep their existing protocol.
+
+## Start on a LAN
+
+In the desktop Communities tab, enter a name and select **Connect**, then
+**Create**. A new community starts with `#general` and a voice channel named
+Lounge. Select **Invite** to copy an invite link or save its QR image.
+Another client selects **Join** and pastes the link or opens the QR image.
+
+Direct mode advertises a LAN address automatically. **Connection & saving**
+lets you specify a hostname and listening port for connections across routed
+networks. The address must be reachable, including any required port forwarding.
+The automatically selected port is reused after restarting a saved community.
+
+To run another desktop identity on the same computer:
+
+```sh
+./build/disquisition.app/Contents/MacOS/disquisition --community-data /tmp/disquisition-second
+```
+
+On Linux and Windows, use the desktop executable's platform-specific name with
+the same `--community-data` option. Only one process can open a given identity
+directory at a time. macOS builds register `disquisition://` invite links;
+links can also be pasted into Join on every platform.
+Keep `identity.key` with the metadata when backing up or moving this directory;
+that key preserves the client's membership and owner/admin identity.
+
+## Connect through a community relay
+
+Run this on a reachable machine:
+
+```sh
+./build/community-relay --listen 3334
+```
+
+Set **Community relay** to `relay://hostname:3334` before connecting each client.
+Relay mode opens no direct listening port and advertises no direct client IP.
+The relay sees the connecting addresses and routing IDs, but peer traffic,
+invite challenges, metadata, chat, and media travel inside mutual TLS tunnels.
+
+This is a new relay protocol. An existing legacy relay on port 3333 cannot
+handle community connections. The repository change does not deploy or upgrade
+any public relay service.
+
+The relay keeps only live routing registrations and pending tunnels. It does
+not own community metadata, issue invites, decide permissions, or store history.
+If the peer originally named in an invite is offline, a community relay can
+route the request to another online member of that community.
+
+Direct invites contain up to eight bootstrap peers. If none is reachable, a
+joining client retries automatically. Changed public IPs or a relay that no
+longer exists require a reachable routing hint, such as an updated invite.
+
+## Ownership, administration, and hosting
+
+- The creator remains the owner and assigns or removes admins.
+- The owner and each admin can independently edit the name, icon, channels,
+  topics, invite policy, host priority, and member removals. There is no voting.
+- Any member can act as host and validate an already-authorized invite without
+  an admin online. Admission updates the member list automatically.
+- Hosting does not grant administrative permissions or transfer ownership.
+- With no owner or admin online, existing communication and invite admission
+  continue. Administrative edits wait until an authorized client is present.
+
+**Manage** contains the community settings, channel editor, admin assignments,
+invite revocations, member removal, and a draggable host priority list. Removing
+a member blocks that peer identity from rejoining with another invite. The
+current UI does not provide an unblock or ownership-transfer operation.
+
+Host priority chooses the first reachable listed member. The owner and then
+the remaining peer IDs provide a deterministic fallback. A disconnected group
+can have its own preferred host until it reconnects with other members.
+Invites start with the issuer, which already knows the newly issued code.
+A bootstrap peer that knows a synchronized higher-priority host validates the
+invite and redirects the join request there.
+
+## Reconnects and network splits
+
+Identity keys and community metadata always persist, even with chat saving off.
+When everyone is offline, the community has no active host. The first returning
+member restores its saved metadata and retries known peers with bounded
+backoff and jitter. It can host the community while alone.
+
+A returning member exchanges metadata with reachable peers before processing
+new admissions or administrative edits. Connections still synchronizing block
+those operations. After startup recovery attempts settle, unreachable peers do
+not prevent a lone member from accepting an existing invite.
+
+Each metadata operation identifies its author, causal parents, and a logical
+sequence number, and carries an Ed25519 signature. Peers merge the operation
+sets and derive the same result. Concurrent edits to the same setting use a
+deterministic order of logical sequence and operation ID; unrelated edits survive.
+No wall clock determines administrative authority.
+
+An owner-issued admin grant authorizes an admin's edits. Revoking that grant
+blocks concurrent and later edits under it. Member removal and invite revocation
+also win against concurrent admissions. An admission accepted before an invite
+revocation remains valid; revoking an invite does not remove existing members.
+Removing a host preserves the admissions it accepted before its removal.
+
+A partition cannot receive changes made elsewhere until it reconnects. Peers
+therefore validate invites and permissions against their latest known accepted
+metadata. On reconnect, missing operations are validated, durably saved, and
+distributed before admissions resume. A former host's cached state cannot
+replace a newer operation set.
+
+Metadata is bounded to 8 MiB and 8,192 operations per community. This version
+exchanges bounded snapshots when revisions differ; log compaction and fetching
+only missing operations can be added without changing the ownership model.
+The current mesh limits each client to 256 simultaneous peer connections.
+
+## Chat, voice, and local saving
+
+One authenticated connection per peer pair carries traffic for all shared
+communities. Packets identify both the community and channel. Clients send only
+to members of that community and validate membership on receipt.
+
+Select a text channel to send messages, images, or GIFs. Messages are live-only.
+If nobody is connected, the local echo says it was not delivered. It will not
+be queued for later delivery. Reconnecting clients do not download missed chat.
+
+Select a voice channel and **Join voice**, or double-click it. A client joins
+one voice channel at a time across its communities. Muting, deafening, audio,
+screen announcements, and screen subscriptions stay within that channel.
+Screen frames go only to peers who choose to watch the share. Leaving the
+channel or losing membership stops the local call and share.
+
+**Connection & saving** controls optional SQLite saving, its file path, and an
+optional maximum number of messages. Only chat this device received or sent
+is saved. History is scoped by community and channel, including after restart.
+Existing legacy message files upgrade in place; their messages stay in the
+legacy room. As in the existing client, uploaded images are not saved as chat
+history. Community metadata and identity storage are independent of this option.
+
+## Terminal client
+
+Community mode requires Qt Network and OpenSSL at build time. It uses a line
+interface, while the original `client` invocation keeps the ncurses room UI.
+
+```sh
+./build/client community --name alice --data /tmp/alice --create friends
+./build/client community --name bob --data /tmp/bob
+```
+
+In Alice's client, `/invite` prints a link. In Bob's client, `/join LINK` joins
+it. Use `/communities`, `/use NAME_OR_ID`, `/channels`, and `/channel NAME_OR_ID`
+to navigate. Normal input sends to the selected text channel. `/help` lists
+administrative commands, `/members` shows IDs and endpoints, and `/history`
+loads this device's selected-channel history.
+
+For relayed connections and optional saving:
+
+```sh
+./build/client community --name alice --data /tmp/alice \
+  --relay relay://127.0.0.1:3334 --save-messages /tmp/alice-messages.db
+```
+
+Desktop and terminal clients share the default identity directory. Use `--data`
+for terminal clients or `--community-data` for desktop clients when running
+multiple identities. Voice and screen sharing use the desktop client.
+
+## Build and verification
+
+Community support needs Qt 6.6+ Core/Network and OpenSSL 3+. The desktop also
+uses the existing Qt Multimedia/FFmpeg dependencies. QR support fetches a pinned
+ZXing-C++ release and links it statically. `-DBUILD_COMMUNITIES=OFF` builds only
+the existing room protocol. Builds without Qt Network skip community targets.
+
+The community model tests cover signatures, permission boundaries, independent
+admin decisions, admissions without admins, revocations, split reconciliation,
+and metadata persistence. Network tests run real direct and relay connections,
+host migration, recovery before admission, connection sharing, channel isolation,
+voice scoping, all-members-offline recovery, and live-only delivery. QR tests
+encode and read invite images. SQLite tests cover legacy migration, channel
+isolation, duplicate handling, retention, and rollback.
+The desktop UI test connects an isolated client, exercises creation and admin
+dialogs, checks channel separation and undelivered local echoes, and captures
+`build/community-ui.png` without accessing microphone or screen hardware.

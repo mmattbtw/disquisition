@@ -38,7 +38,7 @@ private:
 class StreamTile final : public QFrame {
     Q_OBJECT
 public:
-    StreamTile(const QString& name, bool own, QWidget* parent = nullptr);
+    StreamTile(const QString& name, bool own, QWidget* parent = nullptr, const QString& label = {});
     QString name() const { return name_; }
     const QImage& image() const { return view_->image(); }
     void setWatching(bool watching);
@@ -79,7 +79,7 @@ class ScreenStage final : public QWidget {
 public:
     explicit ScreenStage(QWidget* parent = nullptr);
     // `own` streams are this user's share: always shown, never "watched".
-    void addStream(const QString& name, bool own);
+    void addStream(const QString& name, bool own, const QString& label = {});
     void removeStream(const QString& name);
     void setWatching(const QString& name, bool watching);
     void setDetail(const QString& name, const QString& detail);

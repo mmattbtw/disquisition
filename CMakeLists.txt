@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(disquisition LANGUAGES CXX)
 
 option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
+option(BUILD_COMMUNITIES "Build decentralized communities (Qt Network and OpenSSL)" ON)
 if(WIN32)
   option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
 else()
@@ -25,7 +26,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(spdlog)
 
 if(MSVC)
-  add_compile_options(/W4)
+  add_compile_options(/W4 /utf-8)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -54,6 +55,7 @@ if(APPLE)
 endif()
 
 find_package(SQLite3 3.24 REQUIRED)
+include(CTest)
 
 # CMake renamed this imported target at some point; support both spellings.
 if(TARGET SQLite3::SQLite3)
@@ -100,6 +102,53 @@ target_link_libraries(chat_protocol PUBLIC spdlog::spdlog)
 add_library(chat_recent_messages STATIC src/common/recent_messages.cpp)
 target_include_directories(chat_recent_messages PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(chat_recent_messages PRIVATE ${SQLITE_TARGET})
+if(BUILD_TESTING)
+  add_executable(recent_messages_test test/recent_messages_test.cpp)
+  target_link_libraries(recent_messages_test PRIVATE chat_recent_messages ${SQLITE_TARGET})
+  add_test(NAME recent_messages_test COMMAND recent_messages_test)
+endif()
+
+if(BUILD_COMMUNITIES)
+  find_package(Qt6 6.6 COMPONENTS Core Network QUIET)
+  if(TARGET Qt6::Network)
+    find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+    add_library(chat_communities STATIC
+      include/community/node.h
+      include/community/relay.h
+      src/community/identity.cpp
+      src/community/model.cpp
+      src/community/store.cpp
+      src/community/node.cpp
+      src/community/relay.cpp)
+    target_include_directories(chat_communities PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE OpenSSL::Crypto)
+    set_target_properties(chat_communities PROPERTIES AUTOMOC ON)
+    add_executable(community-relay src/community/relay_main.cpp)
+    target_link_libraries(community-relay PRIVATE chat_communities)
+    if(BUILD_TESTING)
+      add_executable(community_model_test test/community_model_test.cpp)
+      target_link_libraries(community_model_test PRIVATE chat_communities)
+      add_test(NAME community_model_test COMMAND community_model_test)
+      set_tests_properties(community_model_test PROPERTIES TIMEOUT 120)
+      add_executable(community_network_test test/community_network_test.cpp)
+      target_link_libraries(community_network_test PRIVATE chat_communities)
+      add_test(NAME community_network_test COMMAND community_network_test)
+      set_tests_properties(community_network_test PROPERTIES TIMEOUT 120)
+      if(APPLE OR WIN32)
+        if(APPLE)
+          set(COMMUNITY_NATIVE_TLS_BACKEND securetransport)
+        else()
+          set(COMMUNITY_NATIVE_TLS_BACKEND schannel)
+        endif()
+        add_test(NAME community_native_tls_test COMMAND community_network_test)
+        set_tests_properties(community_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+          ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
+      endif()
+    endif()
+  else()
+    message(STATUS "Qt Network 6.6+ not found; skipping community support")
+  endif()
+endif()
 
 if(BUILD_DESKTOP_APP)
   if(APPLE)
@@ -112,6 +161,28 @@ if(BUILD_DESKTOP_APP)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
+    if(TARGET chat_communities)
+      # Keep the barcode dependency static without changing the app's other
+      # dependency defaults. Pinned source supports both QR export and import.
+      function(configure_community_qr)
+        set(BUILD_SHARED_LIBS OFF)
+        set(ZXING_READERS ON CACHE BOOL "" FORCE)
+        set(ZXING_WRITERS OLD CACHE STRING "" FORCE)
+        set(ZXING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(community_zxing
+          GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
+          GIT_TAG d6068bcebeb8fd9f0d35a99b00d202be86a14dbe)
+        FetchContent_MakeAvailable(community_zxing)
+      endfunction()
+      configure_community_qr()
+      add_library(community_qr STATIC src/community/qr.cpp)
+      target_link_libraries(community_qr PUBLIC chat_communities Qt6::Gui PRIVATE ZXing::ZXing)
+      if(BUILD_TESTING)
+        add_executable(community_qr_test test/community_qr_test.cpp)
+        target_link_libraries(community_qr_test PRIVATE community_qr)
+        add_test(NAME community_qr_test COMMAND community_qr_test)
+      endif()
+    endif()
     # GIF search, media links and image transfer, kept apart from the
     # widgets so they can be tested without a display.
     add_library(desktop_media STATIC
@@ -150,6 +221,12 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_source.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
+    if(TARGET chat_communities)
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/community_panel.h src/desktop/community_panel.cpp)
+      target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
+      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_COMMUNITIES=1)
+    endif()
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages desktop_media
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
@@ -238,6 +315,11 @@ add_executable(client
   src/client/tui.cpp)
 target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(client PRIVATE chat_network chat_recent_messages ${CURSES_LIBRARIES})
+if(TARGET chat_communities)
+  target_sources(client PRIVATE src/community/terminal.cpp)
+  target_compile_definitions(client PRIVATE DISQUISITION_COMMUNITIES=1)
+  target_link_libraries(client PRIVATE chat_communities)
+endif()
 
 add_executable(relay
   src/relay/main.cpp
@@ -245,17 +327,12 @@ add_executable(relay
   src/relay/relay.cpp)
 target_link_libraries(relay PRIVATE chat_network)
 
-include(CTest)
 if(BUILD_TESTING)
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
-
-  add_executable(recent_messages_test test/recent_messages_test.cpp)
-  target_link_libraries(recent_messages_test PRIVATE chat_recent_messages ${SQLITE_TARGET})
-  add_test(NAME recent_messages_test COMMAND recent_messages_test)
 
   add_executable(connection_test test/connection_test.cpp)
   target_link_libraries(connection_test PRIVATE chat_network)
@@ -284,4 +361,19 @@ if(BUILD_TESTING AND TARGET desktop_media)
   target_link_libraries(desktop_media_test PRIVATE desktop_media)
   add_test(NAME desktop_media_test COMMAND desktop_media_test)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET disquisition-desktop AND TARGET chat_communities)
+  # Exercise the actual widgets and their wiring, including modal dialogs,
+  # with isolated identity/settings directories and no audio hardware access.
+  get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)
+  list(REMOVE_ITEM COMMUNITY_UI_SOURCES src/desktop/main.cpp resources/macos/disquisition.icns)
+  get_target_property(COMMUNITY_UI_LIBRARIES disquisition-desktop LINK_LIBRARIES)
+  get_target_property(COMMUNITY_UI_DEFINITIONS disquisition-desktop COMPILE_DEFINITIONS)
+  add_executable(community_ui_test test/community_ui_test.cpp ${COMMUNITY_UI_SOURCES})
+  set_target_properties(community_ui_test PROPERTIES AUTOMOC ON)
+  target_link_libraries(community_ui_test PRIVATE ${COMMUNITY_UI_LIBRARIES})
+  target_compile_definitions(community_ui_test PRIVATE ${COMMUNITY_UI_DEFINITIONS})
+  add_test(NAME community_ui_test COMMAND community_ui_test)
+  set_tests_properties(community_ui_test PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

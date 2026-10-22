@@ -46,12 +46,14 @@ void StreamView::mouseDoubleClickEvent(QMouseEvent*) {
     emit doubleClicked();
 }
 
-StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
+StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QString& label)
     : QFrame(parent), name_(name), own_(own) {
     setObjectName("streamTile");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    auto* title = new QLabel(own ? name + " (you)" : name, this);
+    const auto display = label.isEmpty() ? name : label;
+    auto* title = new QLabel(own ? display + " (you)" : display, this);
+    title->setTextFormat(Qt::PlainText);
     title->setObjectName("streamName");
     auto* live = new QLabel("LIVE", this);
     live->setObjectName("live");
@@ -153,11 +155,11 @@ ScreenStage::ScreenStage(QWidget* parent) : QWidget(parent) {
     relayout();
 }
 
-void ScreenStage::addStream(const QString& name, bool own) {
+void ScreenStage::addStream(const QString& name, bool own, const QString& label) {
     if (find(name)) {
         return;
     }
-    auto* tile = new StreamTile(name, own, this);
+    auto* tile = new StreamTile(name, own, this, label);
     connect(tile, &StreamTile::watchClicked, this, [this, name] { emit watchRequested(name); });
     connect(tile, &StreamTile::stopWatchingClicked, this,
             [this, name] { emit stopWatchingRequested(name); });

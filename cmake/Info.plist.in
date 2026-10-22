@@ -18,6 +18,15 @@
     <string>1.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>Disquisition community invite</string>
+            <key>CFBundleURLSchemes</key>
+            <array><string>disquisition</string></array>
+        </dict>
+    </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>disquisition uses your microphone when you join the group voice call.</string>
 </dict>
