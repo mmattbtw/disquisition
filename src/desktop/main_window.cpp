@@ -934,6 +934,7 @@ void MainWindow::startDrawingSession(const QString& sharer, bool owner) {
     ScreenDrawing* drawing = stage_->drawing(sharer);
     if (!drawing)
         return;
+    drawing->setChatColor(chatColor(messageColor_));
     auto session = std::make_unique<ScreenDrawingSession>(myName_, sharer, drawing, owner);
     connect(session.get(), &ScreenDrawingSession::sendToPeer, this,
             [this](const QString& target, const chat::Message& payload) {
@@ -1659,6 +1660,10 @@ void MainWindow::runCommand(const QString& command) {
             appendChat("Color", "unknown or reserved color: " + requested, {}, true);
         } else {
             messageColor_ = requested;
+            for (const auto& [sharer, session] : drawingSessions_) {
+                if (auto* drawing = stage_->drawing(sharer))
+                    drawing->setChatColor(chatColor(messageColor_));
+            }
             appendChat("Color", "you chose " + requested, requested);
         }
     } else if (name == "/users") {

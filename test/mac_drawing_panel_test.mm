@@ -4,6 +4,7 @@
 
 #include "check.h"
 #include "desktop/screen_drawing.h"
+#include "desktop/screen_drawing_session.h"
 
 int main(int argc, char** argv) {
     // Avoid Qt activating this test process during AppKit launch completion.
@@ -11,11 +12,11 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QWidget mainWindow;
     ScreenDrawing drawing;
+    ScreenDrawingSession session("alice", "alice", &drawing, true);
     ShareSource source;
     source.nativeId = CGMainDisplayID();
     PresenterOverlay overlay(source, &drawing, &mainWindow);
-    QObject::connect(&drawing, &ScreenDrawing::segmentDrawn, &drawing,
-                     [&](const chat::ScreenDraw& segment) { drawing.add(segment); });
+
     const bool wasActive = NSApp.active;
     CHECK(!wasActive);
     drawing.setState(true, 1);
@@ -51,6 +52,15 @@ int main(int argc, char** argv) {
     CHECK(drawing.segments().size() == 2);
     CHECK(drawing.segments()[0].x1 < drawing.segments()[1].x2);
     CHECK(drawing.segments()[0].y1 > drawing.segments()[1].y2);
+    // The native host uses the shared Qt renderer with AppKit's flipped
+    // coordinates. Check a pixel in the middle of the actual pen stroke.
+    NSView* view = canvas.contentView;
+    NSBitmapImageRep* bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+    [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
+    const CGFloat scale = bitmap.pixelsWide / view.bounds.size.width;
+    NSColor* pixel = [[bitmap colorAtX:200 * scale y:(view.bounds.size.height - 150) * scale]
+                      colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+    CHECK(pixel.greenComponent > pixel.redComponent + 0.1);
     // Exercise AppKit key dispatch, including when Qt's application shortcut
     // machinery has no active main window.
     NSEvent* escape = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
@@ -62,6 +72,25 @@ int main(int argc, char** argv) {
     drawing.setPenActive(true);
     [toolbar sendEvent:escape];
     CHECK(!drawing.penActive() && canvas.ignoresMouseEvents);
+    CHECK(NSApp.active == wasActive);
+    // Native selection and Delete share the same hit testing as video previews.
+    drawing.setTool(ScreenDrawing::Tool::Select);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 200, 150)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 200, 150)];
+    CHECK(drawing.selectedStrokes().size() == 1);
+    NSEvent* remove = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+        modifierFlags:0 timestamp:0 windowNumber:canvas.windowNumber context:nil
+        characters:@"\x7f" charactersIgnoringModifiers:@"\x7f" isARepeat:NO keyCode:51];
+    [canvas sendEvent:remove];
+    CHECK(drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive);
+    drawing.setPenActive(true);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    drawing.setTool(ScreenDrawing::Tool::Eraser);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 200, 150)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 200, 150)];
+    CHECK(drawing.segments().isEmpty());
     CHECK(NSApp.active == wasActive);
     drawing.setState(false, 2);
     CHECK(!canvas.visible && !toolbar.visible);
