@@ -11,8 +11,8 @@ For the server, relay, terminal client and C++ library on Linux or macOS:
 - POSIX sockets and `poll`
 - Git and network access on the first configure, to download spdlog
 
-Community mode additionally needs Qt 6.6+ Core/Network and OpenSSL 3+. Without
-Qt Network, the legacy targets still build. Pass `-DBUILD_COMMUNITIES=OFF` to
+Communities in the desktop app and relay additionally need Qt 6.6+ Core/Network
+and OpenSSL 3+. Without Qt Network, the legacy targets still build. Pass `-DBUILD_COMMUNITIES=OFF` to
 disable community support explicitly. Desktop community QR support downloads
 a pinned ZXing-C++ source revision on the first configure.
 
@@ -41,8 +41,10 @@ ctest --test-dir build --output-on-failure
 
 The build creates `build/server`, `build/client`, `build/relay` and the static
 `disquisition::client` library. `make clean` removes the `build` directory.
-With community support, it also creates `build/community-relay` and adds
-`client community` mode. See [Communities](communities.md) for setup.
+With community support, the existing `build/relay` also handles desktop
+communities on its usual listening port. The terminal client keeps its room
+interface. See [Communities](communities.md) for setup. A relay built with
+community support needs the Qt Core/Network and OpenSSL runtime libraries.
 
 ## Desktop app
 

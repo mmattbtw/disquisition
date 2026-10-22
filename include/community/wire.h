@@ -7,6 +7,8 @@
 #include <stdexcept>
 
 namespace community {
+// Identifies community routing on the relay's shared room/community TCP port.
+inline constexpr char kRelayPrefix[] = "DQC1\n";
 constexpr quint32 kMaxPacketBytes = 256 * 1024;
 inline QByteArray frame(const QJsonObject& message) {
     const auto payload = QJsonDocument(message).toJson(QJsonDocument::Compact);

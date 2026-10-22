@@ -3,7 +3,7 @@
 Disquisition is a C++20 group chat app with desktop and terminal clients.
 Communities live on member devices, with text channels, channel voice and
 screen sharing, invite links and QR codes, and automatic hosting by online
-members. Peers connect directly or through a community relay; no discovery
+members. Desktop peers connect directly or through the relay; no discovery
 server is needed. Chat is live-only, with optional local saving.
 
 Community connections use authenticated TLS and signed metadata. The separate

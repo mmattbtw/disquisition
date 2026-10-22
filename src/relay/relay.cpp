@@ -1,8 +1,12 @@
 #include "relay/relay.h"
 
+#include <poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -10,7 +14,41 @@
 #include "common/net.h"
 #include "util/log.h"
 
+#if defined(DISQUISITION_COMMUNITIES)
+#    include <QThread>
+
+#    include "community/wire.h"
+#    include "relay/community_router.h"
+#endif
+
 namespace chat {
+#if defined(DISQUISITION_COMMUNITIES)
+// Community tunnels run independently of discovery-server connection attempts.
+// The existing relay owns the only listener and passes accepted sockets here.
+class CommunityService {
+public:
+    CommunityService() : router_(new CommunityRouter) {
+        router_->moveToThread(&thread_);
+        QObject::connect(&thread_, &QThread::started, router_, &CommunityRouter::start);
+        QObject::connect(&thread_, &QThread::finished, router_, &QObject::deleteLater);
+        thread_.start();
+    }
+    ~CommunityService() {
+        QMetaObject::invokeMethod(router_, &CommunityRouter::close, Qt::BlockingQueuedConnection);
+        thread_.quit();
+        thread_.wait();
+    }
+    void adopt(int fd) {
+        QMetaObject::invokeMethod(
+            router_, [this, fd] { router_->adopt(fd); }, Qt::QueuedConnection);
+    }
+
+private:
+    QThread thread_;
+    CommunityRouter* router_;
+};
+#endif
+
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -43,6 +81,9 @@ int Relay::run() {
         LOG_ERR("cannot listen on port {}: {}", options_.port, error);
         return 1;
     }
+#if defined(DISQUISITION_COMMUNITIES)
+    communities_ = std::make_unique<CommunityService>();
+#endif
     running_.store(true);
     acceptThread_ = std::thread([this] { acceptLoop(); });
     if (options_.advertiseHost.empty()) {
@@ -57,7 +98,8 @@ int Relay::run() {
     // Keep one anonymous server connection for health probes. It never joins
     // the room, so checking the relay cannot churn a user's session.
     healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error);
-    if (!healthServer_.failed()) healthServer_.startReader();
+    if (!healthServer_.failed())
+        healthServer_.startReader();
     nextHealthAttempt_ = Clock::now() + kServerRetryInterval;
 
     while (!shutdownRequested()) {
@@ -94,21 +136,81 @@ void Relay::shutdown() {
         listenFd_ = -1;
     }
     users_.clear();
+    for (const auto& pending : pendingSockets_) {
+        ::close(pending.fd);
+    }
+    pendingSockets_.clear();
     awaiting_.clear();
+#if defined(DISQUISITION_COMMUNITIES)
+    communities_.reset();
+#endif
     healthServer_.stop();
 }
 
 void Relay::acceptLoop() {
-    acceptConnections(listenFd_, running_, [this](int fd) {
-        if (auto connection = Connection::fromAccepted(fd)) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            awaiting_.push_back(std::move(connection));
+    // Classify connections independently of legacy discovery retries, which
+    // can block the legacy service loop while its server is unavailable.
+    while (running_.load()) {
+        pollfd listener{listenFd_, POLLIN, 0};
+        const auto ready = ::poll(&listener, 1, 50);
+        if (ready > 0 && (listener.revents & (POLLERR | POLLHUP | POLLNVAL)))
+            break;
+        if (ready > 0 && (listener.revents & POLLIN)) {
+            const int fd = ::accept(listenFd_, nullptr, nullptr);
+            if (fd >= 0) {
+                if (pendingSockets_.size() >= 512)
+                    ::close(fd);
+                else
+                    pendingSockets_.push_back({fd, Clock::now()});
+            }
         }
-    });
+        classifyInbound();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Inbound connections
+
+void Relay::classifyInbound() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = pendingSockets_.begin(); it != pendingSockets_.end();) {
+        char prefix[5];
+        const auto count = ::recv(it->fd, prefix, sizeof(prefix), MSG_PEEK | MSG_DONTWAIT);
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            if (Clock::now() - it->accepted < std::chrono::seconds(15)) {
+                ++it;
+                continue;
+            }
+        }
+        else if (count > 0) {
+#if defined(DISQUISITION_COMMUNITIES)
+            if (std::memcmp(prefix, community::kRelayPrefix, count) == 0) {
+                if (count < static_cast<ssize_t>(sizeof(prefix))) {
+                    if (Clock::now() - it->accepted < std::chrono::seconds(15)) {
+                        ++it;
+                        continue;
+                    }
+                }
+                else {
+                    communities_->adopt(it->fd);
+                    it = pendingSockets_.erase(it);
+                    continue;
+                }
+            }
+            else
+#endif
+            {
+                if (auto connection = Connection::fromAccepted(it->fd)) {
+                    awaiting_.push_back(std::move(connection));
+                }
+                it = pendingSockets_.erase(it);
+                continue;
+            }
+        }
+        ::close(it->fd);
+        it = pendingSockets_.erase(it);
+    }
+}
 
 void Relay::dispatchInbound() {
     std::deque<std::unique_ptr<Connection>> pending;
@@ -155,8 +257,7 @@ void Relay::route(std::unique_ptr<Connection> connection, const Message& first) 
             target->peers.adoptInbound(sender, std::move(connection));
         }
     }
-    else if (first.type == MsgType::RelayProbe && first.fields.empty() &&
-             !healthServer_.failed()) {
+    else if (first.type == MsgType::RelayProbe && first.fields.empty() && !healthServer_.failed()) {
         connection->send(Message{MsgType::RelayReady, {}});
     }
 }
@@ -197,7 +298,8 @@ void Relay::dropUser(std::uint64_t sessionId) {
     const std::string assignedName = departing->second->assignedName;
     users_.erase(departing);
     // A session that never signed in has no identity in anyone else's roster.
-    if (assignedName.empty()) return;
+    if (assignedName.empty())
+        return;
 
     // The server announces departures, but while it is unreachable only the
     // relay knows, so update the other hosted users directly.
@@ -229,7 +331,8 @@ void Relay::serviceUsers() {
 }
 
 void Relay::serviceHealth() {
-    if (!healthServer_.failed() || Clock::now() < nextHealthAttempt_) return;
+    if (!healthServer_.failed() || Clock::now() < nextHealthAttempt_)
+        return;
     healthServer_.stop();
     std::string error;
     if (healthServer_.connectTo(options_.serverHost, options_.serverPort, 2000, error)) {

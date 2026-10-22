@@ -17,6 +17,10 @@
 
 namespace chat {
 
+#if defined(DISQUISITION_COMMUNITIES)
+class CommunityService;
+#endif
+
 // Hosts any number of users on one public port, for clients that cannot
 // accept connections themselves. New connections are routed by their first
 // frame:
@@ -26,6 +30,8 @@ namespace chat {
 //          client to that user's peer mesh.
 //   Hello  a peer dialling one of the hosted users; handed to that user's
 //          mesh.
+//   DQC1   a desktop community registration or encrypted peer tunnel, routed
+//          without the discovery server when community support is enabled.
 //
 // The relay and server do not retain message history.
 class Relay {
@@ -55,6 +61,7 @@ private:
     void acceptLoop();
 
     void dispatchInbound();
+    void classifyInbound();
     void route(std::unique_ptr<Connection> connection, const Message& first);
     User* findUser(const std::string& name);
     void attachClient(const std::string& requestedName, std::unique_ptr<Connection> client);
@@ -82,7 +89,15 @@ private:
     std::chrono::steady_clock::time_point nextHealthAttempt_{};
 
     std::mutex mutex_;
+    struct PendingSocket {
+        int fd;
+        std::chrono::steady_clock::time_point accepted;
+    };
+    std::deque<PendingSocket> pendingSockets_;
     std::deque<std::unique_ptr<Connection>> awaiting_; // accepted, first frame not read yet
+#if defined(DISQUISITION_COMMUNITIES)
+    std::unique_ptr<CommunityService> communities_;
+#endif
     std::atomic<bool> running_{false};
     std::thread acceptThread_;
 };

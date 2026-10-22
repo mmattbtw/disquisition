@@ -45,4 +45,3 @@ jobs:
             build/client
             build/server
             build/relay
-            build/community-relay

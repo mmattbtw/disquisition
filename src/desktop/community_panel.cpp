@@ -388,7 +388,7 @@ void CommunityPanel::settings() {
     dialog.setWindowTitle("Community connection & local saving");
     auto* form = new QFormLayout(&dialog);
     auto* relay = new QLineEdit(saved.value("community/relay").toString(), &dialog);
-    relay->setPlaceholderText("relay://hostname:3334, or leave blank for direct connections");
+    relay->setPlaceholderText("relay://hostname:3333, or leave blank for direct connections");
     auto* host = new QLineEdit(saved.value("community/host").toString(), &dialog);
     host->setPlaceholderText("Automatic LAN address");
     auto* port = new QSpinBox(&dialog);
@@ -398,7 +398,7 @@ void CommunityPanel::settings() {
     relay->setEnabled(!online_);
     host->setEnabled(!online_);
     port->setEnabled(!online_);
-    form->addRow("Community relay", relay);
+    form->addRow("Relay", relay);
     form->addRow("Direct advertised host", host);
     form->addRow("Direct listen port", port);
     auto* saving = new QCheckBox("Save messages received or sent by this client", &dialog);

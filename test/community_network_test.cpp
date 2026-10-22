@@ -1,14 +1,20 @@
 #include <QCoreApplication>
 #include <QDeadlineTimer>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QSslSocket>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
 #include <cstdio>
 #include <functional>
 
 #include "check.h"
+#include "common/protocol.h"
 #include "community/node.h"
-#include "community/relay.h"
+#include "community/wire.h"
+#include "relay/community_router.h"
 
 using namespace community;
 namespace {
@@ -22,6 +28,104 @@ bool until(const std::function<bool()>& predicate, int timeout = 12000) {
     }
     return predicate();
 }
+QProcess* relayProcess = nullptr;
+QProcess* serverProcess = nullptr;
+QString relayExecutable, serverExecutable;
+void stopProcesses() {
+    for (auto* process : {relayProcess, serverProcess}) {
+        if (process && process->state() != QProcess::NotRunning) {
+            process->kill();
+            process->waitForFinished();
+        }
+    }
+}
+
+// Desktop-only builds exercise the routing component in process. POSIX builds
+// run the existing relay executable, including its shared-port dispatcher.
+class TestRelay : public QTcpServer {
+public:
+    TestRelay() {
+        if (relayExecutable.isEmpty()) {
+            router.start();
+            CHECK(listen(QHostAddress::LocalHost, 0));
+            port_ = serverPort();
+        }
+        else {
+            relayProcess = &relay;
+            serverProcess = &server;
+            gCheckCleanup = stopProcesses;
+            const auto serverPort = start(server, serverExecutable,
+                                          {"--port", "0", "--db", ":memory:"});
+            port_ = start(relay, relayExecutable,
+                          {"--host", "127.0.0.1", "--port", QString::number(serverPort),
+                           "--advertise", "127.0.0.1", "--listen", "0"});
+        }
+    }
+    ~TestRelay() {
+        if (relay.state() != QProcess::NotRunning) {
+            relay.terminate();
+            CHECK(relay.waitForFinished(8000));
+            CHECK(relay.exitStatus() == QProcess::NormalExit && relay.exitCode() == 0);
+            const auto output = relay.readAll();
+            CHECK(!output.contains("QSocketNotifier") && !output.contains("QObject::"));
+        }
+        stopProcesses();
+        relayProcess = serverProcess = nullptr;
+        gCheckCleanup = nullptr;
+    }
+    quint16 port() const { return port_; }
+    void stopDiscovery() {
+        server.kill();
+        CHECK(server.waitForFinished());
+    }
+
+protected:
+    void incomingConnection(qintptr descriptor) override { router.adopt(descriptor); }
+
+private:
+    quint16 start(QProcess& process, const QString& executable, const QStringList& args) {
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        process.start(executable, args);
+        CHECK(process.waitForStarted());
+        QByteArray output;
+        QRegularExpression marker("listening on port ([0-9]+)");
+        CHECK(until([&] {
+            output += process.readAll();
+            return marker.match(QString::fromUtf8(output)).hasMatch();
+        }));
+        return marker.match(QString::fromUtf8(output)).captured(1).toUShort();
+    }
+    chat::CommunityRouter router;
+    QProcess server, relay;
+    quint16 port_ = 0;
+};
+
+struct RoomPeer {
+    QTcpSocket socket;
+    std::string buffer;
+    bool received(chat::MsgType type, const std::string& body = {}) {
+        const auto bytes = socket.readAll();
+        buffer.append(bytes.constData(), bytes.size());
+        chat::Message message;
+        while (chat::decode(buffer, message) == chat::DecodeStatus::Ok) {
+            if (message.type == type &&
+                (body.empty() || (message.fields.size() >= 3 && message.fields[2] == body)))
+                return true;
+        }
+        return false;
+    }
+    void send(const chat::Message& message) {
+        const auto bytes = chat::encode(message);
+        socket.write(bytes.data(), bytes.size());
+    }
+    void login(quint16 port, const std::string& name) {
+        socket.connectToHost("127.0.0.1", port);
+        CHECK(socket.waitForConnected());
+        send({chat::MsgType::Login, {name}});
+        CHECK(until([&] { return received(chat::MsgType::LoginOk); }));
+    }
+};
+
 void diagnostics(Node& node) {
     QObject::connect(&node, &Node::errorOccurred, [](const QString& message) {
         std::fprintf(stderr, "node: %s\n", message.toUtf8().constData());
@@ -127,8 +231,35 @@ void directAdmissionIsolationAndConnectionReuse() {
 }
 
 void relayHostMigrationAndReconnection() {
-    Relay relay;
-    CHECK(relay.listen(0, QHostAddress::LocalHost));
+    TestRelay relay;
+    // A stalled or fragmented initial handshake must not block other clients.
+    QTcpSocket stalled, fragmented;
+    stalled.connectToHost("127.0.0.1", relay.port());
+    CHECK(stalled.waitForConnected());
+    fragmented.connectToHost("127.0.0.1", relay.port());
+    CHECK(fragmented.waitForConnected());
+    fragmented.write("DQ", 2);
+    CHECK(!until([&] { return fragmented.bytesAvailable() > 0; }, 100));
+    fragmented.write("C1\n", 3);
+    CHECK(until([&] { return fragmented.bytesAvailable() > 0; }));
+    QByteArray challengeBytes;
+    QJsonObject challenge;
+    CHECK(until([&] {
+        challengeBytes += fragmented.readAll();
+        return takeFrame(challengeBytes, challenge);
+    }));
+    CHECK(challenge.value("type") == "challenge");
+    fragmented.abort();
+    RoomPeer roomA, roomB;
+    if (!relayExecutable.isEmpty()) {
+        roomA.login(relay.port(), "room-a");
+        roomB.login(relay.port(), "room-b");
+        CHECK(until([&] {
+            roomA.send(
+                {chat::MsgType::PeerChat, {"room-a", "12345", "before communities", "mint"}});
+            return roomB.received(chat::MsgType::PeerChat, "before communities");
+        }));
+    }
     const auto endpoint = "relay://127.0.0.1:" + QString::number(relay.port());
     QTemporaryDir ad, bd, cd;
     Node a(ad.path()), b(bd.path()), c(cd.path());
@@ -138,10 +269,32 @@ void relayHostMigrationAndReconnection() {
     CHECK(a.start("alice", {}, 0, endpoint) && b.start("bob", {}, 0, endpoint) &&
           c.start("carol", {}, 0, endpoint));
     CHECK(a.port() == 0 && b.port() == 0); // relay mode never opens a direct listener
+    if (!relayExecutable.isEmpty()) {
+        roomA.send({chat::MsgType::PeerChat, {"room-a", "12346", "shared relay", "mint"}});
+        CHECK(until([&] { return roomB.received(chat::MsgType::PeerChat, "shared relay"); }));
+        // Communities continue to join and migrate hosts without discovery.
+        relay.stopDiscovery();
+    }
     const auto cid = a.createCommunity("relayed");
     const auto link = a.invite(cid);
     b.joinCommunity(link);
     CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    bool chatReceived = false;
+    QObject::connect(&b, &Node::packetReceived,
+                     [&](const QString& community, const QString&, const QString&,
+                         const QString& kind, const QJsonObject& packet) {
+                         if (community == cid && kind == "chat" &&
+                             packet.value("body") == "community through shared relay")
+                             chatReceived = true;
+                     });
+    CHECK(a.sendPacket(cid, channel(a.communities()[cid], "text"), "chat",
+                       {{"body", "community through shared relay"}}) == 1);
+    CHECK(until([&] { return chatReceived; }));
+    if (!relayExecutable.isEmpty()) {
+        roomA.send({chat::MsgType::PeerChat, {"room-a", "12347", "room beside community", "mint"}});
+        CHECK(until(
+            [&] { return roomB.received(chat::MsgType::PeerChat, "room beside community"); }));
+    }
     a.stop();
     CHECK(until([&] { return b.online(cid).size() == 1; }));
     CHECK(b.host(cid) == b.peerId());
@@ -287,6 +440,10 @@ void allOfflineRestoresMetadataAndNeverReplaysMissedChat() {
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
+    if (argc == 3) {
+        relayExecutable = QString::fromLocal8Bit(argv[1]);
+        serverExecutable = QString::fromLocal8Bit(argv[2]);
+    }
     const auto backend = qEnvironmentVariable("DISQUISITION_TEST_TLS_BACKEND");
     if (!backend.isEmpty() && !QSslSocket::setActiveBackend(backend)) {
         std::fprintf(stderr, "TLS backend unavailable: %s\n", backend.toUtf8().constData());

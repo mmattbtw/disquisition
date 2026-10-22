@@ -1,7 +1,8 @@
 # Servers, peers and relays
 
 This page describes the legacy room protocol. Decentralized communities use a
-separate authenticated protocol and community relay; see [Communities](communities.md).
+separate authenticated protocol through the same relay executable and port;
+see [Communities](communities.md).
 
 Disquisition uses plain TCP without encryption, authentication, private rooms
 or access control. Use hosts and networks you trust. Relays hide client addresses

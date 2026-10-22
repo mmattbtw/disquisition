@@ -114,24 +114,24 @@ if(BUILD_COMMUNITIES)
     find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
     add_library(chat_communities STATIC
       include/community/node.h
-      include/community/relay.h
       src/community/identity.cpp
       src/community/model.cpp
       src/community/store.cpp
-      src/community/node.cpp
-      src/community/relay.cpp)
+      src/community/node.cpp)
     target_include_directories(chat_communities PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE OpenSSL::Crypto)
     set_target_properties(chat_communities PROPERTIES AUTOMOC ON)
-    add_executable(community-relay src/community/relay_main.cpp)
-    target_link_libraries(community-relay PRIVATE chat_communities)
+    add_library(chat_community_router STATIC
+      include/relay/community_router.h src/relay/community_router.cpp)
+    target_link_libraries(chat_community_router PUBLIC chat_communities)
+    set_target_properties(chat_community_router PROPERTIES AUTOMOC ON)
     if(BUILD_TESTING)
       add_executable(community_model_test test/community_model_test.cpp)
       target_link_libraries(community_model_test PRIVATE chat_communities)
       add_test(NAME community_model_test COMMAND community_model_test)
       set_tests_properties(community_model_test PROPERTIES TIMEOUT 120)
       add_executable(community_network_test test/community_network_test.cpp)
-      target_link_libraries(community_network_test PRIVATE chat_communities)
+      target_link_libraries(community_network_test PRIVATE chat_communities chat_community_router chat_protocol)
       add_test(NAME community_network_test COMMAND community_network_test)
       set_tests_properties(community_network_test PROPERTIES TIMEOUT 120)
       if(APPLE OR WIN32)
@@ -315,17 +315,23 @@ add_executable(client
   src/client/tui.cpp)
 target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(client PRIVATE chat_network chat_recent_messages ${CURSES_LIBRARIES})
-if(TARGET chat_communities)
-  target_sources(client PRIVATE src/community/terminal.cpp)
-  target_compile_definitions(client PRIVATE DISQUISITION_COMMUNITIES=1)
-  target_link_libraries(client PRIVATE chat_communities)
-endif()
 
 add_executable(relay
   src/relay/main.cpp
   src/relay/options.cpp
   src/relay/relay.cpp)
 target_link_libraries(relay PRIVATE chat_network)
+if(TARGET chat_community_router)
+  if(BUILD_TESTING)
+    add_dependencies(community_network_test relay server)
+    # The existing relay must serve both protocols on one public port.
+    add_test(NAME community_shared_relay_test COMMAND community_network_test
+      $<TARGET_FILE:relay> $<TARGET_FILE:server>)
+    set_tests_properties(community_shared_relay_test PROPERTIES TIMEOUT 120)
+  endif()
+  target_compile_definitions(relay PRIVATE DISQUISITION_COMMUNITIES=1)
+  target_link_libraries(relay PRIVATE chat_community_router)
+endif()
 
 if(BUILD_TESTING)
   add_test(NAME macos_codesign_test

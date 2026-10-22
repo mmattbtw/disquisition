@@ -1,4 +1,4 @@
-#include "community/relay.h"
+#include "relay/community_router.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -8,8 +8,9 @@
 #include "community/identity.h"
 #include "community/wire.h"
 
-namespace community {
-struct Relay::Session {
+namespace chat {
+using namespace community;
+struct CommunityRouter::Session {
     QTcpSocket* socket = nullptr;
     QByteArray buffer;
     QString nonce;
@@ -18,49 +19,12 @@ struct Relay::Session {
     Session* paired = nullptr;
     bool tunnel = false;
     bool control = false;
+    bool started = false;
     qint64 touched = QDateTime::currentMSecsSinceEpoch();
 };
 
-Relay::Relay(QObject* parent) : QObject(parent) {
-    connect(&listener_, &QTcpServer::newConnection, this, [this] {
-        while (listener_.hasPendingConnections()) {
-            auto* socket = listener_.nextPendingConnection();
-            if (sessions_.size() >= 512) {
-                socket->abort();
-                socket->deleteLater();
-                continue;
-            }
-            auto* session = new Session;
-            session->socket = socket;
-            session->nonce = randomCode();
-            sessions_.append(session);
-            socket->setReadBufferSize(256 * 1024);
-            connect(socket, &QTcpSocket::readyRead, this, [this, session] { read(session); });
-            connect(socket, &QTcpSocket::bytesWritten, this, [this, session] {
-                if (session->paired)
-                    read(session->paired);
-            });
-            connect(socket, &QTcpSocket::disconnected, this, [this, session] {
-                auto* paired = session->paired;
-                if (paired)
-                    paired->paired = nullptr;
-                if (registered_.value(session->peer) == session)
-                    registered_.remove(session->peer);
-                for (auto it = waiting_.begin(); it != waiting_.end();) {
-                    if (it.value() == session)
-                        it = waiting_.erase(it);
-                    else
-                        ++it;
-                }
-                sessions_.removeAll(session);
-                session->socket->deleteLater();
-                delete session;
-                if (paired)
-                    paired->socket->abort();
-            });
-            send(session, {{"type", "challenge"}, {"nonce", session->nonce}});
-        }
-    });
+CommunityRouter::CommunityRouter(QObject* parent) : QObject(parent) {
+    timer_.setParent(this);
     timer_.setInterval(1000);
     connect(&timer_, &QTimer::timeout, this, [this] {
         const auto now = QDateTime::currentMSecsSinceEpoch();
@@ -74,29 +38,81 @@ Relay::Relay(QObject* parent) : QObject(parent) {
     });
 }
 
-bool Relay::listen(quint16 port, const QHostAddress& address) {
-    if (!listener_.listen(address, port))
-        return false;
+void CommunityRouter::start() {
     timer_.start();
-    return true;
 }
-Relay::~Relay() {
+
+void CommunityRouter::adopt(qintptr descriptor) {
+    auto* socket = new QTcpSocket(this);
+    if (!socket->setSocketDescriptor(descriptor)) {
+        socket->deleteLater();
+        return;
+    }
+    if (sessions_.size() >= 512) {
+        socket->abort();
+        socket->deleteLater();
+        return;
+    }
+    auto* session = new Session;
+    session->socket = socket;
+    session->nonce = randomCode();
+    sessions_.append(session);
+    socket->setReadBufferSize(256 * 1024);
+    connect(socket, &QTcpSocket::readyRead, this, [this, session] { read(session); });
+    connect(socket, &QTcpSocket::bytesWritten, this, [this, session] {
+        if (session->paired)
+            read(session->paired);
+    });
+    connect(socket, &QTcpSocket::disconnected, this, [this, session] {
+        auto* paired = session->paired;
+        if (paired)
+            paired->paired = nullptr;
+        if (registered_.value(session->peer) == session)
+            registered_.remove(session->peer);
+        for (auto it = waiting_.begin(); it != waiting_.end();) {
+            if (it.value() == session)
+                it = waiting_.erase(it);
+            else
+                ++it;
+        }
+        sessions_.removeAll(session);
+        session->socket->deleteLater();
+        delete session;
+        if (paired)
+            paired->socket->abort();
+    });
+    read(session);
+}
+
+CommunityRouter::~CommunityRouter() {
     close();
 }
 
-void Relay::close() {
+void CommunityRouter::close() {
     timer_.stop();
-    listener_.close();
     while (!sessions_.isEmpty())
         sessions_.first()->socket->abort();
 }
 
-void Relay::send(Session* session, const QJsonObject& message) {
+void CommunityRouter::send(Session* session, const QJsonObject& message) {
     session->socket->write(frame(message));
 }
 
-void Relay::read(Session* session) {
+void CommunityRouter::read(Session* session) {
     session->touched = QDateTime::currentMSecsSinceEpoch();
+    if (!session->started) {
+        constexpr auto size = sizeof(kRelayPrefix) - 1;
+        const auto prefix = session->socket->peek(size);
+        if (!QByteArray(kRelayPrefix, size).startsWith(prefix)) {
+            session->socket->abort();
+            return;
+        }
+        if (prefix.size() < static_cast<qsizetype>(size))
+            return;
+        session->socket->read(size);
+        session->started = true;
+        send(session, {{"type", "challenge"}, {"nonce", session->nonce}});
+    }
     if (session->tunnel) {
         if (!session->paired)
             return;
@@ -122,7 +138,7 @@ void Relay::read(Session* session) {
     }
 }
 
-void Relay::route(Session* session, const QJsonObject& request) {
+void CommunityRouter::route(Session* session, const QJsonObject& request) {
     const auto type = request.value("type").toString();
     if (session->control && type == "ping") {
         send(session, {{"type", "pong"}});
@@ -189,7 +205,7 @@ void Relay::route(Session* session, const QJsonObject& request) {
     }
 }
 
-void Relay::bridge(Session* a, Session* b) {
+void CommunityRouter::bridge(Session* a, Session* b) {
     a->paired = b;
     b->paired = a;
     a->tunnel = true;
@@ -199,4 +215,4 @@ void Relay::bridge(Session* a, Session* b) {
     send(a, {{"type", "ready"}, {"peer", a->peer}});
     send(b, {{"type", "ready"}});
 }
-} // namespace community
+} // namespace chat

@@ -14,12 +14,15 @@ constexpr const char* kUsage = R"(usage: relay --advertise <host> [options]
                           recommended: it is what lets unreachable
                           clients be discovered and dialled
       --listen <port>     the one port every hosted user shares, for
-                          clients and peers alike (default 3333)
+                          room and community connections (default 3333)
   -h, --help              show this message
 
 Names come from the clients: any number of clients may attach, each
 signing in as the name it supplies. Point a client at it with:
   client --relay <advertise-host>:<listen>
+
+Desktop communities use relay://<host>:<listen> on the same port.
+Community routing does not require the discovery server.
 )";
 
 } // namespace

@@ -65,7 +65,7 @@ void memberHostsAdmitWithoutAdmins() {
     CHECK(group.model.isMember(group.bob.id()));
     CHECK(!group.model.canAdmin(group.bob.id()));
     group.model.admit(group.bob,
-                      joinIntent(group.carol, group.invite, "carol", "relay://relay.example:3334"));
+                      joinIntent(group.carol, group.invite, "carol", "relay://relay.example:3333"));
     CHECK(group.model.isMember(group.carol.id()));
     rejects([&] { group.model.change(group.bob, "rename", {{"name", "hijacked"}}); });
     rejects([&] { group.model.issueInvite(group.bob); });

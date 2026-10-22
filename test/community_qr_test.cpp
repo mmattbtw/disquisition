@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
     const auto owner = community::Identity::generate();
     const community::Invite invite{
         community::freshId(), owner.id(), community::randomCode(),
-        QJsonArray{QJsonObject{{"peer", owner.id()}, {"endpoint", "relay://relay.example:3334"}}}};
+        QJsonArray{QJsonObject{{"peer", owner.id()}, {"endpoint", "relay://relay.example:3333"}}}};
     const auto link = invite.toLink();
     const auto image = community::inviteQr(link);
     CHECK(!image.isNull());

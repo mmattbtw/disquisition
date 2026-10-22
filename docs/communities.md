@@ -4,9 +4,9 @@ Communities live on member devices. The creator owns the community; any member
 can host its metadata and admit peers with an existing valid invite. The
 discovery `server` process is not involved in community connections.
 
-The desktop app's **Communities** tab and `client community` use the same
-community protocol. The **Legacy room** tab, original terminal mode, `server`,
-and original `relay` keep their existing protocol.
+Communities are a feature of the desktop client and the existing `relay`.
+The relay accepts community connections and room connections on the same TCP
+port. The terminal client continues to use the original room protocol.
 
 ## Start on a LAN
 
@@ -33,26 +33,28 @@ links can also be pasted into Join on every platform.
 Keep `identity.key` with the metadata when backing up or moving this directory;
 that key preserves the client's membership and owner/admin identity.
 
-## Connect through a community relay
+## Connect through the relay
 
 Run this on a reachable machine:
 
 ```sh
-./build/community-relay --listen 3334
+./build/relay --listen 3333
 ```
 
-Set **Community relay** to `relay://hostname:3334` before connecting each client.
+Set **Relay** to `relay://hostname:3333` before connecting each client.
 Relay mode opens no direct listening port and advertises no direct client IP.
 The relay sees the connecting addresses and routing IDs, but peer traffic,
 invite challenges, metadata, chat, and media travel inside mutual TLS tunnels.
 
-This is a new relay protocol. An existing legacy relay on port 3333 cannot
-handle community connections. The repository change does not deploy or upgrade
-any public relay service.
+Build the relay with community support enabled, then restart it with the
+updated binary. Community routing works without the discovery `server` process;
+room clients still use that server through the relay. The same `--listen` port
+handles both protocols, with no additional process or community port. This
+repository change does not deploy or upgrade any public relay service.
 
 The relay keeps only live routing registrations and pending tunnels. It does
 not own community metadata, issue invites, decide permissions, or store history.
-If the peer originally named in an invite is offline, a community relay can
+If the peer originally named in an invite is offline, the relay can
 route the request to another online member of that community.
 
 Direct invites contain up to eight bootstrap peers. If none is reachable, a
@@ -140,33 +142,6 @@ Existing legacy message files upgrade in place; their messages stay in the
 legacy room. As in the existing client, uploaded images are not saved as chat
 history. Community metadata and identity storage are independent of this option.
 
-## Terminal client
-
-Community mode requires Qt Network and OpenSSL at build time. It uses a line
-interface, while the original `client` invocation keeps the ncurses room UI.
-
-```sh
-./build/client community --name alice --data /tmp/alice --create friends
-./build/client community --name bob --data /tmp/bob
-```
-
-In Alice's client, `/invite` prints a link. In Bob's client, `/join LINK` joins
-it. Use `/communities`, `/use NAME_OR_ID`, `/channels`, and `/channel NAME_OR_ID`
-to navigate. Normal input sends to the selected text channel. `/help` lists
-administrative commands, `/members` shows IDs and endpoints, and `/history`
-loads this device's selected-channel history.
-
-For relayed connections and optional saving:
-
-```sh
-./build/client community --name alice --data /tmp/alice \
-  --relay relay://127.0.0.1:3334 --save-messages /tmp/alice-messages.db
-```
-
-Desktop and terminal clients share the default identity directory. Use `--data`
-for terminal clients or `--community-data` for desktop clients when running
-multiple identities. Voice and screen sharing use the desktop client.
-
 ## Build and verification
 
 Community support needs Qt 6.6+ Core/Network and OpenSSL 3+. The desktop also
@@ -184,3 +159,7 @@ isolation, duplicate handling, retention, and rollback.
 The desktop UI test connects an isolated client, exercises creation and admin
 dialogs, checks channel separation and undelivered local echoes, and captures
 `build/community-ui.png` without accessing microphone or screen hardware.
+
+On POSIX builds, the shared relay test launches the real `relay` and `server`,
+checks room chat alongside community connections on one port, then stops
+discovery and checks community admission, host migration, and recovery.

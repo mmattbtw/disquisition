@@ -129,7 +129,7 @@ bool Node::start(const QString& displayName, const QString& advertisedHost, quin
     }
     if (!relayEndpoint.isEmpty() &&
         (!validEndpoint(relayEndpoint) || QUrl(relayEndpoint).scheme() != "relay")) {
-        emit errorOccurred("Use relay://hostname:port for the community relay.");
+        emit errorOccurred("Use relay://hostname:port for the relay.");
         return false;
     }
     relayEndpoint_ = relayEndpoint;
@@ -336,6 +336,10 @@ Node::Link* Node::makeLink(bool outgoing, const QString& expected) {
             }
         }
         socket->ignoreSslErrors(errors);
+    });
+    connect(socket, &QSslSocket::connected, this, [link] {
+        if (!link->relayAction.isEmpty())
+            link->socket->write(kRelayPrefix, sizeof(kRelayPrefix) - 1);
     });
     connect(socket, &QSslSocket::encrypted, this, [this, link] { encrypted(link); });
     connect(socket, &QSslSocket::readyRead, this, [this, link] { read(link); });
@@ -965,6 +969,8 @@ void Node::connectRelay() {
     relay_ = socket;
     relayLastRead_ = now();
     socket->setReadBufferSize(64 * 1024);
+    connect(socket, &QTcpSocket::connected, this,
+            [socket] { socket->write(kRelayPrefix, sizeof(kRelayPrefix) - 1); });
     connect(socket, &QTcpSocket::readyRead, this, &Node::readRelay);
     const auto cleanup = [this, socket] {
         if (relay_ == socket) {
