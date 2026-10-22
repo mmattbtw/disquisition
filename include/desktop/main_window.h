@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QMainWindow>
+#include <QMap>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QThreadPool>
@@ -79,6 +80,8 @@ private:
     void handlePeerMessage(QTcpSocket* socket, const chat::Message& message);
     void sendFrame(QTcpSocket* socket, const chat::Message& message);
     void sendVoiceState();
+    void publishSprite(bool sendReset = false);
+    void receiveSprite(const chat::Message& message);
     void appendChat(const QString& sender, const QString& body,
                     const QString& messageColor = "mint", bool system = false,
                     qint64 timestamp = -1);
@@ -147,6 +150,7 @@ private:
     bool showPenguins_ = false;
     bool penguinsWander_ = true;
     int penguinsIdleMinutes_ = 10;
+    QMap<QString, chat::SpriteTransfer> spriteTransfers_;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;

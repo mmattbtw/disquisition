@@ -15,6 +15,8 @@ struct PenguinSprites {
     static PenguinSprites fromSettings(QSettings& settings);
     void save(QSettings& settings) const;
     static QImage readImage(const QString& path, QString& error);
+    QByteArray wireData() const;
+    static PenguinSprites fromWireData(const QByteArray& bytes);
 };
 
 // Edits a copy. Preferences commits it only when Save is accepted.

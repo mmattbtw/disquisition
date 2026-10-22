@@ -258,6 +258,50 @@ void testPeerImage() {
         Message{MsgType::PeerChat, {"bob", "1", "pink", "1", "0", "1", "x"}}, chunk));
 }
 
+void testSpriteTransfers() {
+    const std::string data(chat::kMaxSpriteBytes, '\0');
+    const auto frames = chat::spriteMessages(data, "abcdefghijklmnopqrst-2");
+    CHECK(frames.size() == chat::kMaxSpriteChunks);
+    chat::SpriteTransfer incoming;
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        std::string buffer = chat::encode(frames[i]);
+        Message decoded;
+        CHECK(chat::decode(buffer, decoded) == DecodeStatus::Ok);
+        CHECK(incoming.accept(decoded, true));
+        CHECK(incoming.complete() == (i + 1 == frames.size()));
+    }
+    CHECK(incoming.data() == data);
+    CHECK(incoming.accept(chat::spriteMessages({}, "alice").front(), true));
+    CHECK(incoming.complete() && incoming.data().empty());
+    CHECK(chat::spriteMessages(data + "x").empty());
+
+    using Fields = std::vector<std::string>;
+    const auto rejects = [&](Fields fields) {
+        return !incoming.accept(Message{MsgType::PenguinSprite, std::move(fields)});
+    };
+    CHECK(rejects({"pretend_sender", "0", "1", "x"}));
+    CHECK(rejects({"1", "2", "x"})); // No first chunk.
+    CHECK(rejects({"0", "0", "x"}));
+    CHECK(rejects({"0", std::to_string(chat::kMaxSpriteChunks + 1), "x"}));
+    CHECK(rejects({"0", "1", std::string(chat::kImageChunkSize + 1, 'x')}));
+    CHECK(rejects({"+0", "1", "x"}));
+    CHECK(rejects({"0", "1", ""}));
+    CHECK(incoming.accept(Message{MsgType::PenguinSprite, {"0", "3", "first"}}));
+    CHECK(!incoming.complete());
+    CHECK(rejects({"2", "3", "skipped"}));
+    CHECK(incoming.accept(Message{MsgType::PenguinSprite, {"0", "3", "old"}}));
+    CHECK(incoming.accept(Message{MsgType::PenguinSprite, {"0", "1", "replacement"}}));
+    CHECK(incoming.complete() && incoming.data() == "replacement");
+
+    const std::string full(chat::kImageChunkSize, 'x');
+    for (std::uint32_t i = 0; i < chat::kMaxSpriteChunks - 1; ++i) {
+        CHECK(incoming.accept(Message{MsgType::PenguinSprite,
+            {std::to_string(i), std::to_string(chat::kMaxSpriteChunks), full}}));
+    }
+    CHECK(rejects({std::to_string(chat::kMaxSpriteChunks - 1),
+                   std::to_string(chat::kMaxSpriteChunks), full}));
+}
+
 } // namespace
 
 int main() {
@@ -273,6 +317,7 @@ int main() {
     testPeerChat();
     testPeerAnnouncement();
     testPeerImage();
+    testSpriteTransfers();
     std::puts("protocol_test: ok");
     return 0;
 }

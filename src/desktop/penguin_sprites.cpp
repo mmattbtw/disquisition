@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QVBoxLayout>
+#include <QtEndian>
 #include <utility>
 
 namespace {
@@ -52,6 +53,26 @@ void PenguinSprites::save(QSettings& settings) const {
     settings.setValue("penguins/customSprite", enabled);
     settings.setValue("penguins/standingSprite", png(standing));
     settings.setValue("penguins/walkingSprite", png(walking));
+}
+
+QByteArray PenguinSprites::wireData() const {
+    if (!enabled || !complete()) return {};
+    const QByteArray first = png(standing);
+    const QByteArray second = png(walking);
+    QByteArray bytes(4, '\0');
+    qToBigEndian<quint32>(static_cast<quint32>(first.size()), bytes.data());
+    return bytes + first + second;
+}
+
+PenguinSprites PenguinSprites::fromWireData(const QByteArray& bytes) {
+    if (bytes.size() < 4 || bytes.size() > 256 * 1024) return {};
+    const auto length = qFromBigEndian<quint32>(bytes.constData());
+    if (length == 0 || length >= static_cast<quint32>(bytes.size() - 4)) return {};
+    PenguinSprites result;
+    result.standing = storedImage(bytes.mid(4, length));
+    result.walking = storedImage(bytes.mid(4 + length));
+    result.enabled = result.complete();
+    return result;
 }
 
 QImage PenguinSprites::readImage(const QString& path, QString& error) {
@@ -140,7 +161,7 @@ PenguinSpriteEditor::PenguinSpriteEditor(PenguinSprites sprites, QWidget* parent
     auto* hint = new QLabel("Standing: face forward. Walking: face left.\n"
                            "Transparent images work best.\n"
                            "Animated images use the first frame.\n"
-                           "Replaces everyone's sprite on this device.", images);
+                           "Your sprite is shared with everyone in the server.", images);
     form->addRow(hint);
     layout->addWidget(images);
     images->setVisible(sprites_.enabled);
