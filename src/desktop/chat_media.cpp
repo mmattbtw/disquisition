@@ -95,8 +95,8 @@ void openViewer(QWidget* parent, const QByteArray& bytes) {
     }
 
     auto* buttons = new QHBoxLayout;
-    auto* save = new QPushButton("save…", dialog);
-    auto* close = new QPushButton("close", dialog);
+    auto* save = new QPushButton("Save…", dialog);
+    auto* close = new QPushButton("Close", dialog);
     buttons->addStretch();
     buttons->addWidget(save);
     buttons->addWidget(close);
