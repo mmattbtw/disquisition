@@ -21,7 +21,7 @@ Client::Client(std::string address, ConnectionType type) : type_(type) {
         throw std::invalid_argument("address must include a host and port");
     }
     if (!chat::parseHostPort(address, host_, port_, 0) || port_ == 0) {
-        throw std::invalid_argument("address must look like relay.mmatt.net:3333");
+        throw std::invalid_argument("address must look like relay.disquisition.app:3333");
     }
 }
 

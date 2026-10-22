@@ -8,7 +8,7 @@ connect from another terminal:
 ```
 
 Running `./build/client` without arguments opens interactive setup, which
-defaults to `relay.mmatt.net:9000`. With any command-line option, the default
+defaults to `server.disquisition.app:9000`. With any command-line option, the default
 server is `127.0.0.1:9000`.
 
 For remote connections, address advertising and relay setup, see

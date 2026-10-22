@@ -5,6 +5,11 @@ or access control. Use hosts and networks you trust. Relays hide client addresse
 from other users while direct connections reveal them. Relays and servers can
 read relayed voice and screen shares.
 
+The public discovery server is `server.disquisition.app:9000`, and the public
+relay is `relay.disquisition.app:3333`. The legacy hostname `relay.mmatt.net`
+remains an alias for `relay.disquisition.app`, so saved settings and older
+clients keep working on the same ports.
+
 ## Start a server
 
 ```sh
