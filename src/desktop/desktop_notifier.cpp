@@ -13,6 +13,9 @@
 #if defined(DISQUISITION_DBUS_NOTIFICATIONS)
 #    include "desktop/freedesktop_notifications.h"
 #endif
+#if defined(Q_OS_WIN)
+#    include "desktop/windows_notifications.h"
+#endif
 
 DesktopNotifier::DesktopNotifier(const QList<QAction*>& trayActions, QObject* parent) :
     QObject(parent), trayActions_(trayActions) {
@@ -26,7 +29,16 @@ DesktopNotifier::DesktopNotifier(const QList<QAction*>& trayActions, QObject* pa
         appIcon_.addPixmap(QPixmap::fromImage(iconImages_.last()));
     }
     updateIcons();
-#    if defined(DISQUISITION_DBUS_NOTIFICATIONS)
+#    if defined(Q_OS_WIN)
+    windows_ = new WindowsNotifications(icon, this);
+    if (windows_->isAvailable()) {
+        connect(windows_, &WindowsNotifications::activated, this, &DesktopNotifier::activated);
+    } else {
+        delete windows_;
+        windows_ = nullptr;
+        showTrayIcon();
+    }
+#    elif defined(DISQUISITION_DBUS_NOTIFICATIONS)
     constexpr int kNotificationIconSize = 64;
     freedesktop_ = new FreedesktopNotifications(
         icon.scaled(kNotificationIconSize, kNotificationIconSize, Qt::KeepAspectRatio,
@@ -53,6 +65,12 @@ DesktopNotifier::~DesktopNotifier() {
 void DesktopNotifier::show(const DesktopNotification& notification) {
 #if defined(Q_OS_MACOS)
     mac_->show(notification.key, notification.title, notification.body);
+#elif defined(Q_OS_WIN)
+    if (windows_) {
+        windows_->show(notification.key, notification.title, notification.body);
+    } else {
+        showTrayMessage(notification);
+    }
 #elif defined(DISQUISITION_DBUS_NOTIFICATIONS)
     if (freedesktop_) {
         freedesktop_->show(notification.key, notification.title, notification.body);
@@ -68,6 +86,8 @@ void DesktopNotifier::withdrawAll() {
     // A tray icon's message cannot be taken back.
 #if defined(Q_OS_MACOS)
     mac_->removeAll();
+#elif defined(Q_OS_WIN)
+    if (windows_) windows_->removeAll();
 #elif defined(DISQUISITION_DBUS_NOTIFICATIONS)
     if (freedesktop_) freedesktop_->closeAll();
 #endif

@@ -178,6 +178,11 @@ if(BUILD_DESKTOP_APP)
         BASE resources/macos
         FILES resources/macos/disquisition.png)
     endif()
+    if(WIN32)
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/windows_notifications.h src/desktop/windows_notifications.cpp)
+      target_link_libraries(disquisition-desktop PRIVATE runtimeobject)
+    endif()
     if(UNIX AND NOT APPLE AND TARGET Qt6::DBus)
       target_sources(disquisition-desktop PRIVATE
         include/desktop/freedesktop_notifications.h src/desktop/freedesktop_notifications.cpp)

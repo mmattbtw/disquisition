@@ -16,9 +16,10 @@ class QAction;
 class QMenu;
 class QSystemTrayIcon;
 class QWidget;
+class WindowsNotifications;
 
-// Notification Center and the Dock on macOS, the D-Bus notification server on
-// Linux, and a tray icon on Windows or when Linux has no notification server.
+// Notification Center and the Dock on macOS, toasts on Windows, the D-Bus
+// notification server on Linux, and a tray icon where those are missing.
 class DesktopNotifier final : public QObject {
     Q_OBJECT
 
@@ -46,6 +47,7 @@ private:
     std::unique_ptr<QMenu> trayMenu_;
     QSystemTrayIcon* tray_ = nullptr;
     FreedesktopNotifications* freedesktop_ = nullptr;
+    WindowsNotifications* windows_ = nullptr;
 #if defined(Q_OS_MACOS)
     std::unique_ptr<MacNotifications> mac_;
 #endif
