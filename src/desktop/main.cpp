@@ -2,13 +2,13 @@
 #include <QFont>
 #include <QFontDatabase>
 
+#include "desktop/app_identity.h"
 #include "desktop/main_window.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    // Keep the existing settings and application-data paths when changing the display name.
-    QApplication::setApplicationName("Disquisition");
-    QApplication::setApplicationDisplayName("disquisition");
+    QApplication::setApplicationName(QString::fromUtf8(disquisition::kSettingsName));
+    QApplication::setApplicationDisplayName(QString::fromUtf8(disquisition::kAppName));
     QApplication::setOrganizationName("Disquisition");
     
     // load font
