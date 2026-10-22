@@ -105,8 +105,10 @@ cmake --build build --target mac_drawing_panel_test
 ```
 
 This test checks that enabling the overlay and pen leaves the app inactive,
-forwards native strokes to the shared drawing, renders the shared colors,
-supports selection and erasing, and restores click-through on Escape. It briefly shows native windows, so it runs separately from `ctest`.
+accepts native panel mouse events, forwards strokes to the shared drawing,
+and renders the shared colors. It also supports selection and erasing, and
+restores click-through on Escape. It briefly
+shows native windows, so it runs separately from `ctest`.
 For a manual check, put another app over Disquisition, enable the presenter
 pen, draw, change colors, and press Escape. The client should stay behind the
 shared app, and Escape should let clicks reach that app again.
