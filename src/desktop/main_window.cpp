@@ -274,7 +274,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             leaveVoice();
         } else if (resumeVoice_) {
             resumeVoice_ = false;
-            voiceButton_->setText("join voice");
+            voiceButton_->setText("Join Voice");
             voiceLabel_->setText("voice: off");
         } else {
             joinVoice();
@@ -311,7 +311,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         voice_.setMuted(muted_);
         relayAudio_.setMuted(muted_);
         muteButton_->setChecked(muted_);
-        muteButton_->setText(muted_ ? "unmute" : "mute");
+        muteButton_->setText(muted_ ? "Unmute" : "Mute");
         sendVoiceState();
     });
     connect(deafenButton_, &QPushButton::clicked, this, [this] {
@@ -326,14 +326,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         relayAudio_.setDeafened(deafened_);
         relayAudio_.setMuted(muted_);
         deafenButton_->setChecked(deafened_);
-        deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
+        deafenButton_->setText(deafened_ ? "Undeafen" : "Deafen");
         if (deafened_) {
             muteButton_->setChecked(true);
-            muteButton_->setText("unmute");
+            muteButton_->setText("Unmute");
             muteButton_->setEnabled(false);
         } else {
             muteButton_->setChecked(muted_);
-            muteButton_->setText(muted_ ? "unmute" : "mute");
+            muteButton_->setText(muted_ ? "Unmute" : "Mute");
             muteButton_->setEnabled(true);
         }
         sendVoiceState();
@@ -442,12 +442,12 @@ void MainWindow::buildUi() {
     auto* setup = new QHBoxLayout;
     name_ = new QLineEdit(root);
     name_->setPlaceholderText("name");
-    connectButton_ = new QPushButton("join", root);
+    connectButton_ = new QPushButton("Join", root);
     connectButton_->setObjectName("primary");
-    voiceButton_ = new QPushButton("join voice", root);
+    voiceButton_ = new QPushButton("Join Voice", root);
     voiceButton_->setEnabled(false);
-    settingsButton_ = new QPushButton("settings", root);
-    shareButton_ = new QPushButton("share screen", root);
+    settingsButton_ = new QPushButton("Settings", root);
+    shareButton_ = new QPushButton("Share Screen", root);
     shareButton_->setEnabled(false);
     setup->addWidget(name_, 1);
     setup->addWidget(connectButton_);
@@ -474,10 +474,10 @@ void MainWindow::buildUi() {
     outputDevice_ = new QComboBox(root);
     outputDevice_->setEditable(false);
     outputDevice_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    muteButton_ = new QPushButton("mute", root);
+    muteButton_ = new QPushButton("Mute", root);
     muteButton_->setCheckable(true);
     muteButton_->setEnabled(false);
-    deafenButton_ = new QPushButton("deafen", root);
+    deafenButton_ = new QPushButton("Deafen", root);
     deafenButton_->setCheckable(true);
     deafenButton_->setEnabled(false);
     devices->addWidget(micLabel);
@@ -528,10 +528,10 @@ void MainWindow::buildUi() {
     composer_->setPlaceholderText("> type a message");
     composer_->setEnabled(false);
     composer_->installEventFilter(this);
-    gifButton_ = new QPushButton("gif", root);
+    gifButton_ = new QPushButton("GIF", root);
     gifButton_->setToolTip("search GIFs (/gif)");
     gifButton_->setEnabled(false);
-    sendButton_ = new QPushButton("send", root);
+    sendButton_ = new QPushButton("Send", root);
     sendButton_->setEnabled(false);
     compose->addWidget(composer_, 1);
     compose->addWidget(gifButton_);
@@ -628,7 +628,7 @@ void MainWindow::joinVoice() {
             voiceWanted_ = true;
             activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
             sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
-            voiceButton_->setText("leave voice");
+            voiceButton_->setText("Leave Voice");
             voiceLabel_->setText("voice: relayed");
             muteButton_->setEnabled(!deafened_);
             deafenButton_->setEnabled(true);
@@ -667,7 +667,7 @@ void MainWindow::joinVoice() {
         restoreVoiceState();
         if (deafened_) voice_.setDeafened(true);
         else if (muted_) voice_.setMuted(true);
-        voiceButton_->setText("leave voice");
+        voiceButton_->setText("Leave Voice");
         muteButton_->setEnabled(!deafened_);
         deafenButton_->setEnabled(true);
         inputDevice_->setEnabled(false);
@@ -685,10 +685,10 @@ void MainWindow::restoreVoiceState() {
     relayAudio_.setMuted(muted_);
     relayAudio_.setDeafened(deafened_);
     muteButton_->setChecked(muted_);
-    muteButton_->setText(muted_ ? "unmute" : "mute");
+    muteButton_->setText(muted_ ? "Unmute" : "Mute");
     muteButton_->setEnabled(!deafened_);
     deafenButton_->setChecked(deafened_);
-    deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
+    deafenButton_->setText(deafened_ ? "Undeafen" : "Deafen");
     resumeVoice_ = false;
 }
 
@@ -707,13 +707,13 @@ void MainWindow::leaveVoice() {
     localSpeaking_ = false;
     muteButton_->setChecked(false);
     deafenButton_->setChecked(false);
-    muteButton_->setText("mute");
-    deafenButton_->setText("deafen");
+    muteButton_->setText("Mute");
+    deafenButton_->setText("Deafen");
     muteButton_->setEnabled(false);
     deafenButton_->setEnabled(false);
     inputDevice_->setEnabled(true);
     outputDevice_->setEnabled(true);
-    voiceButton_->setText("join voice");
+    voiceButton_->setText("Join Voice");
     voiceButton_->setEnabled(!myName_.isEmpty() &&
                              server_.state() == QAbstractSocket::ConnectedState);
     voiceLabel_->setText("voice: off");
@@ -770,7 +770,7 @@ void MainWindow::startScreenShare() {
     const quint64 generation = ++screenShareGeneration_;
     sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
     stage_->addStream(myName_, true);
-    shareButton_->setText("stop sharing");
+    shareButton_->setText("Stop Sharing");
     refreshMembers();
     const bool sharingWindow = source->kind == ShareSource::Kind::Window;
     QTimer::singleShot(5000, this, [this, generation, sharingWindow] {
@@ -799,7 +799,7 @@ void MainWindow::stopScreenShare() {
         sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"0"}});
     }
     stage_->removeStream(myName_);
-    shareButton_->setText("share screen");
+    shareButton_->setText("Share Screen");
     refreshMembers();
 }
 
@@ -947,7 +947,7 @@ void MainWindow::showPreferences() {
     auto* saveMessages = new QCheckBox("Save chat messages locally", &dialog);
     saveMessages->setChecked(saveMessages_);
     auto* messageFile = new QLineEdit(messageFile_, &dialog);
-    auto* chooseMessageFile = new QPushButton("browse…", &dialog);
+    auto* chooseMessageFile = new QPushButton("Browse…", &dialog);
     auto* messageFileRow = new QWidget(&dialog);
     auto* messageFileLayout = new QHBoxLayout(messageFileRow);
     messageFileLayout->setContentsMargins(0, 0, 0, 0);
