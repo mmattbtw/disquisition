@@ -4,6 +4,8 @@
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QImage>
+#include <QPainter>
 #include <QWidget>
 #include <QWindow>
 #import <AppKit/AppKit.h>
@@ -16,8 +18,11 @@
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return NO; }
 - (void)sendEvent:(NSEvent*)event {
-    if (event.type == NSEventTypeKeyDown && event.keyCode == 53 && self.target) {
-        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    const int key = event.keyCode == 53 ? Qt::Key_Escape :
+                    event.keyCode == 51 ? Qt::Key_Backspace :
+                    event.keyCode == 117 ? Qt::Key_Delete : 0;
+    if (event.type == NSEventTypeKeyDown && key && self.target) {
+        QKeyEvent escape(QEvent::KeyPress, key, Qt::NoModifier);
         escape.setAccepted(false);
         QApplication::sendEvent(self.target, &escape);
         if (escape.isAccepted())
@@ -32,6 +37,7 @@
 @interface DisquisitionDrawingView : NSView {
 @public
     QPointer<ScreenDrawing> drawingModel;
+    QImage drawingImage;
 }
 @property(nonatomic, assign) QWidget* target;
 @end
@@ -54,39 +60,39 @@
 - (void)mouseUp:(NSEvent*)event { [self forwardMouse:event type:QEvent::MouseButtonRelease]; }
 - (void)drawRect:(NSRect)dirtyRect {
     Q_UNUSED(dirtyRect);
-    const ScreenDrawing* drawing = self->drawingModel.data();
-    if (!drawing || !drawing->enabled())
+    if (!drawingModel || !drawingModel->enabled())
         return;
-    const NSRect bounds = self.bounds;
-    [[NSColor colorWithWhite:0 alpha:drawing->penActive() ? 1.0 / 255 : 0] setFill];
-    NSRectFillUsingOperation(bounds, NSCompositingOperationCopy);
-    const CGFloat width = qMax(2.0, bounds.size.width * 0.003);
-    for (const auto& segment : drawing->segments()) {
-        const QColor color = screenPenColor(segment.color);
-        [[NSColor colorWithRed:color.redF() green:color.greenF() blue:color.blueF() alpha:1] setStroke];
-        NSBezierPath* path = [NSBezierPath bezierPath];
-        path.lineWidth = width;
-        path.lineCapStyle = NSLineCapStyleRound;
-        path.lineJoinStyle = NSLineJoinStyleRound;
-        const NSPoint a = NSMakePoint(segment.x1 * bounds.size.width / chat::kDrawCoordinateMax,
-                                      segment.y1 * bounds.size.height / chat::kDrawCoordinateMax);
-        NSPoint b = NSMakePoint(segment.x2 * bounds.size.width / chat::kDrawCoordinateMax,
-                                segment.y2 * bounds.size.height / chat::kDrawCoordinateMax);
-        // A zero-length AppKit path does not draw the initial pen dot.
-        if (NSEqualPoints(a, b))
-            b.x += 0.01;
-        [path moveToPoint:a];
-        [path lineToPoint:b];
-        [path stroke];
+    // Reuse the Qt renderer so native presenter panels have exactly the same
+    // selection highlights, colors and author labels as viewers' video canvases.
+    const qreal scale = self.window.backingScaleFactor;
+    const QSize size(qRound(self.bounds.size.width * scale), qRound(self.bounds.size.height * scale));
+    if (drawingImage.size() != size) {
+        drawingImage = QImage(size, QImage::Format_ARGB32_Premultiplied);
     }
-    if (drawing->penActive()) {
-        const QColor color = screenPenColor(drawing->color());
-        [[NSColor colorWithRed:color.redF() green:color.greenF() blue:color.blueF() alpha:1] setStroke];
-        NSBezierPath* border = [NSBezierPath bezierPathWithRect:NSInsetRect(bounds, 1, 1)];
-        border.lineWidth = 2;
-        [border stroke];
-    }
+    drawingImage.setDevicePixelRatio(scale);
+    drawingImage.fill(Qt::transparent);
+    QPainter painter(&drawingImage);
+    static_cast<DrawingCanvas*>(self.target)->renderDrawing(painter);
+    painter.end();
+    CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef data = CGDataProviderCreateWithData(nullptr, drawingImage.constBits(),
+                                                        drawingImage.sizeInBytes(), nullptr);
+    CGImageRef image = CGImageCreate(size.width(), size.height(), 8, 32, drawingImage.bytesPerLine(),
+        colors, static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) | kCGBitmapByteOrder32Little, data, nullptr, false,
+        kCGRenderingIntentDefault);
+    CGContextRef context = NSGraphicsContext.currentContext.CGContext;
+    CGContextSaveGState(context);
+    CGContextClearRect(context, NSRectToCGRect(self.bounds));
+    CGContextTranslateCTM(context, 0, self.bounds.size.height);
+    CGContextScaleCTM(context, 1, -1);
+    if (image)
+        CGContextDrawImage(context, NSRectToCGRect(self.bounds), image);
+    CGContextRestoreGState(context);
+    if (image) CGImageRelease(image);
+    CGDataProviderRelease(data);
+    CGColorSpaceRelease(colors);
 }
+
 @end
 
 struct MacDrawingPanel::Native {

@@ -255,7 +255,9 @@ Message peerDataMessage(const PeerData& data) {
 }
 
 bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out) {
-    if (message.type != MsgType::ScreenDraw || message.fields.size() != (fromOwner ? 9 : 8)) {
+    const std::size_t legacySize = fromOwner ? 9 : 8;
+    if (message.type != MsgType::ScreenDraw ||
+        (message.fields.size() != legacySize && message.fields.size() != legacySize + 2)) {
         return false;
     }
     ScreenDraw draw;
@@ -278,6 +280,15 @@ bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out) {
         }
         *values[i] = static_cast<int>(value);
     }
+    if (fromOwner && (draw.author.empty() || draw.author.size() > kMaxNameLength))
+        return false;
+    if (message.fields.size() == legacySize + 2) {
+        std::int64_t rgb = 0;
+        if (!parseU32(message.fields[legacySize], draw.stroke) ||
+            !parseInt64(message.fields[legacySize + 1], rgb) || rgb < -1 || rgb > 0xffffff)
+            return false;
+        draw.rgb = static_cast<int>(rgb);
+    }
     out = std::move(draw);
     return true;
 }
@@ -290,6 +301,39 @@ Message screenDrawMessage(const ScreenDraw& draw, bool fromOwner) {
     for (int value : {draw.x1, draw.y1, draw.x2, draw.y2, draw.color}) {
         message.fields.push_back(std::to_string(value));
     }
+    if (draw.stroke != 0 || draw.rgb >= 0) {
+        message.fields.push_back(std::to_string(draw.stroke));
+        message.fields.push_back(std::to_string(draw.rgb));
+    }
+    return message;
+}
+
+bool parseScreenErase(const Message& message, ScreenErase& out) {
+    if (message.type != MsgType::ScreenDrawErase || message.fields.size() < 4 ||
+        message.fields.size() > 3 + kMaxEraseStrokes)
+        return false;
+    ScreenErase erase;
+    erase.sharer = message.fields[0];
+    erase.author = message.fields[2];
+    if (erase.sharer.empty() || erase.sharer.size() > kMaxNameLength ||
+        erase.author.empty() || erase.author.size() > kMaxNameLength ||
+        !parseInt64(message.fields[1], erase.epoch) || erase.epoch <= 0)
+        return false;
+    for (std::size_t i = 3; i < message.fields.size(); ++i) {
+        std::uint32_t id = 0;
+        if (!parseU32(message.fields[i], id))
+            return false;
+        erase.strokes.push_back(id);
+    }
+    out = std::move(erase);
+    return true;
+}
+
+Message screenEraseMessage(const ScreenErase& erase) {
+    Message message{MsgType::ScreenDrawErase,
+                    {erase.sharer, std::to_string(erase.epoch), erase.author}};
+    for (const auto id : erase.strokes)
+        message.fields.push_back(std::to_string(id));
     return message;
 }
 

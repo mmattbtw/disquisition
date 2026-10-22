@@ -64,12 +64,14 @@ enum class MsgType : std::uint8_t {
     // Viewer -> owner: [sharer, epoch, segment id, x1, y1, x2, y2, color];
     // owner -> viewers inserts author at index 2. Author + id deduplicates previews.
     // Coordinates are normalized to 0..10000, color is an index in the pen palette.
+    // New clients append [stroke id, RGB or -1] to group gestures and carry chat colors.
     ScreenDraw = 28,
     ScreenDrawWatch = 29, // viewer -> owner: [sharer, 1 subscribe | 0 unsubscribe]
     // Generic targeted peer channel: [sender, target, channel, binary payload].
     // The relay stamps sender using the established peer/client identity.
     PeerData = 30,
     PeerLink = 31, // relay -> client: [peer, connected 0|1], for resuming peer channels
+    ScreenDrawErase = 32, // peer data: [sharer, epoch, author, stroke ids...]
 };
 
 struct Message {
@@ -166,9 +168,21 @@ struct ScreenDraw {
     std::uint32_t id = 0;
     int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
     int color = 0;
+    std::uint32_t stroke = 0; // one continuous gesture; 0 uses the legacy segment id
+    int rgb = -1; // 24-bit RGB; -1 uses the legacy palette
 };
 bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out);
 Message screenDrawMessage(const ScreenDraw& draw, bool fromOwner);
+
+constexpr std::size_t kMaxEraseStrokes = 128;
+struct ScreenErase {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::vector<std::uint32_t> strokes;
+};
+bool parseScreenErase(const Message& message, ScreenErase& out);
+Message screenEraseMessage(const ScreenErase& erase);
 
 struct PeerAddress {
     std::string name;

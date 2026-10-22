@@ -332,6 +332,27 @@ void testScreenDraw() {
     CHECK(!chat::parseScreenDraw(invalid, false, draw));
 }
 
+void testStrokeMetadataAndErase() {
+    chat::ScreenDraw pen;
+    pen.sharer = "alice"; pen.author = "bob"; pen.epoch = 9;
+    pen.id = 2; pen.stroke = 1; pen.rgb = 0x12ab34;
+    chat::ScreenDraw decoded;
+    CHECK(chat::parseScreenDraw(chat::screenDrawMessage(pen, true), true, decoded));
+    CHECK(decoded.stroke == 1 && decoded.rgb == 0x12ab34);
+    auto invalid = chat::screenDrawMessage(pen, true);
+    invalid.fields.back() = "16777216";
+    CHECK(!chat::parseScreenDraw(invalid, true, decoded));
+    chat::ScreenErase erase{"alice", "bob", 9, {1, 2}};
+    chat::ScreenErase parsed;
+    CHECK(chat::parseScreenErase(chat::screenEraseMessage(erase), parsed));
+    CHECK(parsed.author == "bob" && parsed.strokes == erase.strokes);
+    auto request = chat::screenEraseMessage(erase);
+    request.fields.back() = "-1";
+    CHECK(!chat::parseScreenErase(request, parsed));
+    erase.strokes.resize(chat::kMaxEraseStrokes + 1, 1);
+    CHECK(!chat::parseScreenErase(chat::screenEraseMessage(erase), parsed));
+}
+
 } // namespace
 
 int main() {
@@ -348,6 +369,7 @@ int main() {
     testPeerAnnouncement();
     testPeerImage();
     testScreenDraw();
+    testStrokeMetadataAndErase();
     testPeerData();
     std::puts("protocol_test: ok");
     return 0;

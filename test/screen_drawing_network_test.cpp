@@ -156,6 +156,20 @@ int main(int argc, char** argv) {
         late.poll();
         return late.drawing.segments().size() == 601;
     }));
+    // Per-author clearing and batched stroke deletion use the same generic
+    // peer transport through an unchanged discovery server and relay.
+    viewer.drawing.clearMineRequested();
+    CHECK(waitFor([&] {
+        pump(); late.poll();
+        return owner.drawing.segments().size() == 600 && viewer.drawing.segments().size() == 600 &&
+               late.drawing.segments().size() == 600;
+    }));
+    owner.drawing.clearMineRequested(); // more than one erase-message batch
+    CHECK(waitFor([&] {
+        pump(); late.poll();
+        return owner.drawing.segments().isEmpty() && viewer.drawing.segments().isEmpty() &&
+               late.drawing.segments().isEmpty();
+    }));
     const auto previousEpoch = owner.drawing.epoch();
     owner.drawing.clearRequested();
     CHECK(owner.drawing.segments().isEmpty() && owner.drawing.epoch() != previousEpoch);

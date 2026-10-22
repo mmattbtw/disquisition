@@ -14,6 +14,7 @@ std::int64_t nextEpoch() {
 ScreenDrawingSession::ScreenDrawingSession(const QString& localName, const QString& sharer,
                                            ScreenDrawing* drawing, bool owner, QObject* parent) :
     QObject(parent), localName_(localName), sharer_(sharer), drawing_(drawing), owner_(owner) {
+    drawing->setIdentity(localName, owner);
     connect(drawing, &ScreenDrawing::permissionRequested, this, [this](bool enabled) {
         if (owner_)
             reset(enabled);
@@ -23,6 +24,11 @@ ScreenDrawingSession::ScreenDrawingSession(const QString& localName, const QStri
             reset(true);
     });
     connect(drawing, &ScreenDrawing::segmentDrawn, this, &ScreenDrawingSession::submit);
+    connect(drawing, &ScreenDrawing::eraseRequested, this, &ScreenDrawingSession::erase);
+    connect(drawing, &ScreenDrawing::clearMineRequested, this, [this] {
+        if (drawing_)
+            erase(localName_, drawing_->strokeIds(localName_));
+    });
     retry_.setInterval(1000);
     connect(&retry_, &QTimer::timeout, this, [this] {
         if (++attempts_ >= 5) {
@@ -115,7 +121,7 @@ void ScreenDrawingSession::submit(chat::ScreenDraw segment) {
 void ScreenDrawingSession::accept(chat::ScreenDraw segment) {
     if (!drawing_ || !drawing_->enabled() || segment.epoch != drawing_->epoch())
         return;
-    if (drawing_->segments().size() >= static_cast<qsizetype>(chat::kMaxDrawSegments)) {
+    if (drawing_->historySize() >= static_cast<qsizetype>(chat::kMaxDrawSegments)) {
         reset(true);
         return;
     }
@@ -123,6 +129,24 @@ void ScreenDrawingSession::accept(chat::ScreenDraw segment) {
     drawing_->add(segment);
     if (drawing_->segments().size() != before)
         broadcast(chat::screenDrawMessage(segment, true));
+}
+
+void ScreenDrawingSession::erase(const QString& author, const QList<quint32>& strokes) {
+    if (!drawing_ || !drawing_->enabled() || (!owner_ && (!watching_ || author != localName_)))
+        return;
+    for (qsizetype offset = 0; offset < strokes.size(); offset += chat::kMaxEraseStrokes) {
+        chat::ScreenErase request;
+        request.sharer = sharer_.toStdString();
+        request.author = author.toStdString();
+        request.epoch = drawing_->epoch();
+        const auto batch = strokes.mid(offset, chat::kMaxEraseStrokes);
+        request.strokes.assign(batch.begin(), batch.end());
+        drawing_->remove(author, batch);
+        if (owner_)
+            broadcast(chat::screenEraseMessage(request));
+        else
+            emit sendToPeer(sharer_, chat::screenEraseMessage(request));
+    }
 }
 
 void ScreenDrawingSession::receive(const QString& sender, const chat::Message& message) {
@@ -150,6 +174,14 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
                 accept(segment);
             }
         }
+        else if (message.type == chat::MsgType::ScreenDrawErase && viewers_.contains(sender)) {
+            chat::ScreenErase request;
+            if (chat::parseScreenErase(message, request) && request.sharer == sharer_.toStdString() &&
+                request.epoch == drawing_->epoch() && request.author == sender.toStdString()) {
+                const QList<quint32> ids(request.strokes.begin(), request.strokes.end());
+                erase(sender, ids);
+            }
+        }
         return;
     }
     if (!watching_ || sender != sharer_)
@@ -163,6 +195,14 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
         retry_.stop();
         drawing_->setStatus({});
         drawing_->setState(message.fields[1] == "1", epoch);
+    }
+    else if (message.type == chat::MsgType::ScreenDrawErase) {
+        chat::ScreenErase request;
+        if (chat::parseScreenErase(message, request) && request.sharer == sharer_.toStdString() &&
+            request.epoch == drawing_->epoch() && drawing_->enabled()) {
+            drawing_->remove(QString::fromStdString(request.author),
+                             QList<quint32>(request.strokes.begin(), request.strokes.end()));
+        }
     }
     else if (message.type == chat::MsgType::ScreenDraw) {
         chat::ScreenDraw segment;

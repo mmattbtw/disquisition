@@ -105,18 +105,29 @@ enlarge one above the others.
 
 To annotate a share, the person sharing chooses **allow drawing** on their
 tile. Drawing starts off for every new share. Everyone watching can then
-choose **pen**, select a color and drag over the video. The sharer can draw
-too. Drawings stay aligned when viewers resize the video or open it
-fullscreen, and people who start watching later receive the existing ink.
-Only the sharer can **clear drawings** or turn off drawing. Turning it off,
-ending the share or losing the connection clears the ink. A full canvas
-also clears automatically after 4,096 pen segments to bound memory use.
+choose **pen** and drag over the video. The default pen color matches the
+person's chat color; the color menu offers other colors for new strokes.
+A username tag follows each active drawer's latest endpoint, then disappears
+after they stop. Drawings stay aligned when viewers resize the video or open
+it fullscreen, and people who start watching later receive the current ink.
+
+Choose **eraser** and drag across a line to erase its whole stroke. A stroke
+is one continuous mouse drag. Viewers can erase their own strokes; the sharer
+can erase anyone's. **Clear mine** removes only that person's drawings.
+The sharer also has **select**: click a line or drag a box across strokes,
+then choose **delete selected** or press Delete. Selected strokes are
+highlighted and show their authors' names. **Clear all** removes everyone's
+ink. Press Esc to leave any drawing or selection tool.
+
+Only the sharer can turn off drawing. Turning it off, ending the share or
+losing the connection clears the ink. The drawing also clears automatically
+after 4,096 accepted pen segments, including erased segments, to bound memory.
 
 On macOS, Windows and X11, a transparent overlay shows the same drawings
 over the actual shared display or application window. A small toolbar lets
-the sharer switch the pen on and off, choose a color and clear the screen
-without returning to chat. With pen off, mouse input passes through to the
-shared application. Press Esc or turn pen off to use the mouse normally.
+the sharer draw, erase, select strokes, choose a color and clear drawings
+without returning to chat. With drawing tools off, mouse input passes
+through to the shared application. Press Esc to use the mouse normally.
 For a window share, the overlay follows that window and hides while it is
 minimized. Annotations refer to positions in the shared image and stay in
 place when its contents scroll or change.
@@ -138,8 +149,10 @@ it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
-Drawing needs updated desktop clients and, for relayed participants, an
-updated relay. A server that already supports screen sharing needs no
+Drawing needs updated desktop clients and, for relayed participants, a
+relay with the generic peer-data channel. Erasing, selection and chat colors
+need updated desktop clients on both ends; they require no further server
+or relay changes. A server that already supports screen sharing needs no
 drawing update. The sharing client owns drawing permissions and history,
 validates incoming strokes and sends the current drawing to new viewers.
 Choosing allow drawing takes effect locally immediately. Annotations travel

@@ -1,4 +1,6 @@
 #include <QApplication>
+#include <QComboBox>
+#include <QEventLoop>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -57,6 +59,7 @@ void testPermissionsAndLocalEcho() {
 
 void testLetterboxingAndResize() {
     ScreenDrawing drawing;
+    drawing.setColor(0);
     StreamView view;
     view.setDrawing(&drawing);
     view.resize(400, 400);
@@ -300,6 +303,146 @@ void testClientOwnedDrawing() {
     CHECK(viewer.epoch() == own.epoch()); // link recovery resubscribes and resynchronizes
 }
 
+void testEditingAndIdentity() {
+    ScreenDrawing owner, viewer, late;
+    ScreenDrawingSession host("alice", "alice", &owner, true);
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    ScreenDrawingSession newcomer("carol", "alice", &late, false);
+    QObject::connect(&host, &ScreenDrawingSession::sendToPeer, &guest,
+                     [&](const QString& peer, const chat::Message& message) {
+                         if (peer == "bob") guest.receive("alice", message);
+                         if (peer == "carol") newcomer.receive("alice", message);
+                     });
+    QObject::connect(&guest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("bob", message); });
+    QObject::connect(&newcomer, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("carol", message); });
+    viewer.setChatColor(QColor("#aabbcc"));
+    CHECK(viewer.penColor() == QColor("#aabbcc"));
+    viewer.setColor(3);
+    CHECK(viewer.penColor() == screenPenColor(3));
+    viewer.setChatColor(QColor("#123456"));
+    CHECK(viewer.penColor() == screenPenColor(3)); // a chosen color stays chosen
+    viewer.setColor(-1);
+    CHECK(viewer.penColor() == QColor("#123456"));
+    guest.start();
+    owner.permissionRequested(true);
+    chat::ScreenDraw pen;
+    pen.id = 1; pen.stroke = 1; pen.rgb = 0x123456;
+    viewer.segmentDrawn(pen);
+    pen.id = 2;
+    viewer.segmentDrawn(pen);
+    pen.id = 3; pen.stroke = 3;
+    owner.segmentDrawn(pen);
+    CHECK(owner.segments().size() == 3 && viewer.segments().size() == 3);
+    CHECK(owner.activeAuthors().size() == 2);
+    CHECK(owner.segments()[0].rgb == 0x123456);
+    // A viewer cannot erase the presenter's stroke, even by bypassing the controls.
+    guest.receive("mallory", {chat::MsgType::ScreenDrawErase,
+                              {"alice", std::to_string(owner.epoch()), "alice", "3"}});
+    host.receive("bob", {chat::MsgType::ScreenDrawErase,
+                        {"alice", std::to_string(owner.epoch()), "alice", "3"}});
+    CHECK(owner.segments().size() == 3);
+    viewer.eraseRequested("bob", {1});
+    CHECK(owner.segments().size() == 1 && viewer.segments().size() == 1);
+    // An in-flight segment from an erased gesture must not resurrect the stroke.
+    pen.id = 4; pen.stroke = 1;
+    viewer.segmentDrawn(pen);
+    CHECK(owner.segments().size() == 1 && viewer.segments().size() == 1);
+    pen.id = 5; pen.stroke = 5;
+    viewer.segmentDrawn(pen);
+    CHECK(owner.segments().size() == 2);
+    viewer.clearMineRequested();
+    CHECK(owner.segments().size() == 1 && owner.segments()[0].author == "alice");
+    newcomer.start();
+    CHECK(late.segments().size() == 1); // replay excludes erased strokes
+    owner.eraseRequested("alice", {3});
+    CHECK(owner.segments().isEmpty() && viewer.segments().isEmpty() && late.segments().isEmpty());
+    CHECK(owner.activeAuthors().isEmpty());
+    pen.id = 6; pen.stroke = 6;
+    viewer.segmentDrawn(pen);
+    pen.id = 7; pen.stroke = 7;
+    owner.segmentDrawn(pen);
+    owner.clearMineRequested();
+    CHECK(owner.segments().size() == 1 && owner.segments()[0].author == "bob");
+    owner.eraseRequested("bob", {6}); // presenter may remove somebody else's stroke
+    CHECK(owner.segments().isEmpty() && late.segments().isEmpty());
+    const auto oldEpoch = owner.epoch();
+    owner.clearRequested();
+    pen.id = 8; pen.stroke = 8;
+    viewer.segmentDrawn(pen);
+    host.receive("bob", {chat::MsgType::ScreenDrawErase, {"alice", std::to_string(oldEpoch), "bob", "8"}});
+    host.receive("outsider", {chat::MsgType::ScreenDrawErase, {"alice", std::to_string(owner.epoch()), "bob", "8"}});
+    CHECK(owner.segments().size() == 1);
+    viewer.requestErase({screenStrokeKey(owner.segments().front())});
+    CHECK(owner.segments().isEmpty());
+    viewer.setTool(ScreenDrawing::Tool::Select);
+    CHECK(viewer.tool() != ScreenDrawing::Tool::Select);
+}
+
+void testEraserAndSelection() {
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    drawing.permissionRequested(true);
+    DrawingCanvas canvas;
+    canvas.resize(400, 200);
+    canvas.setDrawing(&drawing);
+    drawing.setPenActive(true);
+    mouse(canvas, QEvent::MouseButtonPress, {40, 60}, Qt::LeftButton, Qt::LeftButton);
+    mouse(canvas, QEvent::MouseButtonRelease, {360, 60}, Qt::LeftButton, Qt::NoButton);
+    CHECK(drawing.segments().size() == 2);
+    CHECK(drawing.segments()[0].stroke == drawing.segments()[1].stroke);
+    drawing.setTool(ScreenDrawing::Tool::Eraser);
+    // Scrubbing across a line erases the whole stroke, even if endpoints miss it.
+    mouse(canvas, QEvent::MouseButtonPress, {200, 20}, Qt::LeftButton, Qt::LeftButton);
+    mouse(canvas, QEvent::MouseButtonRelease, {200, 100}, Qt::LeftButton, Qt::NoButton);
+    CHECK(drawing.segments().isEmpty());
+    drawing.setPenActive(true);
+    mouse(canvas, QEvent::MouseButtonPress, {20, 80}, Qt::LeftButton, Qt::LeftButton);
+    mouse(canvas, QEvent::MouseButtonRelease, {380, 80}, Qt::LeftButton, Qt::NoButton);
+    drawing.setTool(ScreenDrawing::Tool::Select);
+    // A selection box intersects the middle, rather than containing the endpoints.
+    mouse(canvas, QEvent::MouseButtonPress, {180, 60}, Qt::LeftButton, Qt::LeftButton);
+    mouse(canvas, QEvent::MouseButtonRelease, {220, 100}, Qt::LeftButton, Qt::NoButton);
+    CHECK(drawing.selectedStrokes().size() == 1);
+    drawing.deleteSelection();
+    CHECK(drawing.segments().isEmpty());
+    drawing.setPenActive(true);
+    click(canvas, {300, 140}); // a dot is also a selectable stroke
+    drawing.setTool(ScreenDrawing::Tool::Select);
+    click(canvas, {302, 142});
+    CHECK(drawing.selectedStrokes().size() == 1);
+    QKeyEvent remove(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QApplication::sendEvent(&canvas, &remove);
+    CHECK(drawing.segments().isEmpty());
+}
+
+void testAttributionAndPalette() {
+    ScreenDrawing drawing;
+    ScreenDrawingSession session("alice", "alice", &drawing, true);
+    drawing.permissionRequested(true);
+    DrawingControls controls(&drawing, true);
+    const auto palette = controls.findChild<QComboBox*>();
+    CHECK(palette && palette->currentText() == "chat color");
+    drawing.setChatColor(QColor("#abcdef"));
+    CHECK(drawing.penColor() == QColor("#abcdef"));
+    palette->setCurrentIndex(2); // yellow, following chat color and red
+    DrawingCanvas canvas;
+    canvas.resize(400, 200);
+    canvas.setDrawing(&drawing);
+    drawing.setPenActive(true);
+    click(canvas, {100, 100});
+    CHECK(drawing.segments().size() == 1);
+    CHECK(screenSegmentColor(drawing.segments()[0]) == screenPenColor(1));
+    CHECK(drawing.activeAuthors().size() == 1 && drawing.activeAuthors()[0].author == "alice");
+    CHECK(drawing.activeAuthors()[0].x2 == 2500);
+    QEventLoop loop;
+    QTimer::singleShot(2100, &loop, &QEventLoop::quit);
+    loop.exec();
+    CHECK(drawing.activeAuthors().isEmpty());
+    CHECK(drawing.segments().size() == 1); // only the activity label expires
+}
+
 void testDrawingHistoryLimitAndMissingPeer() {
     ScreenDrawing own;
     ScreenDrawingSession host("alice", "alice", &own, true);
@@ -311,6 +454,13 @@ void testDrawingHistoryLimitAndMissingPeer() {
         own.segmentDrawn(segment);
     }
     CHECK(own.enabled() && own.epoch() != epoch && own.segments().isEmpty());
+    const auto beforeChurn = own.epoch();
+    for (std::size_t i = 0; i <= chat::kMaxDrawSegments; ++i) {
+        segment.id = static_cast<std::uint32_t>(i + chat::kMaxDrawSegments + 1);
+        own.segmentDrawn(segment);
+        own.clearMineRequested();
+    }
+    CHECK(own.epoch() != beforeChurn && own.historySize() == 0);
     ScreenDrawing viewer;
     ScreenDrawingSession guest("bob", "alice", &viewer, false);
     guest.start(); // no compatible client/relay responds
@@ -334,6 +484,9 @@ int main(int argc, char** argv) {
     testEscapeFromPresenterWindows();
     testClosingFullscreenRestoresEscape();
     testClientOwnedDrawing();
+    testEditingAndIdentity();
+    testEraserAndSelection();
+    testAttributionAndPalette();
     testDrawingHistoryLimitAndMissingPeer();
     std::puts("screen_drawing_test: ok");
 }

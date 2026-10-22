@@ -26,6 +26,7 @@ private:
     void reset(bool enabled);
     void submit(chat::ScreenDraw segment);
     void accept(chat::ScreenDraw segment);
+    void erase(const QString& author, const QList<quint32>& strokes);
     void broadcast(const chat::Message& message);
     chat::Message state() const;
     chat::Message watch(bool enabled) const;
