@@ -179,6 +179,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
+    pushToTalkEnabled_ = settings.value("voice/pushToTalk", false).toBool();
+    if (settings.contains("voice/pushToTalkKey"))
+        pushToTalkKey_ = settings.value("voice/pushToTalkKey").toUInt();
+    pushToTalkKeyName_ = settings.value("voice/pushToTalkKeyName").toString();
     // KLIPY asks for a stable, anonymous identifier per user.
     klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
     if (klipyCustomerId_.isEmpty()) {
@@ -311,8 +315,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         muted_ = !muted_;
-        voice_.setMuted(muted_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         muteButton_->setChecked(muted_);
         muteButton_->setText(muted_ ? "unmute" : "mute");
         sendVoiceState();
@@ -327,7 +330,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
         voice_.setDeafened(deafened_);
         relayAudio_.setDeafened(deafened_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         deafenButton_->setChecked(deafened_);
         deafenButton_->setText(deafened_ ? "undeafen" : "deafen");
         if (deafened_) {
@@ -340,6 +343,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             muteButton_->setEnabled(true);
         }
         sendVoiceState();
+    });
+    connect(&pushToTalk_, &PushToTalk::heldChanged, this, [this] {
+        applyMicState();
+        refreshMembers();
     });
     connect(name_, &QLineEdit::textChanged, this, [this](const QString& value) {
         if (!value.trimmed().isEmpty() && name_->property("invalid").toBool()) {
@@ -628,7 +635,9 @@ void MainWindow::joinVoice() {
         }
         if (usingRelay_) {
             restoreVoiceState();
+            applyMicState();
             voiceWanted_ = true;
+            updatePushToTalk();
             activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
             sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
             voiceButton_->setText("leave voice");
@@ -669,7 +678,8 @@ void MainWindow::joinVoice() {
         }
         restoreVoiceState();
         if (deafened_) voice_.setDeafened(true);
-        else if (muted_) voice_.setMuted(true);
+        applyMicState();
+        updatePushToTalk();
         voiceButton_->setText("leave voice");
         muteButton_->setEnabled(!deafened_);
         deafenButton_->setEnabled(true);
@@ -685,7 +695,6 @@ void MainWindow::restoreVoiceState() {
     muted_ = resumeMuted_;
     deafened_ = resumeDeafened_;
     mutedBeforeDeafen_ = resumeMutedBeforeDeafen_;
-    relayAudio_.setMuted(muted_);
     relayAudio_.setDeafened(deafened_);
     muteButton_->setChecked(muted_);
     muteButton_->setText(muted_ ? "unmute" : "mute");
@@ -695,6 +704,20 @@ void MainWindow::restoreVoiceState() {
     resumeVoice_ = false;
 }
 
+void MainWindow::applyMicState() {
+    const bool silent = muted_ || (pushToTalkEnabled_ && !pushToTalk_.held());
+    voice_.setMuted(silent);
+    relayAudio_.setMuted(silent);
+}
+
+void MainWindow::updatePushToTalk() {
+    if (voiceWanted_ && pushToTalkEnabled_ && pushToTalkKey_) {
+        pushToTalk_.start(*pushToTalkKey_);
+    } else {
+        pushToTalk_.stop();
+    }
+}
+
 void MainWindow::leaveVoice() {
     const bool wasInVoice = voiceWanted_;
     voiceWanted_ = false;
@@ -702,6 +725,7 @@ void MainWindow::leaveVoice() {
         sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"0"}});
     }
     activeVoicePort_ = 0;
+    updatePushToTalk();
     voice_.stop();
     relayAudio_.stop();
     muted_ = false;
@@ -1032,6 +1056,21 @@ void MainWindow::showPreferences() {
                                     &dialog);
     showMedia->setChecked(showLinkedMedia_);
     showMedia->setToolTip("Loading them lets those sites see your IP address.");
+    auto* pushToTalk = new QCheckBox("Hold a key to talk", &dialog);
+    pushToTalk->setChecked(pushToTalkEnabled_);
+#if defined(Q_OS_MACOS)
+    pushToTalk->setToolTip("To use it while another app is focused, allow "
+                           "Input Monitoring in System Settings.");
+#endif
+    auto* pushToTalkKey = new PushToTalkKeyButton(&dialog);
+    pushToTalkKey->setKey(pushToTalkKey_, pushToTalkKeyName_);
+    pushToTalkKey->setEnabled(pushToTalkEnabled_);
+    connect(pushToTalk, &QCheckBox::toggled, pushToTalkKey, &QWidget::setEnabled);
+    auto* pushToTalkRow = new QWidget(&dialog);
+    auto* pushToTalkLayout = new QHBoxLayout(pushToTalkRow);
+    pushToTalkLayout->setContentsMargins(0, 0, 0, 0);
+    pushToTalkLayout->addWidget(pushToTalk, 1);
+    pushToTalkLayout->addWidget(pushToTalkKey);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -1045,6 +1084,7 @@ void MainWindow::showPreferences() {
     form->addRow("public host", advertisedHost);
     form->addRow("", advertiseLocal);
     form->addRow("voice SIP port", sipPort);
+    form->addRow("push to talk", pushToTalkRow);
     form->addRow("relay address", relayHost);
     form->addRow("relay port", relayPort);
     form->addRow("", leakIp);
@@ -1062,6 +1102,10 @@ void MainWindow::showPreferences() {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         const QString path = messageFile->text().trimmed();
         const QString count = maximum->text().trimmed();
+        if (pushToTalk->isChecked() && !pushToTalkKey->key()) {
+            QMessageBox::warning(&dialog, "Push to talk", "Choose a push-to-talk key.");
+            return;
+        }
         if (saveMessages->isChecked() && path.isEmpty()) {
             QMessageBox::warning(&dialog, "Message saving", "Choose a SQLite file.");
             return;
@@ -1109,6 +1153,16 @@ void MainWindow::showPreferences() {
     messageFile_ = messageFile->text().trimmed();
     maxSavedMessages_ = chosenMaximum;
     showLinkedMedia_ = showMedia->isChecked();
+    const bool pushToTalkChanged = pushToTalk->isChecked() != pushToTalkEnabled_ ||
+                                   pushToTalkKey->key() != pushToTalkKey_;
+    pushToTalkEnabled_ = pushToTalk->isChecked();
+    pushToTalkKey_ = pushToTalkKey->key();
+    pushToTalkKeyName_ = pushToTalkKey->keyName();
+    if (pushToTalkChanged) {
+        updatePushToTalk();
+        applyMicState();
+        refreshMembers();
+    }
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1125,6 +1179,11 @@ void MainWindow::showPreferences() {
     settings.setValue("server/advertisedHost", advertiseHost_);
     settings.setValue("server/advertiseLocal", advertiseLocal_);
     settings.setValue("voice/sipPort", preferredVoicePort_);
+    settings.setValue("voice/pushToTalk", pushToTalkEnabled_);
+    if (pushToTalkKey_) {
+        settings.setValue("voice/pushToTalkKey", *pushToTalkKey_);
+        settings.setValue("voice/pushToTalkKeyName", pushToTalkKeyName_);
+    }
     settings.setValue("relay/host", relayHost_);
     settings.setValue("relay/port", relayPort_);
     settings.setValue("relay/leakMyIp", leakMyIp_);
@@ -1980,13 +2039,16 @@ void MainWindow::showMemberMenu(const QPoint& position) {
 void MainWindow::refreshMembers() {
     members_->clear();
     if (!myName_.isEmpty()) {
+        const bool waitingToTalk = pushToTalkEnabled_ && !pushToTalk_.held();
+        const bool talking = localSpeaking_ && !muted_ && !waitingToTalk;
         const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :
-                                  localSpeaking_ ? "  talking" :
-                                  voiceWanted_ ? "  mic" : "  text";
-        auto* self = new QListWidgetItem((localSpeaking_ && !muted_ ? "● " : "○ ") + myName_ +
+                                  talking ? "  talking" :
+                                  !voiceWanted_ ? "  text" :
+                                  waitingToTalk ? "  push to talk" : "  mic";
+        auto* self = new QListWidgetItem((talking ? "● " : "○ ") + myName_ +
                                          selfState + (sharingScreen_ ? "  LIVE" : ""), members_);
         self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
-                                   localSpeaking_ ? "#6ee7a2" : "#9dccca"));
+                                   talking ? "#6ee7a2" : "#9dccca"));
     }
     QStringList names = peers_.keys();
     names.sort(Qt::CaseInsensitive);

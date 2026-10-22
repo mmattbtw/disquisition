@@ -153,6 +153,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/chat_media.h
       include/desktop/gif_picker.h
       include/desktop/main_window.h
+      include/desktop/push_to_talk.h
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
@@ -163,6 +164,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/gif_picker.cpp
       src/desktop/main.cpp
       src/desktop/main_window.cpp
+      src/desktop/push_to_talk.cpp
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
@@ -179,6 +181,13 @@ if(BUILD_DESKTOP_APP)
     target_compile_definitions(disquisition-desktop PRIVATE
       "DISQUISITION_GIPHY_API_KEY=\"${DISQUISITION_GIPHY_API_KEY}\""
       "DISQUISITION_KLIPY_API_KEY=\"${DISQUISITION_KLIPY_API_KEY}\"")
+    if(UNIX AND NOT APPLE AND XCB_FOUND)
+      target_link_libraries(disquisition-desktop PRIVATE PkgConfig::XCB)
+      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_XCB)
+    endif()
+    if(WIN32)
+      target_link_libraries(disquisition-desktop PRIVATE user32)
+    endif()
     if(APPLE)
       set(DISQUISITION_CODESIGN_IDENTITY "AUTO" CACHE STRING
           "macOS signing identity: AUTO prefers Apple Development; '-' uses ad-hoc signing")

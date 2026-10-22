@@ -15,6 +15,7 @@
 #include "common/protocol.h"
 #include "common/recent_messages.h"
 #include "desktop/image_transfer.h"
+#include "desktop/push_to_talk.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
 #include "desktop/screen_drawing_session.h"
@@ -102,6 +103,8 @@ private:
     void joinVoice();
     void leaveVoice();
     void restoreVoiceState();
+    void applyMicState();
+    void updatePushToTalk();
     void showPreferences();
     void startTransport(bool relay);
     void handleTransportClosed();
@@ -186,6 +189,10 @@ private:
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
+    bool pushToTalkEnabled_ = false;
+    std::optional<quint32> pushToTalkKey_;
+    QString pushToTalkKeyName_;
+    PushToTalk pushToTalk_;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
     // Screen frames travel through the server, which forwards each share
