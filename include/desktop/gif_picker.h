@@ -13,6 +13,7 @@ class MediaFetcher;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QListWidgetItem;
 class QMovie;
 class QTabBar;
 
@@ -37,6 +38,11 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
+    struct Preview {
+        QListWidgetItem* item;
+        std::unique_ptr<QMovie> movie;
+    };
+
     // Returns true when the available providers changed.
     bool refreshProviders();
     GifProvider provider() const;
@@ -46,6 +52,8 @@ private:
     void showFailure(GifProvider provider, const QString& query, int page, const QString& message);
     void setStatus(const QString& text);
     void choose(const QUrl& gif);
+    void updatePlayback();
+    void updatePlayback(const Preview& preview);
 
     GifSearch* search_;
     MediaFetcher* fetcher_;
@@ -55,7 +63,7 @@ private:
     QListWidget* results_ = nullptr;
     QLabel* attribution_ = nullptr;
     QTimer debounce_;
-    std::vector<std::unique_ptr<QMovie>> previews_;
+    std::vector<Preview> previews_;
     QString shownQuery_;
     int page_ = 0;          // the last page shown
     int requestedPage_ = 0; // the page in flight while loading_
