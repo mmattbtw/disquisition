@@ -255,6 +255,11 @@ public:
         timer_.setInterval(wandering ? 33 : 200);
         update();
     }
+    void setCustomSprites(const QImage& standing, const QImage& walking) {
+        standingSprite_ = standing;
+        walkingSprite_ = walking;
+        update();
+    }
     void setColor(const QString& name, const QColor& color) {
         const auto penguin = scene_.penguins().constFind(name);
         if (penguin == scene_.penguins().cend() || penguin->color == color) return;
@@ -289,19 +294,26 @@ protected:
                 const bool walking = wandering_ && !systemReducedMotion_ &&
                                      penguin.idleSeconds <= 0 && penguin.speech.isEmpty();
                 const int frame = walking ? static_cast<int>(penguin.walkSeconds * 10) % 8 : 2;
-                const auto key = qMakePair(penguin.color.rgba(), frame);
-                if (!tinted_.contains(key)) {
-                    tinted_.insert(key, tintedFrame(frames_[frame], penguin.color));
+                const bool custom = !standingSprite_.isNull() && !walkingSprite_.isNull();
+                QImage image;
+                QSizeF spriteSize;
+                if (custom) {
+                    image = walking ? walkingSprite_ : standingSprite_;
+                    spriteSize = QSizeF(image.size()).scaled(kSpriteHeight, kSpriteHeight,
+                                                            Qt::KeepAspectRatio);
+                } else {
+                    const auto key = qMakePair(penguin.color.rgba(), frame);
+                    if (!tinted_.contains(key)) {
+                        tinted_.insert(key, tintedFrame(frames_[frame], penguin.color));
+                    }
+                    image = tinted_[key];
+                    const double scale = kSpriteHeight / 442.0;
+                    spriteSize = QSizeF(frames_[frame].size()) * scale;
                 }
-                const QImage& image = tinted_[key];
-                // All supplied frames use the same scale, with feet anchored to
-                // their lane. Horizontal mirroring supplies the other direction.
-                const double scale = kSpriteHeight / 442.0;
-                const QSizeF spriteSize(frames_[frame].width() * scale,
-                                         frames_[frame].height() * scale);
                 painter.save();
                 painter.translate(penguin.x, feet);
-                if (penguin.facingRight) painter.scale(-1, 1);
+                // Keep the forward-facing custom standing image unmirrored.
+                if (penguin.facingRight && (!custom || walking)) painter.scale(-1, 1);
                 painter.drawImage(QRectF(-spriteSize.width() / 2, -spriteSize.height(),
                                         spriteSize.width(), spriteSize.height()), image);
                 painter.restore();
@@ -355,6 +367,8 @@ protected:
 private:
     PenguinScene scene_;
     std::array<QImage, 8> frames_;
+    QImage standingSprite_;
+    QImage walkingSprite_;
     QMap<QPair<QRgb, int>, QImage> tinted_;
     QTimer timer_;
     QElapsedTimer clock_;
@@ -412,6 +426,15 @@ void PenguinOverlay::setWandering(bool wandering) {
     for (auto& [screen, window] : windows_) window->setWandering(wandering);
 }
 
+void PenguinOverlay::setCustomSprites(const QImage& standing, const QImage& walking) {
+    // Incomplete or damaged settings fall back to the bundled sprites.
+    standingSprite_ = walking.isNull() ? QImage() : standing;
+    walkingSprite_ = standing.isNull() ? QImage() : walking;
+    for (auto& [screen, window] : windows_) {
+        window->setCustomSprites(standingSprite_, walkingSprite_);
+    }
+}
+
 void PenguinOverlay::setIdleTimeoutMinutes(int minutes) {
     idleTimeoutMinutes_ = qBound(0, minutes, 1440);
     syncScreens();
@@ -443,6 +466,7 @@ void PenguinOverlay::syncScreens() {
         auto& window = windows_[screen];
         if (!window) window = std::make_unique<PenguinOverlayWindow>(screen);
         window->setWandering(wandering_);
+        window->setCustomSprites(standingSprite_, walkingSprite_);
         window->setMembers(visibleMembers_);
         for (auto it = colors_.cbegin(); it != colors_.cend(); ++it) {
             window->setColor(it.key(), it.value());

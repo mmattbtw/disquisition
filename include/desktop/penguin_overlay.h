@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QImage>
 #include <QMap>
 #include <QObject>
 #include <QSizeF>
@@ -63,6 +64,7 @@ public:
     void setColor(const QString& name, const QColor& color);
     void setEnabled(bool enabled);
     void setWandering(bool wandering);
+    void setCustomSprites(const QImage& standing, const QImage& walking);
     void setIdleTimeoutMinutes(int minutes);
     void noteActivity(const QString& name);
     void showMessage(const QString& sender, const QString& body);
@@ -78,5 +80,7 @@ private:
     int idleTimeoutMinutes_ = 10;
     bool enabled_ = true;
     bool wandering_ = true;
+    QImage standingSprite_;
+    QImage walkingSprite_;
     std::map<QScreen*, std::unique_ptr<PenguinOverlayWindow>> windows_;
 };
