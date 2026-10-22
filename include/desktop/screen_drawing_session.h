@@ -18,6 +18,8 @@ public:
     void receive(const QString& sender, const chat::Message& message);
     void peerChanged(const QString& peer, bool connected);
     void expireRequest();
+    void setBanned(const QString& peer, bool banned);
+    bool isBanned(const QString& peer) const { return banned_.contains(peer); }
 
 signals:
     void sendToPeer(const QString& peer, const chat::Message& message);
@@ -28,7 +30,8 @@ private:
     void accept(chat::ScreenDraw segment);
     void erase(const QString& author, const QList<quint32>& strokes);
     void broadcast(const chat::Message& message);
-    chat::Message state() const;
+    chat::Message state(const QString& viewer) const;
+    void sendSnapshot(const QString& viewer);
     chat::Message watch(bool enabled) const;
 
     QString localName_;
@@ -37,6 +40,7 @@ private:
     bool owner_ = false;
     bool watching_ = false;
     QSet<QString> viewers_;
+    QSet<QString> banned_;
     QTimer retry_;
     int attempts_ = 0;
 };
