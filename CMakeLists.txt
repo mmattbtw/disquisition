@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(disquisition LANGUAGES CXX)
 
 option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
+include(cmake/AppIdentity.cmake)
 if(WIN32)
   option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
 else()
@@ -150,6 +151,8 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_source.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
+    configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
+    target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages desktop_media
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
@@ -178,11 +181,14 @@ if(BUILD_DESKTOP_APP)
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
         ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
-        OUTPUT_NAME "disquisition"
+        OUTPUT_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "disquisition"
+        MACOSX_BUNDLE_BUNDLE_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_ICON_FILE "disquisition.icns"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${DISQUISITION_BUNDLE_IDENTIFIER}")
+      # Packaging reads the actual bundle path, including spaces and the channel.
+      file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/disquisition-app-bundle-$<CONFIG>.txt"
+        CONTENT "$<TARGET_BUNDLE_DIR:disquisition-desktop>\n")
       target_sources(disquisition-desktop PRIVATE resources/macos/disquisition.icns)
       set_source_files_properties(resources/macos/disquisition.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
@@ -247,6 +253,8 @@ target_link_libraries(relay PRIVATE chat_network)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME app_identity_test
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
   add_executable(protocol_test test/protocol_test.cpp)

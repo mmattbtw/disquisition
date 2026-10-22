@@ -39,6 +39,22 @@ The build creates `build/server`, `build/client`, `build/relay` and the static
 
 ## Desktop app
 
+Local builds, including `make` and direct CMake builds, default to
+`disquisition development`, even when building a checkout of `main`.
+The desktop workflow builds pull requests as `disquisition staging` and
+`main` as `disquisition`. Manual workflow runs use production on `main`
+and staging on other branches.
+
+Each channel has a separate macOS bundle identifier, preferences and
+application-data directory, so development and staging do not reuse production's
+permission grants or settings. Production keeps its existing identity and paths.
+Permission grants still depend on the signing identity described below.
+
+To select a channel explicitly, use `make BUILD_CHANNEL=staging` or configure
+CMake with `-DDISQUISITION_BUILD_CHANNEL=staging`. Valid channels are
+`development`, `staging` and `production`. CMake remembers the selected channel
+in the build directory; `make` selects development unless `BUILD_CHANNEL` is set.
+
 The desktop target also needs Qt 6.6 or newer with Widgets, Network and
 Multimedia, plus pkg-config and FFmpeg development libraries. CMake checks for
 `libavcodec` version 60 or newer, `libavutil` and `libswscale`. It skips the
@@ -99,11 +115,13 @@ To package a local macOS build, use a baresip executable built with the static
 voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
 
 ```sh
-scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip build/disquisition.dmg
+scripts/package-macos.sh "build/disquisition development.app" build-baresip/output/baresip build/disquisition-development.dmg
 ```
 
 The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
-installer window layout. It bundles dependencies and signs the finished app
+installer window layout. Pass the bundle for the channel you built, such as
+`build/disquisition staging.app` or `build/disquisition.app`.
+It preserves the app's name, bundles dependencies and signs the finished app
 using the same automatic certificate selection as the build, with ad-hoc
 signing as a fallback. If you configured a specific signing identity, set
 `DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.

@@ -186,7 +186,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     }
     imagePool_.setMaxThreadCount(1);
     buildUi();
-    setWindowTitle("disquisition");
+    setWindowTitle(QApplication::applicationDisplayName());
     resize(980, 680);
 
     reconnectTimer_.setSingleShot(true);
@@ -435,7 +435,7 @@ void MainWindow::buildUi() {
     page->setContentsMargins(10, 10, 10, 10);
     page->setSpacing(6);
 
-    auto* title = new QLabel(" disquisition", root);
+    auto* title = new QLabel(" " + QApplication::applicationDisplayName(), root);
     title->setObjectName("title");
     page->addWidget(title);
 
@@ -456,7 +456,7 @@ void MainWindow::buildUi() {
     setup->addWidget(settingsButton_);
     page->addLayout(setup);
 
-    auto* appMenu = menuBar()->addMenu("disquisition");
+    auto* appMenu = menuBar()->addMenu(QApplication::applicationDisplayName());
     auto* preferencesAction = appMenu->addAction("Preferences…");
     preferencesAction->setMenuRole(QAction::PreferencesRole);
     preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));

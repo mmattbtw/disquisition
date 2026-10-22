@@ -112,7 +112,8 @@ which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
 
-On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
+On macOS, allow the app's channel name, such as `disquisition development`,
+in System Settings > Privacy & Security > Screen
 & System Audio Recording, then quit and reopen the app. If it keeps asking
 despite an enabled toggle, quit the app, remove the old Disquisition entry
 with the minus button, add the current app bundle, and reopen it. An old
