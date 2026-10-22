@@ -62,11 +62,9 @@ To build only the server, relay, terminal client and library, configure with
 `-DBUILD_DESKTOP_APP=OFF`. To build only the desktop pieces, use
 `-DBUILD_LEGACY_TARGETS=OFF`.
 
-Local desktop builds need `baresip` on `PATH` for direct voice chat. Install a
-baresip build that includes `menu`, `mixminus`, `vumeter`, `ctrl_tcp`, `g711`
-and the platform audio module: `coreaudio`, `wasapi` or `alsa`.
-The app creates a small isolated baresip profile in the
-platform application-data directory.
+The desktop app requires community support. `-DBUILD_COMMUNITIES=OFF` skips the
+desktop target while allowing the terminal client, server, and room relay to
+build. Community voice uses Qt audio and does not require baresip.
 
 ### Windows
 

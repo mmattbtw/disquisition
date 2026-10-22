@@ -81,6 +81,7 @@ private:
     bool refreshQueued_ = false;
     QString cid_, channel_;
     QString voiceCid_, voiceChannel_;
+    QString selectedVoiceCid_, selectedVoiceChannel_;
     QString pendingLink_;
     QMap<QString, QList<Entry>> entries_;
     QList<QPair<QString, QString>> cachedImages_;
@@ -101,6 +102,7 @@ private:
     QLabel* topic_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* voiceStatus_ = nullptr;
+    QWidget* voiceControls_ = nullptr;
     QPushButton* create_ = nullptr;
     QPushButton* join_ = nullptr;
     QPushButton* invite_ = nullptr;

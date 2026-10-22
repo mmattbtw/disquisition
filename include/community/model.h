@@ -82,6 +82,8 @@ QJsonObject joinIntent(const Identity& peer, const Invite& invite, const QString
                        const QString& endpoint, const QString& host = {},
                        const QString& nonce = {});
 bool validEndpoint(const QString& endpoint);
+// Relay settings accept a hostname, host:port, or the internal relay:// URI.
+QString normalizeRelayEndpoint(const QString& address);
 QString freshId();
 
 } // namespace community

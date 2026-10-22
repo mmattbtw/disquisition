@@ -131,6 +131,63 @@ void diagnostics(Node& node) {
         std::fprintf(stderr, "node: %s\n", message.toUtf8().constData());
     });
 }
+
+void directListenerReportsRelayAddressMixupsWithoutTlsErrors() {
+    QTemporaryDir desktopData, clientData;
+    Node desktop(desktopData.path()), client(clientData.path());
+    QStringList desktopErrors, clientErrors;
+    QObject::connect(&desktop, &Node::errorOccurred,
+                     [&](const QString& message) { desktopErrors.append(message); });
+    QObject::connect(&client, &Node::errorOccurred,
+                     [&](const QString& message) { clientErrors.append(message); });
+    CHECK(desktop.start("desktop", "127.0.0.1"));
+    CHECK(client.start("misconfigured", {}, 0, "127.0.0.1:" + QString::number(desktop.port())));
+    CHECK(until([&] { return !clientErrors.isEmpty(); }));
+    CHECK(clientErrors.size() == 1);
+    CHECK(clientErrors[0].contains("desktop client's direct address"));
+    CHECK(desktopErrors.isEmpty());
+    CHECK(client.communities().isEmpty());
+}
+
+void relayDiagnosticsAreReportedOnceAcrossRetries() {
+    // Exercise both an explicit protocol rejection and an older relay that
+    // simply closes an unsupported handshake. Neither should spam the status.
+    for (const bool diagnostic : {true, false}) {
+        QTcpServer unavailable;
+        CHECK(unavailable.listen(QHostAddress::LocalHost, 0));
+        int attempts = 0;
+        QObject::connect(&unavailable, &QTcpServer::newConnection, [&] {
+            while (unavailable.hasPendingConnections()) {
+                auto* socket = unavailable.nextPendingConnection();
+                ++attempts;
+                // Read the prefix before closing, just as a protocol dispatcher
+                // does. This also avoids resetting a socket with unread data.
+                QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, diagnostic] {
+                    socket->readAll();
+                    if (diagnostic)
+                        socket->write(
+                            frame({{"type", "error"}, {"message", "This relay needs an update."}}));
+                    socket->disconnectFromHost();
+                });
+                QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            }
+        });
+        QTemporaryDir directory;
+        Node client(directory.path());
+        QStringList errors;
+        QObject::connect(&client, &Node::errorOccurred,
+                         [&](const QString& message) { errors.append(message); });
+        CHECK(
+            client.start("alice", {}, 0, "127.0.0.1:" + QString::number(unavailable.serverPort())));
+        // A third attempt proves the client processed two failures, including
+        // the retry whose duplicate diagnostic must have been suppressed.
+        CHECK(until([&] { return attempts >= 3; }));
+        CHECK(errors.size() == 1);
+        CHECK(diagnostic ? errors[0] == "This relay needs an update."
+                         : errors[0].contains("closed the community handshake"));
+    }
+}
+
 QString channel(const Model& model, const QString& type) {
     for (const auto& item : model.channels)
         if (item.type == type)
@@ -450,6 +507,8 @@ int main(int argc, char** argv) {
         return 77;
     }
     directAdmissionIsolationAndConnectionReuse();
+    directListenerReportsRelayAddressMixupsWithoutTlsErrors();
+    relayDiagnosticsAreReportedOnceAcrossRetries();
     relayHostMigrationAndReconnection();
     returningHostSynchronizesBeforeAcceptingInvites();
     preferredHostCoordinatesAdmissions();

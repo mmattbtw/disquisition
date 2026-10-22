@@ -4,10 +4,12 @@
 #include <QHostAddress>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
-#include <QTabWidget>
+#include <QStackedWidget>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QThread>
@@ -59,6 +61,20 @@ int main(int argc, char** argv) {
     window.show();
     auto* panel = window.findChild<CommunityPanel*>();
     CHECK(panel);
+    CHECK(window.centralWidget() == panel);
+    CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
+    CHECK(!panel->findChild<QPushButton*>("communityDeafen")->isVisible());
+    CHECK(!panel->findChild<QPushButton*>("communityShare")->isVisible());
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
+        CHECK(relay && relay->text() == "relay.disquisition.app");
+        dialog->reject();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    // This isolated fixture uses direct loopback connections.
+    QSettings().setValue("community/relay", "");
     auto* online = panel->findChild<QPushButton*>("communityConnect");
     CHECK(online);
     reservation.close();
@@ -74,6 +90,16 @@ int main(int argc, char** argv) {
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
+        auto* categories = dialog->findChild<QListWidget*>("communityManageCategories");
+        auto* pages = dialog->findChild<QStackedWidget*>("communityManagePages");
+        CHECK(categories && pages && categories->count() == 5);
+        CHECK(categories->geometry().right() < pages->geometry().left());
+        for (int i = 0; i < categories->count(); ++i) {
+            categories->setCurrentRow(i);
+            CHECK(pages->currentIndex() == i);
+        }
+        categories->setCurrentRow(0);
+        CHECK(dialog->grab().save("community-manage.png"));
         for (auto* edit : dialog->findChildren<QLineEdit*>())
             if (edit->text() == "After hours")
                 edit->setText("After hours club");
@@ -114,7 +140,47 @@ int main(int argc, char** argv) {
             break;
         }
     QApplication::processEvents();
+    // Selecting voice keeps the text channel open and exposes an inline join.
+    root = nullptr; // Selection rebuilds the tree; reacquire its current items.
+    for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        if (tree->topLevelItem(i)->text(0) == "After hours club")
+            root = tree->topLevelItem(i);
+    CHECK(root);
+    QTreeWidgetItem* voiceItem = nullptr;
+    for (int i = 0; i < root->childCount(); ++i)
+        if (root->child(i)->text(0).contains("Lounge"))
+            voiceItem = root->child(i);
+    CHECK(voiceItem);
+    const auto voiceChannel = voiceItem->data(0, Qt::UserRole + 1).toString();
+    const auto cid = root->data(0, Qt::UserRole).toString();
+    const auto chatBefore = transcript->toPlainText();
+    tree->setCurrentItem(voiceItem);
+    CHECK(transcript->toPlainText() == chatBefore && composer->isEnabled());
+    CHECK(panel->findChild<QPushButton*>("communityJoinVoice")->isVisible());
+    CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
     CHECK(window.grab().save("community-ui.png"));
+    // Exercise presence rendering without opening microphone or screen hardware.
+    auto* node = panel->findChild<community::Node*>();
+    CHECK(node);
+    node->setVoice(cid, voiceChannel, true, true);
+    CHECK(until([&] { return panel->findChild<QPushButton*>("communityMute")->isVisible(); }));
+    CHECK(panel->findChild<QPushButton*>("communityDeafen")->isVisible());
+    CHECK(panel->findChild<QPushButton*>("communityShare")->isVisible());
+    bool selfUnderChannel = false;
+    for (QTreeWidgetItemIterator item(tree); *item; ++item)
+        if ((*item)->text(0) == "Alice (you)" && (*item)->parent() &&
+            (*item)->parent()->data(0, Qt::UserRole + 1).toString() == voiceChannel) {
+            selfUnderChannel = true;
+            const auto activity = (*item)->data(0, Qt::UserRole + 3).toStringList();
+            CHECK(activity.contains("muted") && activity.contains("deafened"));
+            CHECK(tree->itemWidget(*item, 0));
+        }
+    CHECK(selfUnderChannel);
+    CHECK(window.grab().save("community-voice.png"));
+    panel->findChild<QPushButton*>("communityVoice")->click();
+    CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
+    CHECK(!panel->findChild<QPushButton*>("communityDeafen")->isVisible());
+    CHECK(!panel->findChild<QPushButton*>("communityShare")->isVisible());
     online->click();
     CHECK(composer->isEnabled() == false);
     std::puts("community_ui_test: ok");

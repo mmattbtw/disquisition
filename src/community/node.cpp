@@ -73,6 +73,7 @@ struct Node::Link {
     QString remoteNonce;
     bool outgoing = false;
     bool tls = false;
+    bool awaitingTls = false;
     bool hello = false;
     qint64 started = now();
     qint64 touched = now();
@@ -127,12 +128,14 @@ bool Node::start(const QString& displayName, const QString& advertisedHost, quin
         emit errorOccurred("TLS support is unavailable.");
         return false;
     }
-    if (!relayEndpoint.isEmpty() &&
-        (!validEndpoint(relayEndpoint) || QUrl(relayEndpoint).scheme() != "relay")) {
-        emit errorOccurred("Use relay://hostname:port for the relay.");
+    try {
+        relayEndpoint_ = normalizeRelayEndpoint(relayEndpoint);
+    }
+    catch (const std::exception& error) {
+        emit errorOccurred(QString::fromUtf8(error.what()));
         return false;
     }
-    relayEndpoint_ = relayEndpoint;
+    connectionErrors_.clear();
     // Relay mode never advertises a direct address or opens an inbound port.
     if (relayEndpoint_.isEmpty()) {
         if (listenPort == 0) {
@@ -348,8 +351,10 @@ Node::Link* Node::makeLink(bool outgoing, const QString& expected) {
                 if ((error == QAbstractSocket::SslHandshakeFailedError ||
                      error == QAbstractSocket::SslInternalError ||
                      error == QAbstractSocket::SslInvalidUserDataError) &&
-                    links_.contains(link))
-                    emit errorOccurred("TLS handshake failed: " + link->socket->errorString());
+                    links_.contains(link) && link->outgoing)
+                    connectionError(link->route,
+                                    "Secure peer connection failed. Check the invite address and "
+                                    "that both clients and the relay are up to date.");
                 if (links_.contains(link) &&
                     link->socket->state() == QAbstractSocket::UnconnectedState) {
                     // Failed connection attempts don't always emit disconnected().
@@ -397,7 +402,10 @@ void Node::accept(qintptr descriptor) {
         link->socket->abort();
         return;
     }
-    link->socket->startServerEncryption();
+    // Relay handshakes and accidental non-TLS traffic must not enter the TLS
+    // decoder. In particular, a desktop listener is not a relay endpoint.
+    link->awaitingTls = true;
+    read(link);
 }
 
 void Node::dial(const QString& peer, const QString& endpoint, const QString& discover) {
@@ -437,6 +445,7 @@ void Node::encrypted(Link* link) {
         return;
     }
     link->tls = true;
+    connectionErrors_.remove(link->route);
     link->peer = peer;
     if (auto* existing = peers_.value(peer, nullptr)) {
         // Both sides select the connection initiated by the smaller peer ID.
@@ -475,6 +484,25 @@ void Node::read(Link* link) {
     try {
         link->touched = now();
         if (!link->tls) {
+            if (link->awaitingTls) {
+                if (link->socket->bytesAvailable() < 5)
+                    return;
+                const auto prefix = link->socket->peek(5);
+                link->awaitingTls = false;
+                if (prefix == QByteArray(kRelayPrefix, sizeof(kRelayPrefix) - 1)) {
+                    link->socket->read(5);
+                    link->socket->write(frame(
+                        {{"type", "error"},
+                         {"message", "This is a desktop client's direct address. Enter a relay "
+                                     "hostname, or leave Relay blank for direct connections."}}));
+                    link->socket->disconnectFromHost();
+                }
+                else if (prefix[0] == '\x16' && prefix[1] == '\x03')
+                    link->socket->startServerEncryption();
+                else
+                    link->socket->abort();
+                return;
+            }
             if (link->relayAction.isEmpty())
                 return; // TLS handshake owns these bytes.
             QJsonObject response;
@@ -981,7 +1009,18 @@ void Node::connectRelay() {
     };
     connect(socket, &QTcpSocket::disconnected, this, cleanup);
     connect(socket, &QTcpSocket::errorOccurred, this,
-            [cleanup](QAbstractSocket::SocketError) { cleanup(); });
+            [this, cleanup, socket](QAbstractSocket::SocketError error) {
+                if (error == QAbstractSocket::RemoteHostClosedError && relayNonce_.isEmpty())
+                    connectionError(relayEndpoint_,
+                                    "Relay " + QUrl(relayEndpoint_).authority() +
+                                        " closed the community handshake. Check the address and "
+                                        "that the relay is up to date.");
+                else if (error != QAbstractSocket::RemoteHostClosedError)
+                    connectionError(relayEndpoint_, "Cannot reach relay " +
+                                                        QUrl(relayEndpoint_).authority() + ". " +
+                                                        socket->errorString());
+                cleanup();
+            });
     const QUrl address(relayEndpoint_);
     socket->connectToHost(address.host(), address.port());
 }
@@ -1009,6 +1048,13 @@ void Node::readRelay() {
                 relayNonce_ = message.value("nonce").toString();
                 registerRelay();
             }
+            else if (message.value("type") == "registered") {
+                connectionErrors_.remove(relayEndpoint_);
+            }
+            else if (message.value("type") == "error") {
+                connectionError(relayEndpoint_, message.value("message").toString());
+                relay_->abort();
+            }
             else if (message.value("type") == "incoming") {
                 if (links_.size() >= 256)
                     continue;
@@ -1024,6 +1070,13 @@ void Node::readRelay() {
         if (relay_)
             relay_->abort();
     }
+}
+
+void Node::connectionError(const QString& route, const QString& message) {
+    if (connectionErrors_.value(route) == message)
+        return;
+    connectionErrors_[route] = message;
+    emit errorOccurred(message);
 }
 
 void Node::tick() {

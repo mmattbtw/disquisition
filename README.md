@@ -17,7 +17,7 @@ Get the desktop app from the [latest release](https://github.com/mmattbtw/disqui
 - [Windows, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip)
 - [Linux, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
-Open the Communities tab, enter a name and select Connect, then create a
+Open the desktop app, enter a name and select Connect, then create a
 community or join with an invite. See the [community guide](docs/communities.md)
 for direct connections, relay setup, hosting, and permissions.
 Linux downloads need a compatible Qt 6.8 runtime.

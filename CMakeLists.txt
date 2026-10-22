@@ -160,7 +160,7 @@ if(BUILD_DESKTOP_APP)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
-  if(Qt6_FOUND AND FFMPEG_FOUND)
+  if(Qt6_FOUND AND FFMPEG_FOUND AND TARGET chat_communities)
     if(TARGET chat_communities)
       # Keep the barcode dependency static without changing the app's other
       # dependency defaults. Pinned source supports both QR export and import.
@@ -207,7 +207,6 @@ if(BUILD_DESKTOP_APP)
       include/desktop/screen_stage.h
       include/desktop/share_picker.h
       include/desktop/share_source.h
-      include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
       src/desktop/gif_picker.cpp
@@ -218,8 +217,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/screen_h264.cpp
       src/desktop/screen_stage.cpp
       src/desktop/share_picker.cpp
-      src/desktop/share_source.cpp
-      src/desktop/voice_engine.cpp)
+      src/desktop/share_source.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     if(TARGET chat_communities)
       target_sources(disquisition-desktop PRIVATE
@@ -281,6 +279,8 @@ if(BUILD_DESKTOP_APP)
     endif()
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
+  elseif(NOT TARGET chat_communities)
+    message(STATUS "Community support is required for disquisition-desktop; skipping desktop app")
   else()
     message(STATUS "FFmpeg (libavcodec, libavutil, libswscale) not found; skipping disquisition-desktop")
   endif()

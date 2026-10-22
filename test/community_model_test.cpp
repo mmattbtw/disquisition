@@ -33,6 +33,20 @@ struct Group {
     }
 };
 
+void relayAddressesAcceptHostnamesAndRejectOtherProtocols() {
+    CHECK(normalizeRelayEndpoint("relay.disquisition.app") ==
+          "relay://relay.disquisition.app:3333");
+    CHECK(normalizeRelayEndpoint(" relay.example:4444 ") == "relay://relay.example:4444");
+    CHECK(normalizeRelayEndpoint("relay://relay.example:4444") == "relay://relay.example:4444");
+    CHECK(normalizeRelayEndpoint("[::1]:4444") == "relay://[::1]:4444");
+    CHECK(normalizeRelayEndpoint("  ").isEmpty());
+    for (const auto* address :
+         {"https://relay.example", "tcp://relay.example:3333", "relay.example:0",
+          "relay.example:65536", "relay.example:abc", "user:password@relay.example",
+          "relay.example/path", "relay.example?token=x", "relay.example#fragment"})
+        rejects([&] { normalizeRelayEndpoint(address); });
+}
+
 void identityAndInviteIntegrity() {
     Group group;
     CHECK(Identity::fromSecret(group.alice.secret()).id() == group.alice.id());
@@ -204,6 +218,7 @@ void removingHostPreservesItsPreviouslyAcceptedAdmissions() {
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
+    relayAddressesAcceptHostnamesAndRejectOtherProtocols();
     identityAndInviteIntegrity();
     memberHostsAdmitWithoutAdmins();
     rejectedAdmissionsAreAtomic();

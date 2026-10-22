@@ -10,12 +10,16 @@ port. The terminal client continues to use the original room protocol.
 
 ## Start on a LAN
 
-In the desktop Communities tab, enter a name and select **Connect**, then
+In the desktop app, enter a name and select **Connect**, then
 **Create**. A new community starts with `#general` and a voice channel named
 Lounge. Select **Invite** to copy an invite link or save its QR image.
 Another client selects **Join** and pastes the link or opens the QR image.
 
-Direct mode advertises a LAN address automatically. **Connection & saving**
+The default relay is `relay.disquisition.app` on port 3333. Relay settings accept
+a hostname or `hostname:port`, with no scheme required.
+
+For direct mode, clear **Relay** in **Connection & saving**. Direct mode
+advertises a LAN address automatically. **Connection & saving**
 lets you specify a hostname and listening port for connections across routed
 networks. The address must be reachable, including any required port forwarding.
 The automatically selected port is reused after restarting a saved community.
@@ -41,7 +45,7 @@ Run this on a reachable machine:
 ./build/relay --listen 3333
 ```
 
-Set **Relay** to `relay://hostname:3333` before connecting each client.
+Set **Relay** to `hostname` or `hostname:3333` before connecting each client.
 Relay mode opens no direct listening port and advertises no direct client IP.
 The relay sees the connecting addresses and routing IDs, but peer traffic,
 invite challenges, metadata, chat, and media travel inside mutual TLS tunnels.
@@ -72,7 +76,8 @@ longer exists require a reachable routing hint, such as an updated invite.
 - With no owner or admin online, existing communication and invite admission
   continue. Administrative edits wait until an authorized client is present.
 
-**Manage** contains the community settings, channel editor, admin assignments,
+**Manage** has a category sidebar for community settings, channels, members,
+invites, and host priority. It contains the channel editor, admin assignments,
 invite revocations, member removal, and a draggable host priority list. Removing
 a member blocks that peer identity from rejoining with another invite. The
 current UI does not provide an unblock or ownership-transfer operation.
@@ -129,8 +134,10 @@ Select a text channel to send messages, images, or GIFs. Messages are live-only.
 If nobody is connected, the local echo says it was not delivered. It will not
 be queued for later delivery. Reconnecting clients do not download missed chat.
 
-Select a voice channel and **Join voice**, or double-click it. A client joins
-one voice channel at a time across its communities. Muting, deafening, audio,
+Select a voice channel and choose **Join voice** beneath its name. Your text
+channel stays open. Participants appear beneath the voice channel, with icons
+for mute, deafen, and screen sharing. Call controls appear only while connected.
+A client joins one voice channel at a time across its communities. Muting, deafening, audio,
 screen announcements, and screen subscriptions stay within that channel.
 Screen frames go only to peers who choose to watch the share. Leaving the
 channel or losing membership stops the local call and share.

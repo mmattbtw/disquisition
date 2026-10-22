@@ -83,6 +83,7 @@ private:
     void processAdmissions();
     void publishProfile(const QString& community);
     void persistPending();
+    void connectionError(const QString& route, const QString& message);
     bool writable(Link* link, const QString& community) const;
     bool validPacket(const QString& community, const QString& channel, const QString& type,
                      const QJsonObject& data, const QString& peer) const;
@@ -97,6 +98,7 @@ private:
     QList<Link*> links_;
     QMap<QString, Link*> peers_;
     QMap<QString, Retry> retries_;
+    QMap<QString, QString> connectionErrors_;
     QMap<QString, QMap<QString, Presence>> presence_;
     QMap<QString, Presence> mine_;
     QPointer<QTcpSocket> relay_;

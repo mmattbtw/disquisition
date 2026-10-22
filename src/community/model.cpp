@@ -59,6 +59,20 @@ bool validEndpoint(const QString& endpoint) {
            url.fragment().isEmpty() && (url.path().isEmpty() || url.path() == "/");
 }
 
+QString normalizeRelayEndpoint(const QString& address) {
+    const auto input = address.trimmed();
+    if (input.isEmpty())
+        return {};
+    QUrl url(input.contains("://") ? input : "relay://" + input, QUrl::StrictMode);
+    require(url.isValid() && url.scheme() == "relay",
+            "Enter a relay hostname with an optional port.");
+    if (url.port() == -1)
+        url.setPort(3333);
+    const auto result = url.toString();
+    require(validEndpoint(result), "Enter a relay hostname with an optional port.");
+    return result;
+}
+
 QString Invite::toLink() const {
     const QJsonObject object{
         {"v", 1}, {"community", community}, {"owner", owner}, {"code", code}, {"seeds", seeds}};
