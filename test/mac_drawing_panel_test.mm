@@ -38,6 +38,20 @@ int main(int argc, char** argv) {
     CHECK(NSApp.active == wasActive);
     CHECK(!mainWindow.isVisible());
 
+    // Pointer events must pass through the panel's keyboard interception without
+    // reading keyboard-only NSEvent properties and raising an AppKit exception.
+    for (NSPanel* panel in @[canvas, toolbar]) {
+        for (const auto type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseDragged,
+                                NSEventTypeLeftMouseUp}) {
+            NSEvent* event = [NSEvent mouseEventWithType:type location:NSZeroPoint
+                modifierFlags:0 timestamp:0 windowNumber:panel.windowNumber context:nil
+                eventNumber:0 clickCount:1 pressure:1];
+            [panel sendEvent:event];
+        }
+    }
+    CHECK(!drawing.penActive() && drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive);
+
     drawing.setPenActive(true);
     CHECK(!canvas.ignoresMouseEvents);
     CHECK(NSApp.active == wasActive);

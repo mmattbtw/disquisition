@@ -18,15 +18,18 @@
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return NO; }
 - (void)sendEvent:(NSEvent*)event {
-    const int key = event.keyCode == 53 ? Qt::Key_Escape :
-                    event.keyCode == 51 ? Qt::Key_Backspace :
-                    event.keyCode == 117 ? Qt::Key_Delete : 0;
-    if (event.type == NSEventTypeKeyDown && key && self.target) {
-        QKeyEvent escape(QEvent::KeyPress, key, Qt::NoModifier);
-        escape.setAccepted(false);
-        QApplication::sendEvent(self.target, &escape);
-        if (escape.isAccepted())
-            return;
+    // AppKit raises an exception if keyCode is read from a mouse event.
+    if (event.type == NSEventTypeKeyDown && self.target) {
+        const int key = event.keyCode == 53 ? Qt::Key_Escape :
+                        event.keyCode == 51 ? Qt::Key_Backspace :
+                        event.keyCode == 117 ? Qt::Key_Delete : 0;
+        if (key) {
+            QKeyEvent keyEvent(QEvent::KeyPress, key, Qt::NoModifier);
+            keyEvent.setAccepted(false);
+            QApplication::sendEvent(self.target, &keyEvent);
+            if (keyEvent.isAccepted())
+                return;
+        }
     }
     [super sendEvent:event];
 }
