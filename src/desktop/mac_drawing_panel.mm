@@ -43,23 +43,48 @@
     QImage drawingImage;
 }
 @property(nonatomic, assign) QWidget* target;
+@property(nonatomic, strong) NSTrackingArea* pointerTracking;
+@property(nonatomic, assign) BOOL laserCursor;
 @end
 
 @implementation DisquisitionDrawingView
 - (BOOL)isFlipped { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)event { Q_UNUSED(event); return YES; }
-- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor]; }
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (self.pointerTracking)
+        [self removeTrackingArea:self.pointerTracking];
+    self.pointerTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                NSTrackingActiveAlways | NSTrackingInVisibleRect owner:self userInfo:nil];
+    [self addTrackingArea:self.pointerTracking];
+}
+- (void)resetCursorRects {
+    NSCursor* cursor = NSCursor.crosshairCursor;
+    if (self.laserCursor) {
+        NSImage* image = [[NSImage alloc] initWithSize:NSMakeSize(1, 1)];
+        cursor = [[NSCursor alloc] initWithImage:image hotSpot:NSZeroPoint];
+    }
+    [self addCursorRect:self.bounds cursor:cursor];
+}
 - (void)forwardMouse:(NSEvent*)event type:(QEvent::Type)type {
     NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const QPointF position(point.x, point.y);
     const auto button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
-    const auto buttons = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton;
+    const auto buttons = event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeLeftMouseDragged
+                             ? Qt::LeftButton : Qt::NoButton;
     QMouseEvent mouse(type, position, position, button, buttons, Qt::NoModifier);
     QApplication::sendEvent(self.target, &mouse);
 }
 - (void)mouseDown:(NSEvent*)event { [self forwardMouse:event type:QEvent::MouseButtonPress]; }
 - (void)mouseDragged:(NSEvent*)event { [self forwardMouse:event type:QEvent::MouseMove]; }
+- (void)mouseMoved:(NSEvent*)event { [self forwardMouse:event type:QEvent::MouseMove]; }
+- (void)mouseExited:(NSEvent*)event {
+    Q_UNUSED(event);
+    QEvent leave(QEvent::Leave);
+    QApplication::sendEvent(self.target, &leave);
+}
 - (void)mouseUp:(NSEvent*)event { [self forwardMouse:event type:QEvent::MouseButtonRelease]; }
 - (void)drawRect:(NSRect)dirtyRect {
     Q_UNUSED(dirtyRect);
@@ -135,6 +160,7 @@ MacDrawingPanel::MacDrawingPanel(QWidget* widget, ScreenDrawing* drawing) :
         native_->canvas.target = widget_;
         native_->canvas->drawingModel = drawing;
         panel.contentView = native_->canvas;
+        panel.acceptsMouseMovedEvents = YES;
     } else {
         native_->host.reset(QWindow::fromWinId(reinterpret_cast<WId>(panel.contentView)));
         widget_->winId();
@@ -173,5 +199,11 @@ void MacDrawingPanel::hide() {
 }
 
 void MacDrawingPanel::update() {
+    const auto* drawing = native_->canvas->drawingModel.data();
+    const bool laser = drawing && drawing->tool() == ScreenDrawing::Tool::Laser;
+    if (native_->canvas.laserCursor != laser) {
+        native_->canvas.laserCursor = laser;
+        [native_->panel invalidateCursorRectsForView:native_->canvas];
+    }
     native_->canvas.needsDisplay = YES;
 }

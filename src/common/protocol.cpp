@@ -337,6 +337,46 @@ Message screenEraseMessage(const ScreenErase& erase) {
     return message;
 }
 
+bool parseScreenLaser(const Message& message, bool fromOwner, ScreenLaser& out) {
+    if (message.type != MsgType::ScreenLaser || message.fields.size() != (fromOwner ? 8 : 7))
+        return false;
+    ScreenLaser laser;
+    laser.sharer = message.fields[0];
+    if (laser.sharer.empty() || laser.sharer.size() > kMaxNameLength ||
+        !parseInt64(message.fields[1], laser.epoch) || laser.epoch <= 0)
+        return false;
+    if (fromOwner) {
+        laser.author = message.fields[2];
+        if (laser.author.empty() || laser.author.size() > kMaxNameLength)
+            return false;
+    }
+    const std::size_t start = fromOwner ? 3 : 2;
+    std::uint32_t x = 0, y = 0, rgb = 0;
+    if (!parseU32(message.fields[start], laser.id) || laser.id == 0 ||
+        !parseU32(message.fields[start + 1], x) || x > kDrawCoordinateMax ||
+        !parseU32(message.fields[start + 2], y) || y > kDrawCoordinateMax ||
+        !parseU32(message.fields[start + 3], rgb) || rgb > 0xffffff ||
+        (message.fields[start + 4] != "0" && message.fields[start + 4] != "1"))
+        return false;
+    laser.x = static_cast<int>(x);
+    laser.y = static_cast<int>(y);
+    laser.rgb = static_cast<int>(rgb);
+    laser.visible = message.fields[start + 4] == "1";
+    out = std::move(laser);
+    return true;
+}
+
+Message screenLaserMessage(const ScreenLaser& laser, bool fromOwner) {
+    Message message{MsgType::ScreenLaser, {laser.sharer, std::to_string(laser.epoch)}};
+    if (fromOwner)
+        message.fields.push_back(laser.author);
+    for (const auto& value : {std::to_string(laser.id), std::to_string(laser.x),
+                              std::to_string(laser.y), std::to_string(laser.rgb),
+                              std::string(laser.visible ? "1" : "0")})
+        message.fields.push_back(value);
+    return message;
+}
+
 bool parsePeerAddress(const Message& message, PeerAddress& out) {
     if ((message.type != MsgType::Peer && message.type != MsgType::PeerJoined) ||
         message.fields.size() < 4) {

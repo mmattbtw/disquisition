@@ -72,6 +72,9 @@ enum class MsgType : std::uint8_t {
     PeerData = 30,
     PeerLink = 31, // relay -> client: [peer, connected 0|1], for resuming peer channels
     ScreenDrawErase = 32, // peer data: [sharer, epoch, author, stroke ids...]
+    // Transient peer data: [sharer, epoch, optional owner-stamped author,
+    // sequence, x, y, RGB, visible 0|1]. Never included in drawing history.
+    ScreenLaser = 33,
 };
 
 struct Message {
@@ -183,6 +186,18 @@ struct ScreenErase {
 };
 bool parseScreenErase(const Message& message, ScreenErase& out);
 Message screenEraseMessage(const ScreenErase& erase);
+
+struct ScreenLaser {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::uint32_t id = 0;
+    int x = 0, y = 0;
+    int rgb = 0;
+    bool visible = true;
+};
+bool parseScreenLaser(const Message& message, bool fromOwner, ScreenLaser& out);
+Message screenLaserMessage(const ScreenLaser& laser, bool fromOwner);
 
 struct PeerAddress {
     std::string name;

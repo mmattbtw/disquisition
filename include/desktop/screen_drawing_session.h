@@ -28,6 +28,8 @@ private:
     void reset(bool enabled);
     void submit(chat::ScreenDraw segment);
     void accept(chat::ScreenDraw segment);
+    void submitLaser(chat::ScreenLaser point);
+    void acceptLaser(const chat::ScreenLaser& point);
     void erase(const QString& author, const QList<quint32>& strokes);
     void broadcast(const chat::Message& message);
     chat::Message state(const QString& viewer) const;

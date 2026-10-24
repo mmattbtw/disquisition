@@ -21,7 +21,15 @@ class MacDrawingPanel;
 class ScreenDrawing final : public QObject {
     Q_OBJECT
 public:
-    enum class Tool { None, Pen, Eraser, Select };
+    enum class Tool { None, Pen, Laser, Eraser, Select };
+    static constexpr int laserTrailMs = 700;
+    static constexpr int laserTimeoutMs = 1500;
+    struct LaserSample { QPoint position; qint64 seen = 0; bool start = false; };
+    struct LaserPointer {
+        chat::ScreenLaser point;
+        QList<LaserSample> trail;
+        qint64 seen = 0;
+    };
     explicit ScreenDrawing(QObject* parent = nullptr);
     void setIdentity(const QString& name, bool owner);
     void setChatColor(const QColor& color);
@@ -44,6 +52,9 @@ public:
     qsizetype historySize() const { return received_.size(); }
     void setState(bool enabled, std::int64_t epoch);
     void add(const chat::ScreenDraw& segment);
+    bool addLaser(const chat::ScreenLaser& point);
+    const QHash<QString, LaserPointer>& lasers() const { return lasers_; }
+    qint64 laserAge(qint64 seen) const { return activityClock_.elapsed() - seen; }
     void setPenActive(bool active);
     void setColor(int color);
     void setPresenterOverlayAvailable(bool available);
@@ -64,6 +75,7 @@ signals:
     void changed();
     void updated();
     void segmentDrawn(const chat::ScreenDraw& segment);
+    void laserPointed(const chat::ScreenLaser& point);
     void permissionRequested(bool enabled);
     void clearRequested();
     void clearMineRequested();
@@ -83,6 +95,9 @@ private:
     QHash<QString, ActiveAuthor> activeAuthors_;
     QElapsedTimer activityClock_;
     QTimer activityTimer_;
+    QHash<QString, LaserPointer> lasers_;
+    QHash<QString, quint32> laserIds_;
+    QTimer laserTimer_;
     bool presenterOverlayAvailable_ = true;
     QString status_;
     int color_ = -1;
@@ -115,9 +130,13 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     void drawTo(const QPointF& position, bool first = false);
+    void pointLaser(const QPointF& position);
+    void sendLaser();
+    void stopLaser();
     void eraseTo(const QPointF& position);
     void selectTo(const QPointF& position, bool finished);
     QPointF normalized(const QPointF& position) const;
@@ -127,6 +146,10 @@ private:
     QPointer<ScreenDrawing> drawing_;
     std::optional<QPoint> previous_;
     QElapsedTimer penClock_;
+    QTimer laserTimer_;
+    QElapsedTimer laserSendClock_;
+    std::optional<QPoint> laserPosition_;
+    std::optional<QPoint> lastLaserSent_;
 };
 
 // A transparent top-level canvas follows the capture source. Its separate

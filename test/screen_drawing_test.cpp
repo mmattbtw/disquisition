@@ -451,7 +451,7 @@ void testDrawingBans() {
         notice |= label->text().contains("banned from drawing");
     CHECK(notice);
     for (const auto* button : controls.findChildren<QPushButton*>()) {
-        if (button->text() == "pen" || button->text() == "eraser")
+        if (button->text() == "pen" || button->text() == "eraser" || button->text() == "laser pointer")
             CHECK(button->isHidden());
         if (button->text() == "clear mine")
             CHECK(!button->isEnabled());
@@ -522,6 +522,150 @@ void testAttributionAndPalette() {
     CHECK(drawing.segments().size() == 1); // only the activity label expires
 }
 
+void waitForAnimation(int milliseconds) {
+    QEventLoop loop;
+    QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
+    loop.exec();
+}
+
+void testLaserHoverAndFade() {
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    StreamView view;
+    view.setDrawing(&drawing);
+    view.resize(400, 400);
+    QImage image(400, 200, QImage::Format_RGB32);
+    image.fill(Qt::black);
+    view.setImage(image);
+    DrawingControls controls(&drawing, true);
+    QPushButton* laser = nullptr;
+    for (auto* button : controls.findChildren<QPushButton*>()) {
+        if (button->text() == "laser pointer") laser = button;
+    }
+    CHECK(laser && laser->isHidden());
+    drawing.permissionRequested(true);
+    drawing.setColor(0);
+    laser->click();
+    CHECK(laser->isChecked() && drawing.tool() == ScreenDrawing::Tool::Laser);
+    CHECK(view.hasMouseTracking());
+    mouse(view, QEvent::MouseMove, {100, 50}, Qt::NoButton, Qt::NoButton);
+    CHECK(drawing.lasers().isEmpty()); // letterboxing is outside the share
+    mouse(view, QEvent::MouseMove, {100, 200}, Qt::NoButton, Qt::NoButton);
+    CHECK(drawing.lasers().size() == 1);
+    CHECK(drawing.lasers()["alice"].point.x == 2500 && drawing.lasers()["alice"].point.y == 5000);
+    waitForAnimation(45);
+    mouse(view, QEvent::MouseMove, {300, 200}, Qt::NoButton, Qt::NoButton);
+    CHECK(drawing.lasers()["alice"].trail.size() == 2);
+    CHECK(drawing.segments().isEmpty() && drawing.historySize() == 0);
+    const auto pixel = [](QWidget& widget, int x, int y) {
+        const QImage rendered = widget.grab().toImage();
+        const auto scale = rendered.devicePixelRatio();
+        return rendered.pixelColor(qRound(x * scale), qRound(y * scale));
+    };
+    CHECK(pixel(view, 200, 200).red() > 100); // the trail connects the hover positions
+    view.resize(800, 400);
+    CHECK(pixel(view, 600, 200).red() > 100); // pointer remains in normalized video coordinates
+    waitForAnimation(ScreenDrawing::laserTrailMs + 100);
+    CHECK(drawing.lasers()["alice"].trail.size() <= 1);
+    CHECK(drawing.lasers()["alice"].point.visible); // heartbeat keeps a still cursor visible
+    CHECK(pixel(view, 400, 200) == QColor(Qt::black)); // old trail has faded
+    QEvent leave(QEvent::Leave);
+    QApplication::sendEvent(&view, &leave);
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    waitForAnimation(ScreenDrawing::laserTrailMs + 100);
+    CHECK(drawing.lasers().isEmpty());
+    CHECK(pixel(view, 600, 200) == QColor(Qt::black));
+    mouse(view, QEvent::MouseMove, {400, 200}, Qt::NoButton, Qt::NoButton);
+    CHECK(drawing.lasers()["alice"].point.visible);
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QApplication::sendEvent(&view, &escape);
+    CHECK(!drawing.penActive() && !laser->isChecked());
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    CHECK(drawing.segments().isEmpty());
+}
+
+void testLaserPeerPermissionsAndExpiry() {
+    ScreenDrawing own, viewer, late;
+    ScreenDrawingSession host("alice", "alice", &own, true);
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    ScreenDrawingSession lateGuest("carol", "alice", &late, false);
+    QObject::connect(&host, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString& peer, const chat::Message& message) {
+                         if (peer == "bob") guest.receive("alice", message);
+                         else if (peer == "carol") lateGuest.receive("alice", message);
+                     });
+    QObject::connect(&guest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("bob", message); });
+    QObject::connect(&lateGuest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("carol", message); });
+    guest.start();
+    chat::ScreenLaser point{"wrong", "spoofed", 0, 1, 5000, 5000, 0x12ab34, true};
+    viewer.laserPointed(point);
+    CHECK(own.lasers().isEmpty()); // drawing is off
+    own.permissionRequested(true);
+    chat::ScreenDraw ink;
+    ink.id = 500;
+    own.segmentDrawn(ink);
+    viewer.setTool(ScreenDrawing::Tool::Laser);
+    viewer.laserPointed(point);
+    CHECK(own.lasers().size() == 1 && viewer.lasers().size() == 1);
+    CHECK(own.lasers()["bob"].point.author == "bob" && own.lasers()["bob"].point.sharer == "alice");
+    CHECK(viewer.lasers()["bob"].trail.size() == 1); // owner's echo is deduplicated
+    lateGuest.start();
+    CHECK(late.enabled() && late.segments().size() == 1 && late.lasers().isEmpty()); // only ink is replayed
+    ++point.id;
+    viewer.laserPointed(point);
+    CHECK(late.lasers().contains("bob"));
+    point.sharer = "alice"; point.epoch = own.epoch(); point.id = 100;
+    host.receive("outsider", chat::screenLaserMessage(point, false));
+    guest.receive("outsider", chat::screenLaserMessage(point, true));
+    CHECK(own.lasers().size() == 1 && viewer.lasers().size() == 1);
+    host.setBanned("bob", true);
+    CHECK(!viewer.penActive());
+    const auto before = own.lasers()["bob"].point.id;
+    viewer.laserPointed(point);
+    host.receive("bob", chat::screenLaserMessage(point, false));
+    CHECK(own.lasers()["bob"].point.id == before); // even a client bypassing its UI is rejected
+    CHECK(!viewer.lasers().contains("spoofed"));
+    host.setBanned("bob", false);
+    host.receive("bob", chat::screenLaserMessage(point, false));
+    CHECK(own.lasers()["bob"].point.id == 100);
+    --point.id;
+    point.x = 1000;
+    host.receive("bob", chat::screenLaserMessage(point, false));
+    CHECK(own.lasers()["bob"].point.x == 5000); // delayed positions cannot move it backwards
+    point.id = 101; point.author = "alice";
+    own.laserPointed(point);
+    CHECK(viewer.lasers().contains("alice") && late.lasers().contains("alice"));
+    CHECK(own.segments().size() == 1 && viewer.historySize() == 1);
+    waitForAnimation(ScreenDrawing::laserTimeoutMs + 100);
+    CHECK(own.lasers().isEmpty() && viewer.lasers().isEmpty() && late.lasers().isEmpty());
+    CHECK(own.segments().size() == 1 && viewer.segments().size() == 1); // fading leaves ink alone
+    own.laserPointed(point);
+    CHECK(own.lasers().isEmpty()); // expiry retains sequence deduplication
+    ++point.id;
+    own.laserPointed(point);
+    CHECK(!viewer.lasers().isEmpty());
+    own.permissionRequested(false);
+    CHECK(own.lasers().isEmpty() && viewer.lasers().isEmpty() && late.lasers().isEmpty());
+    host.receive("bob", chat::screenLaserMessage(point, false));
+    CHECK(own.lasers().isEmpty());
+
+    ScreenDrawing bounded;
+    bounded.setState(true, 1);
+    point.epoch = 1;
+    for (quint32 id = 1; id <= 200; ++id) {
+        point.id = id;
+        point.x = static_cast<int>(id);
+        CHECK(bounded.addLaser(point));
+    }
+    CHECK(bounded.lasers()["alice"].trail.size() == 64);
+    CHECK(bounded.historySize() == 0 && bounded.segments().isEmpty());
+    ++point.id;
+    point.epoch = 2;
+    CHECK(!bounded.addLaser(point)); // delayed positions from another clear/share
+}
+
 void testDrawingHistoryLimitAndMissingPeer() {
     ScreenDrawing own;
     ScreenDrawingSession host("alice", "alice", &own, true);
@@ -567,6 +711,8 @@ int main(int argc, char** argv) {
     testEraserAndSelection();
     testDrawingBans();
     testAttributionAndPalette();
+    testLaserHoverAndFade();
+    testLaserPeerPermissionsAndExpiry();
     testDrawingHistoryLimitAndMissingPeer();
     std::puts("screen_drawing_test: ok");
 }

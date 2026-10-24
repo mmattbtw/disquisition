@@ -332,6 +332,47 @@ void testScreenDraw() {
     CHECK(!chat::parseScreenDraw(invalid, false, draw));
 }
 
+void testScreenLaser() {
+    chat::ScreenLaser point{"alice", "bob", 9, 42, 0, 10000, 0x12ab34, true};
+    for (const bool fromOwner : {false, true}) {
+        const auto message = chat::screenLaserMessage(point, fromOwner);
+        chat::ScreenLaser decoded;
+        CHECK(chat::parseScreenLaser(message, fromOwner, decoded));
+        CHECK(decoded.sharer == "alice" && decoded.epoch == 9 && decoded.id == 42);
+        CHECK(decoded.x == 0 && decoded.y == 10000 && decoded.rgb == 0x12ab34 && decoded.visible);
+        CHECK(decoded.author == (fromOwner ? "bob" : ""));
+        CHECK(!chat::parseScreenLaser(message, !fromOwner, decoded));
+        auto invalid = message;
+        invalid.fields.push_back("extra");
+        CHECK(!chat::parseScreenLaser(invalid, fromOwner, decoded));
+        invalid = message;
+        invalid.fields.pop_back();
+        CHECK(!chat::parseScreenLaser(invalid, fromOwner, decoded));
+    }
+    point.visible = false;
+    chat::ScreenLaser decoded;
+    CHECK(chat::parseScreenLaser(chat::screenLaserMessage(point, true), true, decoded) && !decoded.visible);
+    const auto valid = chat::screenLaserMessage(point, false);
+    for (std::size_t field = 0; field < valid.fields.size(); ++field) {
+        auto invalid = valid;
+        invalid.fields[field] = "";
+        CHECK(!chat::parseScreenLaser(invalid, false, decoded));
+    }
+    for (const auto& [field, bad] : {std::pair{0, std::string(21, 'a')}, {1, "0"}, {2, "0"},
+                                  {2, "4294967296"}, {3, "-1"}, {3, "10001"}, {4, "nan"},
+                                  {5, "16777216"}, {6, "2"}}) {
+        auto invalid = valid;
+        invalid.fields[field] = bad;
+        CHECK(!chat::parseScreenLaser(invalid, false, decoded));
+    }
+    auto invalid = chat::screenLaserMessage(point, true);
+    invalid.fields[2] = "";
+    CHECK(!chat::parseScreenLaser(invalid, true, decoded));
+    invalid = valid;
+    invalid.type = MsgType::ScreenDraw;
+    CHECK(!chat::parseScreenLaser(invalid, false, decoded));
+}
+
 void testStrokeMetadataAndErase() {
     chat::ScreenDraw pen;
     pen.sharer = "alice"; pen.author = "bob"; pen.epoch = 9;
@@ -370,6 +411,7 @@ int main() {
     testPeerImage();
     testScreenDraw();
     testStrokeMetadataAndErase();
+    testScreenLaser();
     testPeerData();
     std::puts("protocol_test: ok");
     return 0;

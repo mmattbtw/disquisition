@@ -106,6 +106,25 @@ int main(int argc, char** argv) {
     [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 200, 150)];
     CHECK(drawing.segments().isEmpty());
     CHECK(NSApp.active == wasActive);
+    drawing.setTool(ScreenDrawing::Tool::Laser);
+    CHECK(canvas.acceptsMouseMovedEvents && !canvas.ignoresMouseEvents);
+    [view updateTrackingAreas];
+    bool tracksInactiveMouse = false;
+    for (NSTrackingArea* area in view.trackingAreas)
+        tracksInactiveMouse |= (area.options & NSTrackingMouseMoved) && (area.options & NSTrackingActiveAlways);
+    CHECK(tracksInactiveMouse);
+    [canvas sendEvent:mouse(NSEventTypeMouseMoved, 100, 100)]; // panel must accept non-key hover events
+    [view mouseMoved:mouse(NSEventTypeMouseMoved, 100, 100)];
+    CHECK(drawing.lasers().size() == 1 && drawing.lasers()["alice"].point.visible);
+    CHECK(drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive && !mainWindow.isVisible());
+    [view mouseExited:mouse(NSEventTypeMouseMoved, 100, 100)];
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    [view mouseMoved:mouse(NSEventTypeMouseMoved, 300, 200)];
+    CHECK(drawing.lasers()["alice"].point.visible);
+    [toolbar sendEvent:escape];
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    CHECK(!drawing.penActive() && canvas.ignoresMouseEvents && NSApp.active == wasActive);
     drawing.setState(false, 2);
     CHECK(!canvas.visible && !toolbar.visible);
     std::puts("mac_drawing_panel_test: ok");

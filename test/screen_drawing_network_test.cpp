@@ -140,6 +140,14 @@ int main(int argc, char** argv) {
     }));
     CHECK(owner.drawing.segments()[0].author == "viewer");
     CHECK(viewer.drawing.segments().size() == 1); // canonical echo deduplicates the preview
+    chat::ScreenLaser laser{"", "", 0, 10, 7500, 2500, 0xff5470, true};
+    viewer.drawing.laserPointed(laser);
+    CHECK(waitFor([&] { pump(); return owner.drawing.lasers().contains("viewer"); }));
+    CHECK(owner.drawing.lasers()["viewer"].point.x == 7500);
+    CHECK(owner.drawing.segments().size() == 1); // no persistent ink from the laser
+    laser.id = 11; laser.visible = false;
+    viewer.drawing.laserPointed(laser);
+    CHECK(waitFor([&] { pump(); return !owner.drawing.lasers()["viewer"].point.visible; }));
     // More history than one relay event-queue batch must survive a late subscription.
     for (int i = 0; i < 600; ++i) {
         segment.id = 100 + i;
@@ -160,6 +168,9 @@ int main(int argc, char** argv) {
     CHECK(waitFor([&] { pump(); late.poll(); return viewer.drawing.banned(); }));
     CHECK(!late.drawing.banned() && late.drawing.drawingAllowed());
     CHECK(viewer.drawing.enabled()); // the ban does not stop watching
+    laser.id = 100; laser.visible = true; laser.sharer = "presenter";
+    laser.epoch = owner.drawing.epoch();
+    viewer.session.sendToPeer("presenter", chat::screenLaserMessage(laser, false));
     segment.id = 55; segment.stroke = 55; segment.sharer = "presenter";
     segment.epoch = owner.drawing.epoch();
     // Send through the actual relay while bypassing the local drawing controls.
@@ -170,6 +181,8 @@ int main(int argc, char** argv) {
         return viewer.drawing.banned() && viewer.drawing.segments().size() == 601;
     }));
     CHECK(owner.drawing.segments().size() == 601 && late.drawing.segments().size() == 601);
+    CHECK(!owner.drawing.lasers().contains("viewer") || owner.drawing.lasers()["viewer"].point.id < 100);
+    CHECK(!late.drawing.lasers().contains("viewer"));
     owner.session.setBanned("viewer", false);
     CHECK(waitFor([&] { pump(); late.poll(); return !viewer.drawing.banned(); }));
     viewer.drawing.segmentDrawn(segment);

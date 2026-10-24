@@ -24,6 +24,7 @@ ScreenDrawingSession::ScreenDrawingSession(const QString& localName, const QStri
             reset(true);
     });
     connect(drawing, &ScreenDrawing::segmentDrawn, this, &ScreenDrawingSession::submit);
+    connect(drawing, &ScreenDrawing::laserPointed, this, &ScreenDrawingSession::submitLaser);
     connect(drawing, &ScreenDrawing::eraseRequested, this, &ScreenDrawingSession::erase);
     connect(drawing, &ScreenDrawing::clearMineRequested, this, [this] {
         if (drawing_)
@@ -157,6 +158,25 @@ void ScreenDrawingSession::accept(chat::ScreenDraw segment) {
         broadcast(chat::screenDrawMessage(segment, true));
 }
 
+void ScreenDrawingSession::submitLaser(chat::ScreenLaser point) {
+    if (!drawing_ || !drawing_->drawingAllowed())
+        return;
+    point.sharer = sharer_.toStdString();
+    point.author = localName_.toStdString();
+    point.epoch = drawing_->epoch();
+    if (owner_)
+        acceptLaser(point);
+    else if (watching_) {
+        drawing_->addLaser(point);
+        emit sendToPeer(sharer_, chat::screenLaserMessage(point, false));
+    }
+}
+
+void ScreenDrawingSession::acceptLaser(const chat::ScreenLaser& point) {
+    if (drawing_ && drawing_->addLaser(point))
+        broadcast(chat::screenLaserMessage(point, true));
+}
+
 void ScreenDrawingSession::erase(const QString& author, const QList<quint32>& strokes) {
     if (!drawing_ || !drawing_->enabled() || (!owner_ && (!watching_ || drawing_->banned() || author != localName_)))
         return;
@@ -196,6 +216,13 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
                 accept(segment);
             }
         }
+        else if (message.type == chat::MsgType::ScreenLaser && viewers_.contains(sender) && !isBanned(sender)) {
+            chat::ScreenLaser point;
+            if (chat::parseScreenLaser(message, false, point) && point.sharer == sharer_.toStdString()) {
+                point.author = sender.toStdString();
+                acceptLaser(point);
+            }
+        }
         else if (message.type == chat::MsgType::ScreenDrawErase && viewers_.contains(sender) && !isBanned(sender)) {
             chat::ScreenErase request;
             if (chat::parseScreenErase(message, request) && request.sharer == sharer_.toStdString() &&
@@ -220,6 +247,11 @@ void ScreenDrawingSession::receive(const QString& sender, const chat::Message& m
         drawing_->setBanned(message.fields.size() == 4 && message.fields[3] == "0");
         drawing_->setStatus({});
         drawing_->setState(message.fields[1] == "1", epoch);
+    }
+    else if (message.type == chat::MsgType::ScreenLaser) {
+        chat::ScreenLaser point;
+        if (chat::parseScreenLaser(message, true, point) && point.sharer == sharer_.toStdString())
+            drawing_->addLaser(point);
     }
     else if (message.type == chat::MsgType::ScreenDrawErase) {
         chat::ScreenErase request;

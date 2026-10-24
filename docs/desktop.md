@@ -141,6 +141,13 @@ For a window share, the overlay follows that window and hides while it is
 minimized. Annotations refer to positions in the shared image and stay in
 place when its contents scroll or change.
 
+Choose **laser pointer** to point by moving the mouse without holding a button.
+Everyone watching sees a dot with a short fading trail in your chosen pen color,
+with your name above it. The dot stays visible while you point at one spot.
+Move outside the shared image or press Esc to hide it. Laser trails disappear
+automatically, leave existing ink alone, and are not replayed to new viewers.
+Laser pointers follow the same drawing permissions and individual bans as pens.
+
 Wayland does not support this presenter overlay. If a window cannot be
 identified uniquely on Windows or X11, or XCB support was unavailable at
 build time, the sharer draws in their video preview instead. The toolbar
@@ -159,7 +166,7 @@ which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
 Drawing needs updated desktop clients and, for relayed participants, a
-relay with the generic peer-data channel. Erasing, selection and chat colors
+relay with the generic peer-data channel. Erasing, selection, chat colors and laser pointers
 need updated desktop clients on both ends; they require no further server
 or relay changes. A server that already supports screen sharing needs no
 drawing update. The sharing client owns drawing permissions and history,

@@ -50,6 +50,26 @@ ScreenDrawing::ScreenDrawing(QObject* parent) : QObject(parent) {
             activityTimer_.stop();
         emit updated();
     });
+    laserTimer_.setInterval(16);
+    connect(&laserTimer_, &QTimer::timeout, this, [this] {
+        bool repaint = false;
+        for (auto it = lasers_.begin(); it != lasers_.end();) {
+            repaint |= !it->trail.isEmpty();
+            it->trail.removeIf([this](const LaserSample& sample) { return laserAge(sample.seen) >= laserTrailMs; });
+            if (it->point.visible && laserAge(it->seen) >= laserTimeoutMs) {
+                it->point.visible = false;
+                repaint = true;
+            }
+            if (!it->point.visible && it->trail.isEmpty())
+                it = lasers_.erase(it);
+            else
+                ++it;
+        }
+        if (lasers_.isEmpty())
+            laserTimer_.stop();
+        if (repaint)
+            emit updated();
+    });
 }
 
 void ScreenDrawing::setIdentity(const QString& name, bool owner) {
@@ -79,6 +99,9 @@ void ScreenDrawing::setState(bool enabled, std::int64_t epoch) {
     selectionBox_ = {};
     activeAuthors_.clear();
     activityTimer_.stop();
+    lasers_.clear();
+    laserIds_.clear();
+    laserTimer_.stop();
     if (!enabled)
         tool_ = Tool::None;
     emit changed();
@@ -100,6 +123,29 @@ void ScreenDrawing::add(const chat::ScreenDraw& segment) {
             activityTimer_.start();
     }
     emit updated();
+}
+
+bool ScreenDrawing::addLaser(const chat::ScreenLaser& point) {
+    const QString author = QString::fromStdString(point.author);
+    if (!enabled_ || point.epoch != epoch_ || author.isEmpty() || point.id <= laserIds_.value(author))
+        return false;
+    laserIds_[author] = point.id;
+    auto& laser = lasers_[author];
+    const auto now = activityClock_.elapsed();
+    const QPoint position(point.x, point.y);
+    if (point.visible && (laser.trail.isEmpty() || laser.trail.last().position != position || !laser.point.visible)) {
+        const bool start = !laser.point.visible || laserAge(laser.seen) >= laserTrailMs;
+        laser.trail.append({position, now, start});
+        // Bound transient storage even if a peer submits faster than our UI.
+        if (laser.trail.size() > 64)
+            laser.trail.removeFirst();
+    }
+    laser.point = point;
+    laser.seen = now;
+    if (!laserTimer_.isActive())
+        laserTimer_.start();
+    emit updated();
+    return true;
 }
 
 QList<chat::ScreenDraw> ScreenDrawing::activeAuthors() const {
@@ -184,6 +230,12 @@ void ScreenDrawing::setBanned(bool banned) {
 void ScreenDrawing::setTool(Tool tool) {
     if (!drawingAllowed() || (tool == Tool::Select && !owner_))
         tool = Tool::None;
+    if (tool_ == Tool::Laser && tool != Tool::Laser) {
+        chat::ScreenLaser stop;
+        stop.id = nextSegmentId();
+        stop.visible = false;
+        emit laserPointed(stop);
+    }
     tool_ = tool;
     selected_.clear();
     selectionBox_ = {};
@@ -226,6 +278,10 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     pen->setCheckable(true);
     pen->setToolTip("Draw on the shared screen. Press Esc to return to using your mouse.");
     row->addWidget(pen);
+    auto* laser = new QPushButton("laser pointer", this);
+    laser->setCheckable(true);
+    laser->setToolTip("Move your mouse to point with a fading trail. No click needed. Press Esc to exit.");
+    row->addWidget(laser);
     auto* eraser = new QPushButton("eraser", this);
     eraser->setCheckable(true);
     eraser->setToolTip(owner ? "Drag over a stroke to erase it." : "Drag over one of your strokes to erase it.");
@@ -236,7 +292,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     row->addWidget(select);
     auto* colors = new QComboBox(this);
     colors->setAccessibleName("Pen color");
-    colors->setToolTip("Use your chat color, or choose a color for new strokes.");
+    colors->setToolTip("Use your chat color, or choose a color for the pen and laser pointer.");
     colors->addItem("chat color");
     const QStringList names{"red", "yellow", "green", "blue", "purple", "white"};
     for (int i = 0; i < names.size(); ++i) {
@@ -270,6 +326,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
             drawing->setTool(ScreenDrawing::Tool::None);
     };
     connect(pen, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Pen, checked); });
+    connect(laser, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Laser, checked); });
     connect(eraser, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Eraser, checked); });
     connect(select, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Select, checked); });
     connect(colors, &QComboBox::currentIndexChanged, drawing, [=](int index) { drawing->setColor(index - 1); });
@@ -277,10 +334,11 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     connect(clearMine, &QPushButton::clicked, drawing, &ScreenDrawing::clearMineRequested);
     connect(deleteSelected, &QPushButton::clicked, drawing, &ScreenDrawing::deleteSelection);
     auto refresh = [=] {
-        const QSignalBlocker blockAllow(allow), blockPen(pen), blockEraser(eraser),
+        const QSignalBlocker blockAllow(allow), blockPen(pen), blockLaser(laser), blockEraser(eraser),
                              blockSelect(select), blockColors(colors);
         allow->setChecked(drawing->enabled());
         pen->setChecked(drawing->tool() == ScreenDrawing::Tool::Pen);
+        laser->setChecked(drawing->tool() == ScreenDrawing::Tool::Laser);
         eraser->setChecked(drawing->tool() == ScreenDrawing::Tool::Eraser);
         select->setChecked(drawing->tool() == ScreenDrawing::Tool::Select);
         colors->setCurrentIndex(drawing->color() + 1);
@@ -288,6 +346,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
         swatch.fill(drawing->chatColor());
         colors->setItemIcon(0, QIcon(swatch));
         pen->setVisible(drawing->drawingAllowed());
+        laser->setVisible(drawing->drawingAllowed());
         eraser->setVisible(drawing->drawingAllowed());
         select->setVisible(owner && drawing->drawingAllowed());
         colors->setVisible(drawing->drawingAllowed());
@@ -299,7 +358,8 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
                                QString("delete selected (%1)").arg(drawing->selectedStrokes().size()));
         clear->setEnabled(drawing->enabled() && !drawing->segments().isEmpty());
         const bool previewOnly = owner && !drawing->presenterOverlayAvailable();
-        const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
+        const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Laser ? "move to point; trail fades; Esc exits" :
+                                 drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
                                  drawing->tool() == ScreenDrawing::Tool::Eraser ? (owner ? "erase strokes; Esc exits" : "erase your strokes; Esc exits") : QString();
         hint->setText(!drawing->status().isEmpty() ? drawing->status() :
                       drawing->banned() ? "you are banned from drawing on this stream" :
@@ -346,6 +406,9 @@ bool lineInBox(const QLineF& line, const QRectF& box) {
 
 DrawingCanvas::DrawingCanvas(QWidget* parent) : QWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
+    laserTimer_.setInterval(33);
+    connect(&laserTimer_, &QTimer::timeout, this, &DrawingCanvas::sendLaser);
 }
 
 void DrawingCanvas::setDrawing(ScreenDrawing* drawing) {
@@ -358,14 +421,26 @@ void DrawingCanvas::setDrawing(ScreenDrawing* drawing) {
             previous_.reset();
             gestureStart_.reset();
             eraserPrevious_.reset();
-            setCursor(drawing_->penActive() ? Qt::CrossCursor : Qt::ArrowCursor);
+            if (drawing_->tool() != ScreenDrawing::Tool::Laser) {
+                laserTimer_.stop();
+                laserPosition_.reset();
+                lastLaserSent_.reset();
+                laserSendClock_.invalidate();
+            }
+            setCursor(drawing_->tool() == ScreenDrawing::Tool::Laser ? Qt::BlankCursor :
+                      drawing_->penActive() ? Qt::CrossCursor : Qt::ArrowCursor);
             update();
         });
-        setCursor(drawing_->penActive() ? Qt::CrossCursor : Qt::ArrowCursor);
+        setCursor(drawing_->tool() == ScreenDrawing::Tool::Laser ? Qt::BlankCursor :
+                  drawing_->penActive() ? Qt::CrossCursor : Qt::ArrowCursor);
     }
     previous_.reset();
     gestureStart_.reset();
     eraserPrevious_.reset();
+    laserTimer_.stop();
+    laserPosition_.reset();
+    lastLaserSent_.reset();
+    laserSendClock_.invalidate();
     update();
 }
 
@@ -401,23 +476,52 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
     QFont labelFont = font();
     labelFont.setPixelSize(12);
     painter.setFont(labelFont);
-    QHash<QString, chat::ScreenDraw> labels;
+    struct Label { QPointF position; QColor color; };
+    QHash<QString, Label> labels;
     for (const auto& segment : drawing_->segments()) {
         if (drawing_->selectedStrokes().contains(screenStrokeKey(segment)))
-            labels[QString::fromStdString(segment.author)] = segment;
+            labels[QString::fromStdString(segment.author)] = {drawingPoint(area, segment.x2, segment.y2), screenSegmentColor(segment)};
     }
     for (const auto& author : drawing_->activeAuthors())
-        labels[QString::fromStdString(author.author)] = author;
-    for (const auto& author : labels) {
-        const QString name = painter.fontMetrics().elidedText(QString::fromStdString(author.author), Qt::ElideRight,
+        labels[QString::fromStdString(author.author)] = {drawingPoint(area, author.x2, author.y2), screenSegmentColor(author)};
+    for (auto it = drawing_->lasers().cbegin(); it != drawing_->lasers().cend(); ++it) {
+        const auto& laser = it.value();
+        const QColor color = QColor::fromRgb(static_cast<QRgb>(laser.point.rgb));
+        for (qsizetype i = 1; i < laser.trail.size(); ++i) {
+            const auto& a = laser.trail[i - 1];
+            const auto& b = laser.trail[i];
+            if (b.start)
+                continue;
+            const qreal opacity = qBound(0.0, 1.0 - double(drawing_->laserAge(a.seen)) / ScreenDrawing::laserTrailMs, 1.0);
+            QColor faded = color;
+            faded.setAlphaF(opacity);
+            painter.setPen(QPen(faded, 1.5 + 3 * opacity, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(drawingPoint(area, a.position.x(), a.position.y()),
+                             drawingPoint(area, b.position.x(), b.position.y()));
+        }
+        if (laser.point.visible && drawing_->laserAge(laser.seen) < ScreenDrawing::laserTimeoutMs) {
+            const QPointF point = drawingPoint(area, laser.point.x, laser.point.y);
+            painter.setPen(QPen(color, 2));
+            painter.setBrush(color);
+            painter.drawEllipse(point, 5, 5);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(Qt::white);
+            painter.drawEllipse(point, 2, 2);
+            painter.setBrush(Qt::NoBrush);
+            labels[it.key()] = {point, color};
+        }
+    }
+    for (auto it = labels.cbegin(); it != labels.cend(); ++it) {
+        const auto& labelData = it.value();
+        const QString name = painter.fontMetrics().elidedText(it.key(), Qt::ElideRight,
                                                               qMax(20, qRound(qMin(180.0, area.width() - 12))));
-        const QPointF endpoint = drawingPoint(area, author.x2, author.y2);
+        const QPointF endpoint = labelData.position;
         const qreal labelWidth = qMin(area.width(), painter.fontMetrics().horizontalAdvance(name) + 14.0);
         const qreal labelHeight = painter.fontMetrics().height() + 8;
         const qreal left = qBound(area.left(), endpoint.x() - labelWidth / 2, area.right() - labelWidth);
         const qreal top = endpoint.y() - labelHeight - 10 >= area.top() ? endpoint.y() - labelHeight - 10 : endpoint.y() + 10;
         const QRectF label(left, qBound(area.top(), top, qMax(area.top(), area.bottom() - labelHeight)), labelWidth, labelHeight);
-        painter.setPen(QPen(screenSegmentColor(author), 1));
+        painter.setPen(QPen(labelData.color, 1));
         painter.setBrush(QColor("#171b22"));
         painter.drawRoundedRect(label, 4, 4);
         painter.setPen(QColor("#f3f4f6"));
@@ -469,6 +573,57 @@ void DrawingCanvas::drawTo(const QPointF& position, bool first) {
     emit drawing_->segmentDrawn(segment);
 }
 
+void DrawingCanvas::pointLaser(const QPointF& position) {
+    if (!drawing_ || !drawing_->drawingAllowed() || drawing_->tool() != ScreenDrawing::Tool::Laser)
+        return;
+    if (drawingRect().isEmpty() || !drawingRect().contains(position)) {
+        setCursor(Qt::ArrowCursor);
+        stopLaser();
+        return;
+    }
+    if (cursor().shape() != Qt::BlankCursor)
+        setCursor(Qt::BlankCursor);
+    laserPosition_ = normalized(position).toPoint();
+    sendLaser();
+    laserTimer_.start();
+}
+
+void DrawingCanvas::sendLaser() {
+    if (!drawing_ || drawing_->tool() != ScreenDrawing::Tool::Laser || !laserPosition_)
+        return;
+    // About 30 updates/sec while moving; a quiet heartbeat keeps a stationary
+    // pointer visible, while a disconnected sender expires automatically.
+    if (laserSendClock_.isValid() && laserSendClock_.elapsed() <
+        (lastLaserSent_ == laserPosition_ ? 250 : 33))
+        return;
+    chat::ScreenLaser point;
+    point.id = drawing_->nextSegmentId();
+    point.x = laserPosition_->x();
+    point.y = laserPosition_->y();
+    point.rgb = static_cast<int>(drawing_->penColor().rgb() & 0xffffff);
+    laserSendClock_.start();
+    lastLaserSent_ = laserPosition_;
+    emit drawing_->laserPointed(point);
+}
+
+void DrawingCanvas::stopLaser() {
+    laserTimer_.stop();
+    if (drawing_ && laserPosition_) {
+        chat::ScreenLaser stop;
+        stop.id = drawing_->nextSegmentId();
+        stop.visible = false;
+        emit drawing_->laserPointed(stop);
+    }
+    laserPosition_.reset();
+    lastLaserSent_.reset();
+    laserSendClock_.invalidate();
+}
+
+void DrawingCanvas::leaveEvent(QEvent* event) {
+    stopLaser();
+    QWidget::leaveEvent(event);
+}
+
 void DrawingCanvas::eraseTo(const QPointF& position) {
     if (!drawing_ || drawingRect().isEmpty())
         return;
@@ -512,6 +667,10 @@ void DrawingCanvas::selectTo(const QPointF& position, bool finished) {
 }
 
 void DrawingCanvas::mousePressEvent(QMouseEvent* event) {
+    if (drawing_ && drawing_->tool() == ScreenDrawing::Tool::Laser) {
+        pointLaser(event->position());
+        return;
+    }
     if (event->button() != Qt::LeftButton || !drawing_ || !drawing_->penActive() ||
         drawingRect().isEmpty() || !drawingRect().contains(event->position()))
         return;
@@ -529,6 +688,10 @@ void DrawingCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void DrawingCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (drawing_ && drawing_->tool() == ScreenDrawing::Tool::Laser) {
+        pointLaser(event->position());
+        return;
+    }
     if (!(event->buttons() & Qt::LeftButton) || !drawing_ || !gestureStart_)
         return;
     if (penClock_.isValid() && penClock_.elapsed() < 16)
@@ -543,6 +706,10 @@ void DrawingCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void DrawingCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (drawing_ && drawing_->tool() == ScreenDrawing::Tool::Laser) {
+        pointLaser(event->position());
+        return;
+    }
     if (event->button() != Qt::LeftButton || !drawing_ || !gestureStart_)
         return;
     if (drawing_->tool() == ScreenDrawing::Tool::Pen)
