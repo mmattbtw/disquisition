@@ -141,6 +141,16 @@ For a window share, the overlay follows that window and hides while it is
 minimized. Annotations refer to positions in the shared image and stay in
 place when its contents scroll or change.
 
+Use **undo**, Cmd+Z on macOS, or Ctrl+Z on Windows and Linux to remove your
+most recent pen stroke. Undo removes the complete stroke for everyone watching
+and leaves other people's drawings alone. Undo in a color text field edits the
+text instead.
+
+Type a six-digit hex color, such as `#12ABCD`, directly into the color control.
+The `#` is optional. Choose **pick color...** from its dropdown for the full
+color picker, including its HTML hex field. Presets and **chat color** remain
+available. Custom colors apply to new pen strokes and the laser pointer.
+
 Choose **laser pointer** to point by moving the mouse without holding a button.
 Everyone watching sees a dot with a short fading trail in your chosen pen color,
 with your name above it. The dot stays visible while you point at one spot.

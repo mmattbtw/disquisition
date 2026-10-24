@@ -75,6 +75,18 @@ int main(int argc, char** argv) {
     NSColor* pixel = [[bitmap colorAtX:200 * scale y:(view.bounds.size.height - 150) * scale]
                       colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
     CHECK(pixel.greenComponent > pixel.redComponent + 0.1);
+    NSEvent* undo = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+        modifierFlags:NSEventModifierFlagCommand timestamp:0 windowNumber:canvas.windowNumber context:nil
+        characters:@"z" charactersIgnoringModifiers:@"z" isARepeat:NO keyCode:6];
+    [canvas sendEvent:undo];
+    CHECK(drawing.segments().isEmpty() && NSApp.active == wasActive);
+    [view mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [view mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    [toolbar sendEvent:undo];
+    CHECK(drawing.segments().isEmpty() && NSApp.active == wasActive);
+    [view mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [view mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    CHECK(drawing.segments().size() == 2 && !mainWindow.isVisible());
     // Exercise AppKit key dispatch, including when Qt's application shortcut
     // machinery has no active main window.
     NSEvent* escape = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint

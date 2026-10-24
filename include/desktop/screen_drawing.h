@@ -13,6 +13,7 @@
 #include "desktop/share_source.h"
 
 class QPainter;
+class QColorDialog;
 #if defined(Q_OS_MACOS)
 class MacDrawingPanel;
 #endif
@@ -35,6 +36,10 @@ public:
     void setChatColor(const QColor& color);
     QColor chatColor() const { return chatColor_; }
     QColor penColor() const;
+    QColor customColor() const { return customColor_; }
+    void setCustomColor(const QColor& color);
+    bool canUndo() const;
+    void undo();
     QString localName() const { return localName_; }
     bool owner() const { return owner_; }
     void setTool(Tool tool);
@@ -88,6 +93,7 @@ private:
     QString localName_;
     bool owner_ = false;
     QColor chatColor_{"#87ffaf"};
+    QColor customColor_;
     QSet<QString> removed_;
     QSet<QString> selected_;
     QRectF selectionBox_;
@@ -111,6 +117,9 @@ class DrawingControls final : public QWidget {
     Q_OBJECT
 public:
     DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent = nullptr);
+
+private:
+    QPointer<QColorDialog> colorPicker_;
 };
 
 // Coordinates always refer to the video content, excluding letterboxing.

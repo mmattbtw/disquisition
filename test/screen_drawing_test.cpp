@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QComboBox>
+#include <QColorDialog>
 #include <QEventLoop>
 #include <QKeyEvent>
 #include <QLineEdit>
@@ -382,6 +383,141 @@ void testEditingAndIdentity() {
     CHECK(viewer.tool() != ScreenDrawing::Tool::Select);
 }
 
+void testUndoOwnStrokes() {
+    ScreenDrawing own, viewer;
+    ScreenDrawingSession host("alice", "alice", &own, true);
+    ScreenDrawingSession guest("bob", "alice", &viewer, false);
+    QObject::connect(&host, &ScreenDrawingSession::sendToPeer, &guest,
+                     [&](const QString&, const chat::Message& message) { guest.receive("alice", message); });
+    QObject::connect(&guest, &ScreenDrawingSession::sendToPeer, &host,
+                     [&](const QString&, const chat::Message& message) { host.receive("bob", message); });
+    guest.start();
+    own.permissionRequested(true);
+    chat::ScreenDraw stroke;
+    stroke.id = 1; stroke.stroke = 1;
+    viewer.segmentDrawn(stroke);
+    stroke.id = 2;
+    viewer.segmentDrawn(stroke); // two segments, one gesture
+    stroke.id = 3; stroke.stroke = 3;
+    viewer.segmentDrawn(stroke);
+    stroke.id = 4; stroke.stroke = 4;
+    own.segmentDrawn(stroke); // another author drew more recently
+    CHECK(viewer.canUndo() && own.canUndo());
+    DrawingCanvas canvas;
+    canvas.setDrawing(&viewer);
+    QKeyEvent undo(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
+    QApplication::sendEvent(&canvas, &undo);
+    CHECK(own.segments().size() == 3 && viewer.segments().size() == 3);
+    CHECK(viewer.strokeIds("bob") == QList<quint32>{1});
+    CHECK(own.strokeIds("alice") == QList<quint32>{4});
+    QApplication::sendEvent(&canvas, &undo);
+    CHECK(own.segments().size() == 1 && viewer.segments().size() == 1);
+    CHECK(!viewer.canUndo());
+    viewer.undo();
+    CHECK(own.segments().size() == 1); // no other person's stroke is removed
+    host.setBanned("bob", true);
+    CHECK(!viewer.canUndo());
+    own.undo();
+    CHECK(own.segments().isEmpty() && viewer.segments().isEmpty());
+    own.undo();
+    CHECK(!own.canUndo());
+    own.permissionRequested(false);
+    CHECK(!own.canUndo());
+}
+
+void testHexColorsAndPicker() {
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    drawing.permissionRequested(true);
+    DrawingControls controls(&drawing, true);
+    auto* colors = controls.findChild<QComboBox*>();
+    CHECK(colors && colors->isEditable());
+    auto* editor = colors->lineEdit();
+    editor->selectAll();
+    editor->insert("#1a2b3c");
+    CHECK(drawing.penColor() == QColor("#1a2b3c"));
+    editor->editingFinished();
+    CHECK(colors->currentText() == "#1A2B3C");
+    editor->selectAll();
+    editor->insert("deadbe");
+    CHECK(drawing.penColor() == QColor("#deadbe"));
+    editor->editingFinished();
+    CHECK(colors->currentText() == "#DEADBE");
+    editor->selectAll();
+    editor->insert("#xyz");
+    editor->editingFinished();
+    CHECK(drawing.penColor() == QColor("#deadbe") && colors->currentText() == "#DEADBE");
+    drawing.setChatColor(QColor("#abcdef"));
+    CHECK(drawing.penColor() == QColor("#deadbe")); // custom color survives chat color changes
+    DrawingCanvas canvas;
+    canvas.resize(400, 200);
+    canvas.setDrawing(&drawing);
+    drawing.setPenActive(true);
+    click(canvas, {100, 100});
+    CHECK(drawing.segments().size() == 1);
+    const auto& ink = drawing.segments().last();
+    CHECK(ink.rgb == 0xdeadbe);
+    chat::ScreenDraw decoded;
+    CHECK(chat::parseScreenDraw(chat::screenDrawMessage(ink, true), true, decoded));
+    CHECK(screenSegmentColor(decoded) == QColor("#deadbe"));
+    colors->setCurrentIndex(colors->findText("pick color..."));
+    auto* picker = controls.findChild<QColorDialog*>("screenDrawingColorPicker");
+    CHECK(picker && picker->isVisible() && picker->testOption(QColorDialog::DontUseNativeDialog));
+    picker->setCurrentColor(QColor("#123456"));
+    CHECK(drawing.penColor() == QColor("#deadbe")); // choosing a draft doesn't change ink color
+    picker->reject();
+    CHECK(drawing.penColor() == QColor("#deadbe")); // Cancel preserves the previous color
+    QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    colors->setCurrentIndex(colors->findText("pick color..."));
+    picker = controls.findChild<QColorDialog*>("screenDrawingColorPicker");
+    CHECK(picker && picker->isVisible());
+    picker->setCurrentColor(QColor("#123456"));
+    picker->accept();
+    CHECK(drawing.penColor() == QColor("#123456"));
+    CHECK(colors->currentText() == "#123456");
+    colors->setCurrentIndex(0);
+    CHECK(drawing.penColor() == drawing.chatColor()); // chat color is still available
+}
+
+void testUndoFromPresenterToolbarAndTextEditing() {
+    QWidget window;
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    PresenterOverlay overlay(ShareSource{}, &drawing, &window);
+    auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
+    auto* controls = tools->findChild<DrawingControls*>();
+    auto* colors = controls->findChild<QComboBox*>();
+    drawing.permissionRequested(true);
+    drawing.setPenActive(true);
+    DrawingCanvas canvas;
+    canvas.resize(400, 200);
+    canvas.setDrawing(&drawing);
+    click(canvas, {100, 100});
+    QKeyEvent undo(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
+    QApplication::sendEvent(tools, &undo);
+    CHECK(drawing.segments().isEmpty());
+    click(canvas, {200, 100});
+    auto* editor = colors->lineEdit();
+    tools->show();
+    tools->activateWindow();
+    editor->setFocus();
+    QApplication::processEvents();
+    CHECK(editor->hasFocus());
+    editor->selectAll();
+    editor->insert("#123456");
+    CHECK(editor->isUndoAvailable());
+    QApplication::sendEvent(editor, &undo);
+    CHECK(drawing.segments().size() == 1); // the editor's undo does not erase ink
+    CHECK(editor->text() != "#123456");
+    drawing.setTool(ScreenDrawing::Tool::Select);
+    drawing.select({screenStrokeKey(drawing.segments().last())});
+    editor->setText("#123456");
+    editor->setCursorPosition(7);
+    QKeyEvent backspace(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    QApplication::sendEvent(editor, &backspace);
+    CHECK(editor->text() == "#12345" && drawing.segments().size() == 1);
+}
+
 void testEraserAndSelection() {
     ScreenDrawing drawing;
     ScreenDrawingSession host("alice", "alice", &drawing, true);
@@ -734,6 +870,9 @@ int main(int argc, char** argv) {
     testClosingFullscreenRestoresEscape();
     testClientOwnedDrawing();
     testEditingAndIdentity();
+    testUndoOwnStrokes();
+    testHexColorsAndPicker();
+    testUndoFromPresenterToolbarAndTextEditing();
     testEraserAndSelection();
     testDrawingBans();
     testAttributionAndPalette();

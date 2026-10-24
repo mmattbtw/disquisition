@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QImage>
 #include <QPainter>
@@ -22,11 +23,21 @@
     if (event.type == NSEventTypeKeyDown && self.target) {
         const int key = event.keyCode == 53 ? Qt::Key_Escape :
                         event.keyCode == 51 ? Qt::Key_Backspace :
-                        event.keyCode == 117 ? Qt::Key_Delete : 0;
+                        event.keyCode == 117 ? Qt::Key_Delete :
+                        event.keyCode == 6 && (event.modifierFlags & NSEventModifierFlagCommand) ? Qt::Key_Z : 0;
         if (key) {
-            QKeyEvent keyEvent(QEvent::KeyPress, key, Qt::NoModifier);
+            Qt::KeyboardModifiers modifiers;
+            if (event.modifierFlags & NSEventModifierFlagCommand) modifiers |= Qt::ControlModifier;
+            if (event.modifierFlags & NSEventModifierFlagControl) modifiers |= Qt::MetaModifier;
+            if (event.modifierFlags & NSEventModifierFlagOption) modifiers |= Qt::AltModifier;
+            if (event.modifierFlags & NSEventModifierFlagShift) modifiers |= Qt::ShiftModifier;
+            QKeyEvent keyEvent(QEvent::KeyPress, key, modifiers);
             keyEvent.setAccepted(false);
-            QApplication::sendEvent(self.target, &keyEvent);
+            QWidget* receiver = self.target;
+            auto* focus = QApplication::focusWidget();
+            if (focus && focus->window() == self.target->window() && qobject_cast<QLineEdit*>(focus))
+                receiver = focus;
+            QApplication::sendEvent(receiver, &keyEvent);
             if (keyEvent.isAccepted())
                 return;
         }
