@@ -113,7 +113,8 @@ if(BUILD_DESKTOP_APP)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
     add_library(desktop_penguins STATIC
-      src/desktop/chat_color.cpp src/desktop/penguin_overlay.cpp)
+      src/desktop/chat_color.cpp src/desktop/penguin_overlay.cpp
+      src/desktop/penguin_sprites.cpp)
     target_include_directories(desktop_penguins PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_penguins PUBLIC Qt6::Widgets)
     qt_add_resources(desktop_penguins penguins

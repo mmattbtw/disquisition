@@ -239,6 +239,10 @@ public:
 
     void setMembers(const QStringList& names) {
         scene_.setMembers(names);
+        for (auto it = sprites_.begin(); it != sprites_.end();) {
+            if (!names.contains(it.key())) it = sprites_.erase(it);
+            else ++it;
+        }
         if (!isVisible()) {
             show();
 #if defined(Q_OS_MACOS)
@@ -253,6 +257,15 @@ public:
     void setWandering(bool wandering) {
         wandering_ = wandering;
         timer_.setInterval(wandering ? 33 : 200);
+        update();
+    }
+    void setCustomSprites(const QString& name, const QImage& standing, const QImage& walking) {
+        if (standing.isNull() || walking.isNull()) sprites_.remove(name);
+        else sprites_.insert(name, qMakePair(standing, walking));
+        update();
+    }
+    void clearCustomSprites() {
+        sprites_.clear();
         update();
     }
     void setColor(const QString& name, const QColor& color) {
@@ -289,19 +302,27 @@ protected:
                 const bool walking = wandering_ && !systemReducedMotion_ &&
                                      penguin.idleSeconds <= 0 && penguin.speech.isEmpty();
                 const int frame = walking ? static_cast<int>(penguin.walkSeconds * 10) % 8 : 2;
-                const auto key = qMakePair(penguin.color.rgba(), frame);
-                if (!tinted_.contains(key)) {
-                    tinted_.insert(key, tintedFrame(frames_[frame], penguin.color));
+                const auto sprites = sprites_.constFind(it.key());
+                const bool custom = sprites != sprites_.cend();
+                QImage image;
+                QSizeF spriteSize;
+                if (custom) {
+                    image = walking ? sprites->second : sprites->first;
+                    spriteSize = QSizeF(image.size()).scaled(kSpriteHeight, kSpriteHeight,
+                                                            Qt::KeepAspectRatio);
+                } else {
+                    const auto key = qMakePair(penguin.color.rgba(), frame);
+                    if (!tinted_.contains(key)) {
+                        tinted_.insert(key, tintedFrame(frames_[frame], penguin.color));
+                    }
+                    image = tinted_[key];
+                    const double scale = kSpriteHeight / 442.0;
+                    spriteSize = QSizeF(frames_[frame].size()) * scale;
                 }
-                const QImage& image = tinted_[key];
-                // All supplied frames use the same scale, with feet anchored to
-                // their lane. Horizontal mirroring supplies the other direction.
-                const double scale = kSpriteHeight / 442.0;
-                const QSizeF spriteSize(frames_[frame].width() * scale,
-                                         frames_[frame].height() * scale);
                 painter.save();
                 painter.translate(penguin.x, feet);
-                if (penguin.facingRight) painter.scale(-1, 1);
+                // Keep the forward-facing custom standing image unmirrored.
+                if (penguin.facingRight && (!custom || walking)) painter.scale(-1, 1);
                 painter.drawImage(QRectF(-spriteSize.width() / 2, -spriteSize.height(),
                                         spriteSize.width(), spriteSize.height()), image);
                 painter.restore();
@@ -355,6 +376,7 @@ protected:
 private:
     PenguinScene scene_;
     std::array<QImage, 8> frames_;
+    QMap<QString, QPair<QImage, QImage>> sprites_;
     QMap<QPair<QRgb, int>, QImage> tinted_;
     QTimer timer_;
     QElapsedTimer clock_;
@@ -387,6 +409,10 @@ void PenguinOverlay::setMembers(QStringList names) {
     names.sort();
     if (members_ == names) return;
     members_ = std::move(names);
+    for (auto it = sprites_.begin(); it != sprites_.end();) {
+        if (!members_.contains(it.key())) it = sprites_.erase(it);
+        else ++it;
+    }
     activity_.setMembers(members_, now_());
     for (auto it = colors_.begin(); it != colors_.end();) {
         if (!members_.contains(it.key())) it = colors_.erase(it);
@@ -410,6 +436,21 @@ void PenguinOverlay::setEnabled(bool enabled) {
 void PenguinOverlay::setWandering(bool wandering) {
     wandering_ = wandering;
     for (auto& [screen, window] : windows_) window->setWandering(wandering);
+}
+
+void PenguinOverlay::setCustomSprites(const QString& name, const QImage& standing,
+                                      const QImage& walking) {
+    if (!members_.contains(name)) return;
+    if (standing.isNull() || walking.isNull()) sprites_.remove(name);
+    else sprites_.insert(name, qMakePair(standing, walking));
+    for (auto& [screen, window] : windows_) {
+        window->setCustomSprites(name, standing, walking);
+    }
+}
+
+void PenguinOverlay::clearCustomSprites() {
+    sprites_.clear();
+    for (auto& [screen, window] : windows_) window->clearCustomSprites();
 }
 
 void PenguinOverlay::setIdleTimeoutMinutes(int minutes) {
@@ -444,6 +485,11 @@ void PenguinOverlay::syncScreens() {
         if (!window) window = std::make_unique<PenguinOverlayWindow>(screen);
         window->setWandering(wandering_);
         window->setMembers(visibleMembers_);
+        for (auto it = sprites_.cbegin(); it != sprites_.cend(); ++it) {
+            if (visibleMembers_.contains(it.key())) {
+                window->setCustomSprites(it.key(), it->first, it->second);
+            }
+        }
         for (auto it = colors_.cbegin(); it != colors_.cend(); ++it) {
             window->setColor(it.key(), it.value());
         }

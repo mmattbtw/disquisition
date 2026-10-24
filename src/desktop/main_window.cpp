@@ -35,6 +35,8 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QScrollArea>
+#include <QScreen>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStyle>
@@ -56,6 +58,7 @@
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
 #include "desktop/penguin_overlay.h"
+#include "desktop/penguin_sprites.h"
 #include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
 
@@ -913,6 +916,7 @@ void MainWindow::showPreferences() {
     dialog.setStyleSheet(styleSheet());
     auto* layout = new QVBoxLayout(&dialog);
     auto* form = new QFormLayout;
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     auto* host = new QLineEdit(serverHost_, &dialog);
     auto* port = new QSpinBox(&dialog);
     port->setRange(1, 65535);
@@ -966,6 +970,9 @@ void MainWindow::showPreferences() {
     penguinsIdle->setEnabled(showPenguins_);
     penguinsIdle->setToolTip("Time since joining or the last text or image message. Choose Never to keep everyone visible.");
     connect(showPenguins, &QCheckBox::toggled, penguinsIdle, &QWidget::setEnabled);
+    QSettings spriteSettings;
+    auto* spriteEditor = new PenguinSpriteEditor(PenguinSprites::fromSettings(spriteSettings),
+                                                 &dialog);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -989,17 +996,33 @@ void MainWindow::showPreferences() {
     form->addRow("desktop overlay", showPenguins);
     form->addRow("", penguinsWander);
     form->addRow("hide inactive penguins after", penguinsIdle);
+    form->addRow("custom sprite", spriteEditor);
     form->setRowVisible(showPenguins, penguinsUnlocked_);
     form->setRowVisible(penguinsWander, penguinsUnlocked_);
     form->setRowVisible(penguinsIdle, penguinsUnlocked_);
-    layout->addLayout(form);
+    form->setRowVisible(spriteEditor, penguinsUnlocked_);
+    auto* fields = new QWidget(&dialog);
+    fields->setLayout(form);
+    auto* scroll = new QScrollArea(&dialog);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(fields);
+    layout->addWidget(scroll);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
     layout->addWidget(buttons);
+    const QSize available = screen()->availableGeometry().size() - QSize(40, 80);
+    dialog.resize(QSize(800, 640).boundedTo(available));
     std::optional<std::int64_t> chosenMaximum;
     std::unique_ptr<chat::RecentMessages> replacementStore;
     bool storeChanged = false;
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        const auto sprites = spriteEditor->sprites();
+        if (penguinsUnlocked_ && sprites.enabled && !sprites.complete()) {
+            QMessageBox::warning(&dialog, "Custom sprite",
+                                 "Upload both a standing and a walking image, or turn custom sprites off.");
+            return;
+        }
         const QString path = messageFile->text().trimmed();
         const QString count = maximum->text().trimmed();
         if (saveMessages->isChecked() && path.isEmpty()) {
@@ -1049,6 +1072,7 @@ void MainWindow::showPreferences() {
     messageFile_ = messageFile->text().trimmed();
     maxSavedMessages_ = chosenMaximum;
     showLinkedMedia_ = showMedia->isChecked();
+    const auto sprites = spriteEditor->sprites();
     penguinsAction_->setChecked(showPenguins->isChecked());
     penguinsWander_ = penguinsWander->isChecked();
     penguinsIdleMinutes_ = penguinsIdle->value();
@@ -1080,6 +1104,11 @@ void MainWindow::showPreferences() {
     settings.setValue("gifs/showLinkedMedia", showLinkedMedia_);
     settings.setValue("penguins/wander", penguinsWander_);
     settings.setValue("penguins/idleMinutes", penguinsIdleMinutes_);
+    if (penguinsUnlocked_) {
+        const bool hadCustomSprite = PenguinSprites::fromSettings(settings).enabled;
+        sprites.save(settings);
+        publishSprite(hadCustomSprite);
+    }
 }
 
 void MainWindow::openSavedMessages() {
@@ -1191,6 +1220,7 @@ void MainWindow::handleTransportClosed() {
     serverBuffer_.clear();
     imagePacer_.clear();
     imageAssembler_.clear();
+    spriteTransfers_.clear();
     myName_.clear();
     refreshMembers();
     voiceButton_->setEnabled(false);
@@ -1250,6 +1280,7 @@ void MainWindow::disconnectAll() {
     serverBuffer_.clear();
     imagePacer_.clear();
     imageAssembler_.clear();
+    spriteTransfers_.clear();
     myName_.clear();
     localSpeaking_ = false;
     connectButton_->setText("Join");
@@ -1284,6 +1315,38 @@ void MainWindow::sendVoiceState() {
     refreshMembers();
 }
 
+void MainWindow::publishSprite(bool sendReset) {
+    if (myName_.isEmpty()) return;
+    QSettings settings;
+    auto sprites = PenguinSprites::fromSettings(settings);
+    if (!penguinsUnlocked_ || !sprites.enabled || !sprites.complete()) sprites = {};
+    penguins_->setCustomSprites(myName_, sprites.standing, sprites.walking);
+    const QByteArray bytes = sprites.wireData();
+    if (bytes.isEmpty() && !sendReset) return;
+    if (server_.state() != QAbstractSocket::ConnectedState) return;
+    const std::string data(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+    for (const auto& frame : chat::spriteMessages(data)) sendFrame(&server_, frame);
+}
+
+void MainWindow::receiveSprite(const chat::Message& message) {
+    if (message.fields.empty()) return;
+    const QString name = q(message.fields[0]);
+    if (!peers_.contains(name)) return;
+    auto& transfer = spriteTransfers_[name];
+    if (!transfer.accept(message, true)) {
+        spriteTransfers_.remove(name);
+        return;
+    }
+    if (!transfer.complete()) return;
+    const auto& data = transfer.data();
+    const auto sprites = PenguinSprites::fromWireData(
+        QByteArray(data.data(), static_cast<qsizetype>(data.size())));
+    if (data.empty() || sprites.complete()) {
+        penguins_->setCustomSprites(name, sprites.standing, sprites.walking);
+    }
+    spriteTransfers_.remove(name);
+}
+
 void MainWindow::readServer() {
     serverBuffer_.append(server_.readAll());
     std::string buffer(serverBuffer_.constData(), static_cast<std::size_t>(serverBuffer_.size()));
@@ -1300,6 +1363,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         loginTimer_.stop();
         const QString previousName = myName_;
         myName_ = q(message.fields[0]);
+        spriteTransfers_.clear();
+        penguins_->clearCustomSprites();
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
                                                : serverHost_ + ":" + QString::number(serverPort_)) +
@@ -1322,6 +1387,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         }
         openSavedMessages();
         refreshMembers();
+        publishSprite();
         if (resumeVoice_) {
             QTimer::singleShot(0, this, [this] {
                 if (desiredConnected_ && resumeVoice_ && !voiceWanted_) joinVoice();
@@ -1381,6 +1447,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
             peers_[sender].deafened = message.fields[2] == "1";
             refreshMembers();
         }
+    } else if (message.type == chat::MsgType::PenguinSprite) {
+        receiveSprite(message);
     } else if (message.type == chat::MsgType::ScreenShare && message.fields.size() == 2) {
         handleScreenShare(message);
     } else if (message.type == chat::MsgType::ScreenFrame && message.fields.size() == 6) {
@@ -1433,6 +1501,7 @@ void MainWindow::addPeer(const chat::Message& message) {
 }
 
 void MainWindow::removePeer(const QString& name) {
+    spriteTransfers_.remove(name);
     const Peer peer = peers_.take(name);
     if (peer.socket) {
         peer.socket->disconnectFromHost();

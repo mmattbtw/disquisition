@@ -1,7 +1,12 @@
 #include <QApplication>
+#include <QComboBox>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QImage>
+#include <QLabel>
 #include <QScreen>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QThread>
 #include <QWidget>
@@ -11,9 +16,12 @@
 #include "check.h"
 #include "desktop/chat_color.h"
 #include "desktop/penguin_overlay.h"
+#include "desktop/penguin_sprites.h"
 
 #if defined(Q_OS_MACOS)
 #    import <AppKit/AppKit.h>
+#elif defined(Q_OS_WIN)
+#    include <qt_windows.h>
 #endif
 
 namespace {
@@ -250,6 +258,171 @@ void windowsAreTransparentAndFollowOverlayLifecycle() {
     CHECK(overlayWindows().isEmpty());
 }
 
+void spriteUploadsAreValidatedAndSavedIndependentlyOfOriginals() {
+    QTemporaryDir directory;
+    CHECK(directory.isValid());
+    const QString path = directory.filePath("standing.png");
+    QImage original(600, 300, QImage::Format_ARGB32);
+    original.fill(Qt::transparent);
+    original.setPixelColor(300, 150, Qt::red);
+    CHECK(original.save(path));
+    QString error;
+    const QImage standing = PenguinSprites::readImage(path, error);
+    CHECK(error.isEmpty());
+    CHECK(standing.size() == QSize(152, 76));
+    CHECK(standing.pixelColor(0, 0).alpha() == 0);
+    CHECK(PenguinSprites::readImage(directory.filePath("missing.png"), error).isNull());
+    CHECK(!error.isEmpty());
+    QFile invalid(directory.filePath("invalid.png"));
+    CHECK(invalid.open(QIODevice::WriteOnly));
+    invalid.write("not an image");
+    invalid.close();
+    CHECK(PenguinSprites::readImage(invalid.fileName(), error).isNull());
+    CHECK(!error.isEmpty());
+    QImage tooWide(4097, 1, QImage::Format_ARGB32);
+    tooWide.fill(Qt::red);
+    CHECK(tooWide.save(path));
+    CHECK(PenguinSprites::readImage(path, error).isNull());
+    CHECK(error.contains("4096"));
+    CHECK(invalid.open(QIODevice::WriteOnly));
+    CHECK(invalid.resize(10 * 1024 * 1024 + 1));
+    invalid.close();
+    CHECK(PenguinSprites::readImage(invalid.fileName(), error).isNull());
+    CHECK(error.contains("10 MB"));
+
+    QImage walking(76, 152, QImage::Format_ARGB32);
+    walking.fill(Qt::green);
+    const QString settingsPath = directory.filePath("sprites.ini");
+    {
+        QSettings settings(settingsPath, QSettings::IniFormat);
+        PenguinSprites {true, standing, walking}.save(settings);
+    }
+    CHECK(QFile::remove(path));
+    QSettings settings(settingsPath, QSettings::IniFormat);
+    auto saved = PenguinSprites::fromSettings(settings);
+    CHECK(saved.enabled);
+    CHECK(saved.complete());
+    CHECK(saved.standing == standing);
+    CHECK(saved.walking == walking);
+    {
+        PenguinSpriteEditor editor(saved);
+        auto* choice = editor.findChild<QComboBox*>("customSpriteChoice");
+        CHECK(choice);
+        choice->setCurrentIndex(0);
+        CHECK(!editor.sprites().enabled);
+        CHECK(editor.sprites().complete());
+        // Closing an editor without Save must leave persisted choices intact.
+    }
+    CHECK(PenguinSprites::fromSettings(settings).enabled);
+    saved.enabled = false;
+    saved.save(settings);
+    saved = PenguinSprites::fromSettings(settings);
+    CHECK(!saved.enabled);
+    CHECK(saved.standing == standing && saved.walking == walking);
+    settings.setValue("penguins/standingSprite", QByteArray("broken"));
+    CHECK(!PenguinSprites::fromSettings(settings).complete());
+}
+
+int pixelsOfColor(const QImage& image, QColor color) {
+    int count = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            count += image.pixelColor(x, y) == color;
+        }
+    }
+    return count;
+}
+
+void customSpritesSwitchForWalkingAndSurviveOverlayRecreation() {
+    QImage standing(152, 152, QImage::Format_ARGB32);
+    standing.fill(Qt::red);
+    QImage walking(152, 152, QImage::Format_ARGB32);
+    walking.fill(Qt::green);
+    PenguinOverlay overlay;
+    overlay.setWandering(false);
+    overlay.setMembers({"matt"});
+    overlay.setCustomSprites("matt", standing, walking);
+    auto capture = [] { return overlayWindows().first()->grab().toImage(); };
+    CHECK(pixelsOfColor(capture(), Qt::red) > 1000);
+    CHECK(pixelsOfColor(capture(), Qt::green) == 0);
+    overlay.setColor("matt", chatColor("pink"));
+    CHECK(pixelsOfColor(capture(), Qt::red) > 1000);
+    overlay.setEnabled(false);
+    CHECK(overlayWindows().isEmpty());
+    overlay.setEnabled(true);
+    CHECK(pixelsOfColor(capture(), Qt::red) > 1000);
+    overlay.setWandering(true);
+    QElapsedTimer wait;
+    wait.start();
+    while (pixelsOfColor(capture(), Qt::green) == 0 && wait.elapsed() < 5000) {
+        QApplication::processEvents();
+        QThread::msleep(20);
+    }
+#if defined(Q_OS_MACOS)
+    const bool reduced = [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion];
+#elif defined(Q_OS_WIN)
+    BOOL animations = TRUE;
+    SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+    const bool reduced = !animations;
+#else
+    const bool reduced = false;
+#endif
+    if (!reduced) CHECK(pixelsOfColor(capture(), Qt::green) > 1000);
+    overlay.showMessage("matt", "hello");
+    CHECK(pixelsOfColor(capture(), Qt::green) == 0);
+    CHECK(pixelsOfColor(capture(), Qt::red) > 1000);
+    overlay.setCustomSprites("matt", standing, {});
+    CHECK(pixelsOfColor(capture(), Qt::red) == 0); // Incomplete pair uses penguins.
+}
+
+void customSpritesBelongToIndividualMembers() {
+    QImage red(152, 152, QImage::Format_ARGB32);
+    red.fill(Qt::red);
+    QImage green = red;
+    green.fill(Qt::green);
+    PenguinOverlay overlay;
+    overlay.setWandering(false);
+    overlay.setMembers({"matt", "jesse"});
+    auto capture = [] { return overlayWindows().first()->grab().toImage(); };
+    const auto defaults = capture();
+    overlay.setCustomSprites("matt", red, red);
+    const int mattPixels = pixelsOfColor(capture(), Qt::red);
+    CHECK(mattPixels > 1000);
+    overlay.setCustomSprites("jesse", green, green);
+    CHECK(pixelsOfColor(capture(), Qt::red) == mattPixels);
+    CHECK(pixelsOfColor(capture(), Qt::green) > 1000);
+    overlay.setCustomSprites("matt", {}, {});
+    CHECK(pixelsOfColor(capture(), Qt::red) == 0);
+    CHECK(pixelsOfColor(capture(), Qt::green) > 1000);
+    overlay.clearCustomSprites();
+    CHECK(capture() == defaults);
+    overlay.setCustomSprites("jesse", green, green);
+    overlay.setMembers({"matt"});
+    overlay.setMembers({"matt", "jesse"});
+    CHECK(capture() == defaults); // A new session starts with the default sprite.
+}
+
+void spriteWireDataPreservesImagesAndRejectsInvalidSizes() {
+    QImage standing(152, 76, QImage::Format_ARGB32);
+    standing.fill(Qt::transparent);
+    standing.setPixelColor(50, 50, Qt::red);
+    QImage walking(76, 152, QImage::Format_ARGB32);
+    walking.fill(Qt::green);
+    PenguinSprites sprites {true, standing, walking};
+    const auto bytes = sprites.wireData();
+    const auto received = PenguinSprites::fromWireData(bytes);
+    CHECK(received.enabled && received.complete());
+    CHECK(received.standing == standing && received.walking == walking);
+    CHECK(!PenguinSprites::fromWireData(bytes.first(3)).complete());
+    CHECK(!PenguinSprites::fromWireData(QByteArray::fromHex("ffffffff")).complete());
+    CHECK(!PenguinSprites::fromWireData(bytes.first(bytes.size() / 2)).complete());
+    QImage oversized(153, 152, QImage::Format_ARGB32);
+    oversized.fill(Qt::red);
+    CHECK(!PenguinSprites::fromWireData(PenguinSprites {true, oversized, walking}.wireData()).complete());
+    sprites.enabled = false;
+    CHECK(sprites.wireData().isEmpty());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -262,6 +435,10 @@ int main(int argc, char** argv) {
     inactivityExpiresPerPersonWithoutRosterRefreshesExtendingIt();
     inactivePenguinsReturnOnChatAndStayInactiveAcrossVisibilityChanges();
     windowsAreTransparentAndFollowOverlayLifecycle();
+    spriteUploadsAreValidatedAndSavedIndependentlyOfOriginals();
+    customSpritesSwitchForWalkingAndSurviveOverlayRecreation();
+    customSpritesBelongToIndividualMembers();
+    spriteWireDataPreservesImagesAndRejectsInvalidSizes();
     if (app.arguments().contains("--preview")) {
         // A local preview of the actual native windows, with no server or saved
         // settings. It closes itself rather than leaving an overlay running.

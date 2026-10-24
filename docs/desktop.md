@@ -61,6 +61,24 @@ Uncheck **Let penguins wander** to keep characters still while retaining chat
 bubbles. macOS Reduce Motion and Windows animation settings also stop wandering.
 These choices are saved between launches. The sprites are included in the app.
 
+After unlocking, the **custom sprite** dropdown in Preferences lets you choose
+**Custom images** and upload two images: **Standing**, facing forward, and
+**Walking**, facing left. The walking image flips when moving right. Both images
+keep their original colors and represent you on everyone's desktop. Other members
+use Club Penguin by default, or their own uploaded sprites. Your images are sent
+to the server and shared with current members and new arrivals while you are
+connected. Transparent PNGs work best; JPEG, WebP and GIF are
+also accepted, using the first frame of animated images. Choose files under
+10 MB and no larger than 4096 by 4096 pixels. The app saves resized copies when
+you save Preferences, so you can move or delete the originals. Cancel discards
+changes. Choose **Off (Club Penguin)** to restore the bundled penguins without
+losing your uploaded images.
+
+Sprite synchronization requires a server and relay built from this version.
+The server associates uploads with your assigned name and forgets them when you
+leave. Your saved images are announced again when you reconnect. Turning custom
+sprites off restores your Club Penguin sprite for everyone.
+
 On macOS, the overlay joins Spaces and can appear over fullscreen applications.
 On Linux, always-on-top behavior depends on the window manager; Wayland
 compositors may restrict overlays above other applications.

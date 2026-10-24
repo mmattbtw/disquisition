@@ -56,6 +56,11 @@ enum class MsgType : std::uint8_t {
     // chunks of the same transfer, each carrying the whole header:
     // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
     PeerImage = 26,
+
+    // Personal desktop sprite, via the server. Client: [index, count, bytes];
+    // server: [assigned sender, index, count, bytes]. Empty fields reset to
+    // Club Penguin; the server's reset contains only the assigned sender.
+    PenguinSprite = 27,
 };
 
 struct Message {
@@ -71,6 +76,25 @@ constexpr std::size_t kImageChunkSize = 12 * 1024;
 constexpr std::size_t kMaxImageBytes = 4 * 1024 * 1024;
 constexpr std::uint32_t kMaxImageChunks =
     static_cast<std::uint32_t>((kMaxImageBytes + kImageChunkSize - 1) / kImageChunkSize);
+constexpr std::size_t kMaxSpriteBytes = 256 * 1024;
+constexpr std::uint32_t kMaxSpriteChunks =
+    static_cast<std::uint32_t>((kMaxSpriteBytes + kImageChunkSize - 1) / kImageChunkSize);
+
+// TCP delivers chunks in order. Only a complete, bounded transfer replaces
+// the previous sprite. A new index 0 starts a replacement; a reset is complete.
+class SpriteTransfer {
+public:
+    bool accept(const Message& message, bool fromServer = false);
+    bool complete() const { return next_ == count_; }
+    const std::string& data() const { return data_; }
+
+private:
+    std::string data_;
+    std::uint32_t next_ = 0;
+    std::uint32_t count_ = 0;
+};
+
+std::vector<Message> spriteMessages(const std::string& data, const std::string& sender = {});
 
 // Messages carry their color as a string: one of these names, or an
 // xterm-256 index such as "208".
