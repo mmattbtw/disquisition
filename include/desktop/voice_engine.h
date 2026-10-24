@@ -25,8 +25,7 @@ signals:
     void stopped();
     void statusChanged(const QString& status);
     void logMessage(const QString& line);
-    void localSpeakingChanged(bool speaking);
-    void peerVoiceChanged(const QString& name, bool connected, bool speaking);
+    void peerVoiceChanged(const QString& name, bool connected);
 
 private:
     void command(const QString& text);

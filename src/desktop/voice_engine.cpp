@@ -139,7 +139,6 @@ bool VoiceEngine::writeProfile(const QString& name, quint16 sipPort, const QStri
         << "module g711" << moduleSuffix << "\n"
         << "module menu" << moduleSuffix << "\n"
         << "module mixminus" << moduleSuffix << "\n"
-        << "module vumeter" << moduleSuffix << "\n"
         << "module_app account" << moduleSuffix << "\n"
         << "module_app ctrl_tcp" << moduleSuffix << "\n";
 #if defined(Q_OS_MACOS)
@@ -379,21 +378,6 @@ void VoiceEngine::handleControlEvent(const QByteArray& json) {
                 callIds_.remove(callId);
             }
         }
-        emit peerVoiceChanged(name, type == "CALL_ESTABLISHED", false);
-        return;
-    }
-    if (type != "VU_TX_REPORT" && type != "VU_RX_REPORT") {
-        return;
-    }
-    bool valid = false;
-    const double level = event.value("param").toString().toDouble(&valid);
-    if (!valid) {
-        return;
-    }
-    const bool speaking = level > -42.0;
-    if (type == "VU_TX_REPORT") {
-        emit localSpeakingChanged(speaking);
-    } else if (!name.isEmpty()) {
-        emit peerVoiceChanged(name, true, speaking);
+        emit peerVoiceChanged(name, type == "CALL_ESTABLISHED");
     }
 }

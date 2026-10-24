@@ -153,6 +153,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/chat_media.h
       include/desktop/gif_picker.h
       include/desktop/main_window.h
+      include/desktop/push_to_talk.h
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
@@ -163,6 +164,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/gif_picker.cpp
       src/desktop/main.cpp
       src/desktop/main_window.cpp
+      src/desktop/push_to_talk.cpp
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
@@ -189,6 +191,13 @@ if(BUILD_DESKTOP_APP)
     target_compile_definitions(disquisition-desktop PRIVATE
       "DISQUISITION_GIPHY_API_KEY=\"${DISQUISITION_GIPHY_API_KEY}\""
       "DISQUISITION_KLIPY_API_KEY=\"${DISQUISITION_KLIPY_API_KEY}\"")
+    if(UNIX AND NOT APPLE AND XCB_FOUND)
+      target_link_libraries(disquisition-desktop PRIVATE PkgConfig::XCB)
+      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_XCB)
+    endif()
+    if(WIN32)
+      target_link_libraries(disquisition-desktop PRIVATE user32)
+    endif()
     if(APPLE)
       set(DISQUISITION_CODESIGN_IDENTITY "AUTO" CACHE STRING
           "macOS signing identity: AUTO prefers Apple Development; '-' uses ad-hoc signing")
@@ -206,12 +215,13 @@ if(BUILD_DESKTOP_APP)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
       find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
       find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+      find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
       find_library(SCREENCAPTUREKIT_FRAMEWORK ScreenCaptureKit REQUIRED)
       find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
       find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
       target_link_libraries(disquisition-desktop PRIVATE
         ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
-        ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
+        ${IOKIT_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       target_link_libraries(desktop_screen PRIVATE
         ${APPKIT_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
@@ -291,6 +301,10 @@ if(BUILD_TESTING)
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
+  if(UNIX)
+    add_test(NAME hdiutil_retry_test
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/hdiutil_retry_test.sh")
+  endif()
   add_test(NAME macos_dmg_retry_test
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
   add_executable(protocol_test test/protocol_test.cpp)
