@@ -258,6 +258,10 @@ include(CTest)
 if(BUILD_TESTING)
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
+  if(UNIX)
+    add_test(NAME hdiutil_retry_test
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/hdiutil_retry_test.sh")
+  endif()
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
