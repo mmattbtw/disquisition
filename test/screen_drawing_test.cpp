@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
 #include <QVBoxLayout>
@@ -584,6 +585,31 @@ void testLaserHoverAndFade() {
     CHECK(drawing.segments().isEmpty());
 }
 
+void testLaserTrailHasNoBrightJoints() {
+    ScreenDrawing drawing;
+    drawing.setState(true, 1);
+    DrawingCanvas canvas;
+    canvas.resize(400, 200);
+    canvas.setDrawing(&drawing);
+    chat::ScreenLaser point{"alice", "bob", 1, 1, 2500, 5000, 0xff5470, true};
+    drawing.addLaser(point);
+    point.id = 2; point.x = 5000;
+    drawing.addLaser(point);
+    point.id = 3; point.x = 7500;
+    drawing.addLaser(point);
+    // Partially faded segments expose doubled alpha where round caps overlap.
+    waitForAnimation(300);
+    QImage image(canvas.size(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    canvas.renderDrawing(painter);
+    painter.end();
+    const int midpoint = image.pixelColor(150, 100).alpha();
+    const int joint = image.pixelColor(200, 100).alpha();
+    CHECK(midpoint > 50 && midpoint < 200);
+    CHECK(qAbs(joint - midpoint) < 10);
+}
+
 void testLaserPeerPermissionsAndExpiry() {
     ScreenDrawing own, viewer, late;
     ScreenDrawingSession host("alice", "alice", &own, true);
@@ -712,6 +738,7 @@ int main(int argc, char** argv) {
     testDrawingBans();
     testAttributionAndPalette();
     testLaserHoverAndFade();
+    testLaserTrailHasNoBrightJoints();
     testLaserPeerPermissionsAndExpiry();
     testDrawingHistoryLimitAndMissingPeer();
     std::puts("screen_drawing_test: ok");

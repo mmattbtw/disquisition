@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
@@ -358,8 +359,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
                                QString("delete selected (%1)").arg(drawing->selectedStrokes().size()));
         clear->setEnabled(drawing->enabled() && !drawing->segments().isEmpty());
         const bool previewOnly = owner && !drawing->presenterOverlayAvailable();
-        const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Laser ? "move to point; trail fades; Esc exits" :
-                                 drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
+        const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
                                  drawing->tool() == ScreenDrawing::Tool::Eraser ? (owner ? "erase strokes; Esc exits" : "erase your strokes; Esc exits") : QString();
         hint->setText(!drawing->status().isEmpty() ? drawing->status() :
                       drawing->banned() ? "you are banned from drawing on this stream" :
@@ -376,6 +376,57 @@ namespace {
 QPointF drawingPoint(const QRectF& area, int x, int y) {
     return area.topLeft() + QPointF(x * area.width() / chat::kDrawCoordinateMax,
                                    y * area.height() / chat::kDrawCoordinateMax);
+}
+
+void paintLaserTrail(QPainter& painter, const QRectF& area,
+                     const ScreenDrawing::LaserPointer& laser, const ScreenDrawing& drawing) {
+    struct Section { QPainterPath path; QPointF a, b; QColor from, to; };
+    QList<Section> sections;
+    QRectF bounds;
+    const auto position = [&](qsizetype index) {
+        const auto point = laser.trail[index].position;
+        return drawingPoint(area, point.x(), point.y());
+    };
+    const auto color = [&](qsizetype index) {
+        QColor result = QColor::fromRgb(static_cast<QRgb>(laser.point.rgb));
+        result.setAlphaF(qBound(0.0, 1.0 - double(drawing.laserAge(laser.trail[index].seen)) /
+                                         ScreenDrawing::laserTrailMs, 1.0));
+        return result;
+    };
+    for (qsizetype i = 1; i < laser.trail.size(); ++i) {
+        if (laser.trail[i].start)
+            continue;
+        const QPointF a = position(i - 1), b = position(i);
+        const QPointF before = i > 1 && !laser.trail[i - 1].start ? position(i - 2) : a;
+        const QPointF after = i + 1 < laser.trail.size() && !laser.trail[i + 1].start ? position(i + 1) : b;
+        QPainterPath path(a);
+        path.cubicTo(a + (b - before) / 6, b - (after - a) / 6, b);
+        bounds = bounds.united(path.controlPointRect().adjusted(-3, -3, 3, 3));
+        sections.append({path, a, b, color(i - 1), color(i)});
+    }
+    bounds = bounds.intersected(area);
+    if (bounds.isEmpty())
+        return;
+    const qreal scale = painter.device()->devicePixelRatioF();
+    QImage layer(QSize(qCeil(bounds.width() * scale), qCeil(bounds.height() * scale)),
+                 QImage::Format_ARGB32_Premultiplied);
+    layer.setDevicePixelRatio(scale);
+    layer.fill(Qt::transparent);
+    QPainter trail(&layer);
+    trail.setRenderHint(QPainter::Antialiasing);
+    trail.translate(-bounds.topLeft());
+    // Replace overlapping ink in this isolated layer instead of accumulating
+    // alpha at every sample. Composite the finished trail onto the video once.
+    trail.setCompositionMode(QPainter::CompositionMode_Source);
+    for (const auto& section : sections) {
+        QLinearGradient fade(section.a, section.b);
+        fade.setColorAt(0, section.from);
+        fade.setColorAt(1, section.to);
+        trail.setPen(QPen(QBrush(fade), 3.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        trail.drawPath(section.path);
+    }
+    trail.end();
+    painter.drawImage(bounds.topLeft(), layer);
 }
 
 qreal pointLineDistance(const QPointF& point, const QLineF& line) {
@@ -487,18 +538,7 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
     for (auto it = drawing_->lasers().cbegin(); it != drawing_->lasers().cend(); ++it) {
         const auto& laser = it.value();
         const QColor color = QColor::fromRgb(static_cast<QRgb>(laser.point.rgb));
-        for (qsizetype i = 1; i < laser.trail.size(); ++i) {
-            const auto& a = laser.trail[i - 1];
-            const auto& b = laser.trail[i];
-            if (b.start)
-                continue;
-            const qreal opacity = qBound(0.0, 1.0 - double(drawing_->laserAge(a.seen)) / ScreenDrawing::laserTrailMs, 1.0);
-            QColor faded = color;
-            faded.setAlphaF(opacity);
-            painter.setPen(QPen(faded, 1.5 + 3 * opacity, Qt::SolidLine, Qt::RoundCap));
-            painter.drawLine(drawingPoint(area, a.position.x(), a.position.y()),
-                             drawingPoint(area, b.position.x(), b.position.y()));
-        }
+        paintLaserTrail(painter, area, laser, *drawing_);
         if (laser.point.visible && drawing_->laserAge(laser.seen) < ScreenDrawing::laserTimeoutMs) {
             const QPointF point = drawingPoint(area, laser.point.x, laser.point.y);
             painter.setPen(QPen(color, 2));
