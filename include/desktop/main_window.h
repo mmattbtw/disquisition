@@ -3,6 +3,7 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QThreadPool>
@@ -17,6 +18,7 @@
 #include "desktop/image_transfer.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
+#include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
 #include "desktop/voice_engine.h"
 
@@ -101,6 +103,7 @@ private:
     void openSavedMessages();
     void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
+    void showMemberMenu(const QPoint& position);
     void refreshAudioDevices();
     void startJoining();
     void joinVoice();
@@ -120,6 +123,9 @@ private:
     void stopWatchingStream(const QString& name);
     void endRemoteStream(const QString& name);
     void endRemoteStreams();
+    void startDrawingSession(const QString& sharer, bool owner);
+    void receivePeerData(const chat::Message& message, const QString& linkedPeer = {});
+    void drawingPeerChanged(const QString& peer, bool connected);
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -198,6 +204,10 @@ private:
     // its tile on the stage.
     ScreenCapture screenCapture_;
     bool sharingScreen_ = false;
+    std::unique_ptr<PresenterOverlay> presenterOverlay_;
+    std::optional<ShareSource> sharedSource_;
+    std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawingSessions_;
+    QSet<QString> drawingBans_;
     std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;

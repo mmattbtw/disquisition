@@ -1,5 +1,8 @@
 # Used by scripts/package-macos.sh after Qt deployment and signing.
 set(CPACK_GENERATOR "DragNDrop")
+# Retry only hdiutil's transient create failure, without rerunning deployment,
+# signing, or Finder layout. Quote the command path for checkouts with spaces.
+set(CPACK_COMMAND_HDIUTIL "\"${CMAKE_CURRENT_LIST_DIR}/../scripts/hdiutil-with-retry.sh\"")
 set(CPACK_PACKAGE_NAME "disquisition")
 set(CPACK_PACKAGE_VERSION "1.0")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "disquisition desktop chat")

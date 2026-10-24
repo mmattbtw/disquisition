@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(disquisition LANGUAGES CXX)
 
 option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
+include(cmake/AppIdentity.cmake)
 if(WIN32)
   option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
 else()
@@ -136,6 +137,28 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_notifications PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_notifications PUBLIC Qt6::Gui)
 
+    add_library(desktop_screen STATIC
+      include/desktop/screen_drawing.h
+      include/desktop/screen_drawing_session.h
+      include/desktop/screen_stage.h
+      include/desktop/share_source.h
+      src/desktop/screen_drawing.cpp
+      src/desktop/screen_drawing_session.cpp
+      src/desktop/screen_stage.cpp
+      src/desktop/share_source.cpp)
+    set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
+    target_link_libraries(desktop_screen PUBLIC chat_protocol Qt6::Widgets Qt6::Multimedia)
+    if(UNIX AND NOT APPLE)
+      pkg_check_modules(XCB QUIET IMPORTED_TARGET xcb)
+      if(XCB_FOUND)
+        target_link_libraries(desktop_screen PRIVATE PkgConfig::XCB)
+        target_compile_definitions(desktop_screen PRIVATE DISQUISITION_HAVE_XCB)
+      endif()
+    endif()
+    if(WIN32)
+      target_link_libraries(desktop_screen PRIVATE dwmapi user32)
+    endif()
+
     # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
     add_executable(disquisition-desktop MACOSX_BUNDLE
       include/desktop/audio_permission.h
@@ -148,9 +171,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
-      include/desktop/screen_stage.h
       include/desktop/share_picker.h
-      include/desktop/share_source.h
       include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
@@ -163,14 +184,24 @@ if(BUILD_DESKTOP_APP)
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
-      src/desktop/screen_stage.cpp
       src/desktop/share_picker.cpp
-      src/desktop/share_source.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
+    configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
+    target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages desktop_media desktop_notifications
+      chat_protocol chat_recent_messages desktop_media desktop_notifications desktop_screen
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
+    # Bundled so the app looks the same on every platform; both are OFL licensed.
+    qt_add_resources(disquisition-desktop "fonts"
+      PREFIX "/fonts"
+      BASE resources/fonts
+      FILES
+        resources/fonts/Inter-Regular.ttf
+        resources/fonts/Inter-SemiBold.ttf
+        resources/fonts/Inter-Bold.ttf
+        resources/fonts/CalSans-Regular.ttf
+        resources/fonts/JetBrainsMono-Regular.ttf)
     if(NOT APPLE)
       # The window and tray icon. The macOS bundle has its own.
       qt_add_resources(disquisition-desktop app_icon
@@ -200,15 +231,20 @@ if(BUILD_DESKTOP_APP)
       include(cmake/MacOSCodeSigning.cmake)
       disquisition_resolve_codesign_identity("${DISQUISITION_CODESIGN_IDENTITY}"
         DISQUISITION_RESOLVED_CODESIGN_IDENTITY)
-      target_sources(disquisition-desktop PRIVATE
-        include/desktop/mac_notifications.h src/desktop/mac_notifications.mm
-        include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm)
+      target_sources(desktop_screen PRIVATE
+        include/desktop/mac_screen_capture.h src/desktop/mac_screen_capture.mm
+        include/desktop/mac_drawing_panel.h src/desktop/mac_drawing_panel.mm)
       set_source_files_properties(src/desktop/audio_permission.cpp PROPERTIES LANGUAGE OBJCXX)
-      set_source_files_properties(src/desktop/mac_notifications.mm src/desktop/mac_screen_capture.mm
+      set_source_files_properties(
+        src/desktop/mac_screen_capture.mm src/desktop/mac_drawing_panel.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
-      find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/mac_notifications.h src/desktop/mac_notifications.mm)
+      set_source_files_properties(src/desktop/mac_notifications.mm
+        PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+      find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
       find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
       find_library(SCREENCAPTUREKIT_FRAMEWORK ScreenCaptureKit REQUIRED)
       find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
@@ -218,12 +254,17 @@ if(BUILD_DESKTOP_APP)
         ${APPKIT_FRAMEWORK} ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK}
         ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK}
         ${COREVIDEO_FRAMEWORK} ${USERNOTIFICATIONS_FRAMEWORK})
+      target_link_libraries(desktop_screen PRIVATE
+        ${APPKIT_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
-        OUTPUT_NAME "disquisition"
+        OUTPUT_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "disquisition"
+        MACOSX_BUNDLE_BUNDLE_NAME "${DISQUISITION_APP_NAME}"
         MACOSX_BUNDLE_ICON_FILE "disquisition.icns"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.disquisition.desktop")
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${DISQUISITION_BUNDLE_IDENTIFIER}")
+      # Packaging reads the actual bundle path, including spaces and the channel.
+      file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/disquisition-app-bundle-$<CONFIG>.txt"
+        CONTENT "$<TARGET_BUNDLE_DIR:disquisition-desktop>\n")
       target_sources(disquisition-desktop PRIVATE resources/macos/disquisition.icns)
       set_source_files_properties(resources/macos/disquisition.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
@@ -288,8 +329,12 @@ target_link_libraries(relay PRIVATE chat_network)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME app_identity_test
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
+  add_test(NAME macos_dmg_retry_test
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
@@ -331,4 +376,28 @@ if(BUILD_TESTING AND TARGET desktop_notifications)
   add_executable(desktop_notifications_test test/desktop_notifications_test.cpp)
   target_link_libraries(desktop_notifications_test PRIVATE desktop_notifications)
   add_test(NAME desktop_notifications_test COMMAND desktop_notifications_test)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_screen)
+  add_executable(screen_drawing_test test/screen_drawing_test.cpp)
+  target_link_libraries(screen_drawing_test PRIVATE desktop_screen)
+  add_test(NAME screen_drawing_test COMMAND screen_drawing_test)
+  set_tests_properties(screen_drawing_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+endif()
+
+# Run this explicitly in a macOS desktop session; the regular drawing test
+# remains headless so CI does not need access to WindowServer.
+if(BUILD_TESTING AND APPLE AND TARGET desktop_screen)
+  add_executable(mac_drawing_panel_test EXCLUDE_FROM_ALL test/mac_drawing_panel_test.mm)
+  target_compile_options(mac_drawing_panel_test PRIVATE -fobjc-arc)
+  target_link_libraries(mac_drawing_panel_test PRIVATE desktop_screen ${APPKIT_FRAMEWORK})
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_network)
+  add_executable(screen_drawing_network_test test/screen_drawing_network_test.cpp)
+  target_link_libraries(screen_drawing_network_test PRIVATE desktop_screen chat_network)
+  add_test(NAME screen_drawing_network_test
+    COMMAND screen_drawing_network_test $<TARGET_FILE:server> $<TARGET_FILE:relay>)
+  set_tests_properties(screen_drawing_network_test PROPERTIES TIMEOUT 60)
 endif()
