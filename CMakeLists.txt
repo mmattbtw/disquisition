@@ -267,6 +267,8 @@ if(BUILD_TESTING)
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
+  add_test(NAME macos_dmg_retry_test
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
   add_executable(protocol_test test/protocol_test.cpp)
   target_link_libraries(protocol_test PRIVATE chat_protocol)
   add_test(NAME protocol_test COMMAND protocol_test)
