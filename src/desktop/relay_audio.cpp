@@ -11,9 +11,9 @@ namespace {
 
 constexpr int relayRate = 16000;
 constexpr int relayFrameBytes = 640; // 20 ms of mono signed 16-bit PCM.
-// Talking lasts through this many quiet frames, so the pauses between words
-// do not count as stopping.
-constexpr int speakingHoldFrames = 15;
+constexpr double speakingLevel = 180; // RMS, about -45 dBFS.
+// Pauses between words shorter than this do not end talking.
+constexpr int speakingHoldFrames = 10;
 
 QAudioDevice selectedDevice(const QList<QAudioDevice>& devices, const QString& id,
                             const QAudioDevice& fallback) {
@@ -157,7 +157,7 @@ bool RelayAudio::start(const QString& inputId, const QString& outputId) {
                 const auto sample = static_cast<qint16>(samples[i] | (samples[i + 1] << 8));
                 sum += static_cast<double>(sample) * sample;
             }
-            quietFrames_ = std::sqrt(sum / 320) > 450
+            quietFrames_ = std::sqrt(sum / 320) > speakingLevel
                                ? 0 : std::min(quietFrames_ + 1, speakingHoldFrames);
             const bool speaking = !muted_ && quietFrames_ < speakingHoldFrames;
             if (speaking != speaking_) {
