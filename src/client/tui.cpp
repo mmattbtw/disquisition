@@ -724,6 +724,8 @@ void Tui::drainPeers() {
                 LOG_WARN("{}", event.body);
                 appendSystem(event.body, kColorBad);
                 break;
+            case PeerNetwork::Event::Kind::Data:
+                break; // binary peer channels are handled by desktop clients
             case PeerNetwork::Event::Kind::Image:
                 // The terminal cannot draw images; mention each one once.
                 if (event.image.index == 0) {

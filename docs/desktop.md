@@ -103,6 +103,70 @@ or double-click a video to fill the screen with it; press Esc or double-click
 again to return. With more than one share on the stage, choose focus to
 enlarge one above the others.
 
+To annotate a share, the person sharing chooses **allow drawing** on their
+tile. Drawing starts off for every new share. Everyone watching can then
+choose **pen** and drag over the video. The default pen color matches the
+person's chat color; the color menu offers other colors for new strokes.
+A username tag follows each active drawer's latest endpoint, then disappears
+after they stop. Drawings stay aligned when viewers resize the video or open
+it fullscreen, and people who start watching later receive the current ink.
+
+Choose **eraser** and drag across a line to erase its whole stroke. A stroke
+is one continuous mouse drag. Viewers can erase their own strokes; the sharer
+can erase anyone's. **Clear mine** removes only that person's drawings.
+The sharer also has **select**: click a line or drag a box across strokes,
+then choose **delete selected** or press Delete. Selected strokes are
+highlighted and show their authors' names. **Clear all** removes everyone's
+ink. Press Esc to leave any drawing or selection tool.
+
+While sharing, right-click a person in the chat sidebar and choose
+**Ban from drawing on my stream** to block their pen and eraser. The menu
+changes to **Unban from drawing on my stream** to restore access. A banned
+viewer can still watch and see other people's ink, and their existing ink
+stays until it is erased. Bans apply to that chat name for the current stream,
+survive reconnects and clearing or toggling drawing, and end when the stream
+stops. The presenting client enforces them, so hiding the viewer's controls
+is not the only protection.
+
+Only the sharer can turn off drawing. Turning it off, ending the share or
+losing the connection clears the ink. The drawing also clears automatically
+after 4,096 accepted pen segments, including erased segments, to bound memory.
+
+On macOS, Windows and X11, a transparent overlay shows the same drawings
+over the actual shared display or application window. A small toolbar lets
+the sharer draw, erase, select strokes, choose a color and clear drawings
+without returning to chat. With drawing tools off, mouse input passes
+through to the shared application. Press Esc to use the mouse normally.
+For a window share, the overlay follows that window and hides while it is
+minimized. Annotations refer to positions in the shared image and stay in
+place when its contents scroll or change.
+
+Use **undo**, Cmd+Z on macOS, or Ctrl+Z on Windows and Linux to remove your
+most recent pen stroke. Undo removes the complete stroke for everyone watching
+and leaves other people's drawings alone. Undo in a color text field edits the
+text instead.
+
+Type a six-digit hex color, such as `#12ABCD`, directly into the color control.
+The `#` is optional. Choose **pick color...** from its dropdown for the full
+color picker, including its HTML hex field. Presets and **chat color** remain
+available. Custom colors apply to new pen strokes and the laser pointer.
+
+Choose **laser pointer** to point by moving the mouse without holding a button.
+Everyone watching sees a dot with a short fading trail in your chosen pen color,
+with your name above it. The dot stays visible while you point at one spot.
+Move outside the shared image or press Esc to hide it. Laser trails disappear
+automatically, leave existing ink alone, and are not replayed to new viewers.
+Laser pointers follow the same drawing permissions and individual bans as pens.
+
+Wayland does not support this presenter overlay. If a window cannot be
+identified uniquely on Windows or X11, or XCB support was unavailable at
+build time, the sharer draws in their video preview instead. The toolbar
+in the tile indicates this. The video preview and fullscreen annotations
+still work for all participants. macOS display capture leaves out
+Disquisition's own windows so the overlay is not captured a second time.
+Windows excludes the overlay using capture exclusion on Windows 10 version
+2004 and newer. X11 display capture can include the overlay in the video.
+
 The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
 when it can. Frames travel over the existing server connection, directly or
 through the relay, and the server forwards each share only to its viewers.
@@ -111,8 +175,25 @@ it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
 Screen sharing needs a server and relay built from this version; older servers
 disconnect clients that start a share.
+Drawing needs updated desktop clients and, for relayed participants, a
+relay with the generic peer-data channel. Erasing, selection, chat colors and laser pointers
+need updated desktop clients on both ends; they require no further server
+or relay changes. A server that already supports screen sharing needs no
+drawing update. The sharing client owns drawing permissions and history,
+validates incoming strokes and sends the current drawing to new viewers.
+Choosing allow drawing takes effect locally immediately. Annotations travel
+over direct peer connections or the relay's generic peer-data channel,
+separately from video. The discovery server receives no annotation events
+and stores no drawing state. Peer data is not encrypted. Drawing history
+is kept only in the sharing client's memory for the current share.
 
-On macOS, allow Disquisition in System Settings > Privacy & Security > Screen
+If the sharing client or relay does not support drawing, the viewer shows
+"drawing unavailable: update both apps and the relay" instead of silently
+waiting for permission. Clients resubscribe and receive a fresh drawing
+snapshot when their peer link reconnects.
+
+On macOS, allow the app's channel name, such as `disquisition development`,
+in System Settings > Privacy & Security > Screen
 & System Audio Recording, then quit and reopen the app. If it keeps asking
 despite an enabled toggle, quit the app, remove the old Disquisition entry
 with the minus button, add the current app bundle, and reopen it. An old

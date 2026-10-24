@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# != 3 ]]; then
-    echo "Usage: $0 disquisition.app bundled-baresip output.dmg" >&2
+    echo "Usage: $0 app-bundle.app bundled-baresip output.dmg" >&2
     exit 1
 fi
 if [[ $(uname -s) != Darwin ]]; then
@@ -21,7 +21,8 @@ package_name=$(basename "$3" .dmg)
 staging=$(mktemp -d "${TMPDIR:-/tmp}/disquisition-dmg.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 mkdir -p "$staging/payload"
-app="$staging/payload/disquisition.app"
+app_name=$(basename "$1")
+app="$staging/payload/$app_name"
 ditto "$1" "$app"
 cp "$2" "$app/Contents/MacOS/baresip"
 
@@ -30,7 +31,8 @@ deployqt=$(command -v "${MACDEPLOYQT:-macdeployqt}")
 qt_libs=$("$(dirname "$deployqt")/qmake" -query QT_INSTALL_LIBS)
 # Homebrew splits Qt modules into separate prefixes. Search its shared library
 # directory first so macdeployqt also resolves dependencies of copied plugins.
-binary="$app/Contents/MacOS/disquisition"
+executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+binary="$app/Contents/MacOS/$executable"
 qt_dependencies=$(otool -L "$binary" | awk '/^[[:space:]]*\/.*\/Qt[^\/]*\.framework\// { sub(/^[[:space:]]*/, ""); sub(/ \(compatibility.*$/, ""); print }')
 while IFS= read -r dependency; do
     [[ -z "$dependency" ]] || install_name_tool -change "$dependency" "@rpath/${dependency##*/lib/}" "$binary"
@@ -61,6 +63,7 @@ cmake "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_CODESIGN_IDENTITY:-AUTO}"
 cpack --config "$script_dir/../cmake/MacDmg.cmake" \
     -D "CPACK_INSTALLED_DIRECTORIES=$staging/payload;/" \
     -D "CPACK_PACKAGE_FILE_NAME=$package_name" \
+    -D "CPACK_DMG_VOLUME_NAME=${app_name%.app}" \
     -D "CPACK_PACKAGE_DIRECTORY=$staging/output"
 mv "$staging/output/$package_name.dmg" "$output_dir/$package_name.dmg"
 echo "Created $output_dir/$package_name.dmg"
