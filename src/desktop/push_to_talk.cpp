@@ -8,10 +8,41 @@
 #    include <qt_windows.h>
 #elif defined(Q_OS_MACOS)
 #    include <CoreGraphics/CoreGraphics.h>
+#    include <IOKit/hid/IOHIDKeys.h>
+#    include <IOKit/hid/IOHIDManager.h>
+#    include <IOKit/hid/IOHIDUsageTables.h>
 #elif defined(DISQUISITION_HAVE_XCB)
 #    include <xcb/xcb.h>
 #    include <cstdlib>
 #    include <memory>
+#endif
+
+#if defined(Q_OS_MACOS)
+namespace {
+
+// The virtual key code macOS gives Caps Lock, kVK_CapsLock.
+constexpr quint32 kCapsLockKey = 0x39;
+
+CFDictionaryRef usageMatching(CFStringRef pageKey, int page, CFStringRef usageKey, int usage) {
+    CFNumberRef pageNumber = CFNumberCreate(nullptr, kCFNumberIntType, &page);
+    CFNumberRef usageNumber = CFNumberCreate(nullptr, kCFNumberIntType, &usage);
+    const void* keys[] = {pageKey, usageKey};
+    const void* values[] = {pageNumber, usageNumber};
+    CFDictionaryRef matching = CFDictionaryCreate(nullptr, keys, values, 2,
+                                                  &kCFTypeDictionaryKeyCallBacks,
+                                                  &kCFTypeDictionaryValueCallBacks);
+    CFRelease(pageNumber);
+    CFRelease(usageNumber);
+    return matching;
+}
+
+void closeKeyboards(IOHIDManagerRef keyboards) {
+    IOHIDManagerUnscheduleFromRunLoop(keyboards, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+    IOHIDManagerClose(keyboards, kIOHIDOptionsTypeNone);
+    CFRelease(keyboards);
+}
+
+}  // namespace
 #endif
 
 PushToTalk::PushToTalk(QObject* parent) : QObject(parent) {
@@ -31,6 +62,9 @@ PushToTalk::PushToTalk(QObject* parent) : QObject(parent) {
 }
 
 PushToTalk::~PushToTalk() {
+#if defined(Q_OS_MACOS)
+    if (capsLock_) closeKeyboards(capsLock_);
+#endif
 #if defined(DISQUISITION_HAVE_XCB)
     if (x11_) xcb_disconnect(x11_);
 #endif
@@ -46,6 +80,33 @@ void PushToTalk::start(quint32 key) {
     // macOS asks once and applies a grant after the app restarts.
     global_ = CGPreflightListenEventAccess();
     if (!global_) CGRequestListenEventAccess();
+    // macOS tracks whether Caps Lock is on rather than held down, so read
+    // the key from the keyboards themselves.
+    if (global_ && key == kCapsLockKey) {
+        IOHIDManagerRef keyboards = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+        CFDictionaryRef devices =
+            usageMatching(CFSTR(kIOHIDDeviceUsagePageKey), kHIDPage_GenericDesktop,
+                          CFSTR(kIOHIDDeviceUsageKey), kHIDUsage_GD_Keyboard);
+        CFDictionaryRef capsLock =
+            usageMatching(CFSTR(kIOHIDElementUsagePageKey), kHIDPage_KeyboardOrKeypad,
+                          CFSTR(kIOHIDElementUsageKey), kHIDUsage_KeyboardCapsLock);
+        IOHIDManagerSetDeviceMatching(keyboards, devices);
+        IOHIDManagerSetInputValueMatching(keyboards, capsLock);
+        CFRelease(devices);
+        CFRelease(capsLock);
+        IOHIDManagerRegisterInputValueCallback(
+            keyboards,
+            [](void* context, IOReturn, void*, IOHIDValueRef value) {
+                static_cast<PushToTalk*>(context)->setHeld(IOHIDValueGetIntegerValue(value) != 0);
+            },
+            this);
+        IOHIDManagerScheduleWithRunLoop(keyboards, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+        if (IOHIDManagerOpen(keyboards, kIOHIDOptionsTypeNone) == kIOReturnSuccess) {
+            capsLock_ = keyboards;
+            return;
+        }
+        closeKeyboards(keyboards);
+    }
 #else
     global_ = x11_ != nullptr;
 #endif
@@ -61,6 +122,10 @@ void PushToTalk::stop() {
     key_.reset();
     poll_.stop();
     qApp->removeEventFilter(this);
+#if defined(Q_OS_MACOS)
+    if (capsLock_) closeKeyboards(capsLock_);
+    capsLock_ = nullptr;
+#endif
     setHeld(false);
 }
 

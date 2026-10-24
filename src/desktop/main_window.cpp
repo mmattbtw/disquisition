@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHostAddress>
+#include <QIcon>
 #include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,6 +30,8 @@
 #include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QNetworkInterface>
+#include <QPainter>
+#include <QPixmap>
 #include <QPointer>
 #include <QDir>
 #include <QPushButton>
@@ -152,6 +155,34 @@ QString localAdvertiseHost(const QHostAddress& routeAddress) {
         }
     }
     return {};
+}
+
+// Lit like a TeamSpeak bubble while the member talks. Each client judges
+// that from the audio it receives, so nothing extra goes over the wire.
+QIcon memberBubble(const QColor& color, bool inVoice, bool talking, qreal scale) {
+    QPixmap pixmap(QSize(16, 16) * scale);
+    pixmap.setDevicePixelRatio(scale);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QPointF center(8, 8);
+    if (talking) {
+        QColor glow = color;
+        glow.setAlphaF(0.35);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(glow);
+        painter.drawEllipse(center, 7.5, 7.5);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else if (inVoice) {
+        painter.setPen(QPen(color, 1.5));
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 2, 2);
+    }
+    return QIcon(pixmap);
 }
 
 }  // namespace
@@ -989,8 +1020,8 @@ void MainWindow::showPreferences() {
     auto* pushToTalk = new QCheckBox("Hold a key to talk", &dialog);
     pushToTalk->setChecked(pushToTalkEnabled_);
 #if defined(Q_OS_MACOS)
-    pushToTalk->setToolTip("To use it while another app is focused, allow "
-                           "Input Monitoring in System Settings.");
+    pushToTalk->setToolTip("To use it while another app is focused, or to hold "
+                           "Caps Lock, allow Input Monitoring in System Settings.");
 #endif
     auto* pushToTalkKey = new PushToTalkKeyButton(&dialog);
     pushToTalkKey->setKey(pushToTalkKey_, pushToTalkKeyName_);
@@ -1904,37 +1935,35 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
 
 void MainWindow::refreshMembers() {
     members_->clear();
+    const qreal scale = members_->devicePixelRatioF();
     if (!myName_.isEmpty()) {
-        const bool waitingToTalk = pushToTalkEnabled_ && !pushToTalk_.held();
-        const bool talking = localSpeaking_ && !muted_ && !waitingToTalk;
-        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :
-                                  talking ? "  talking" :
-                                  !voiceWanted_ ? "  text" :
-                                  waitingToTalk ? "  push to talk" : "  mic";
-        auto* self = new QListWidgetItem((talking ? "● " : "○ ") + myName_ +
-                                         selfState + (sharingScreen_ ? "  LIVE" : ""), members_);
-        self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
-                                   talking ? "#6ee7a2" : "#9dccca"));
+        const bool talking = localSpeaking_ && !muted_ &&
+                             (!pushToTalkEnabled_ || pushToTalk_.held());
+        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" : "";
+        const QColor color(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
+                           talking ? "#6ee7a2" : "#9dccca");
+        auto* self = new QListWidgetItem(memberBubble(color, voiceWanted_, talking, scale),
+                                         myName_ + selfState + (sharingScreen_ ? "  LIVE" : ""),
+                                         members_);
+        self->setForeground(color);
     }
     QStringList names = peers_.keys();
     names.sort(Qt::CaseInsensitive);
     for (const QString& name : names) {
         const Peer& peer = peers_[name];
         const bool inVoice = peer.voicePort != 0;
-        const QString marker = peer.speaking && !peer.muted && inVoice ? "● " :
-                               inVoice ? "○ " : "· ";
-        const QString state = !inVoice ? "  text" : peer.deafened ? "  deafened" : peer.muted ? "  muted" :
-                              peer.speaking ? "  talking" :
-                              peer.voiceConnected ? "  voice" : "  in voice";
-        auto* item = new QListWidgetItem(marker + name + state +
-                                         (peer.sharingScreen ? "  LIVE" : ""), members_);
+        const QString state = !inVoice ? "" : peer.deafened ? "  deafened" : peer.muted ? "  muted" : "";
+        const QColor color(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
+                           peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" : "#9dccca");
+        const bool talking = inVoice && peer.speaking && !peer.muted;
+        auto* item = new QListWidgetItem(memberBubble(color, inVoice, talking, scale),
+                                         name + state + (peer.sharingScreen ? "  LIVE" : ""),
+                                         members_);
         item->setData(Qt::UserRole, name);
         if (peer.sharingScreen) {
             item->setToolTip("double-click to watch " + name + "'s screen");
         }
-        item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
-                                  peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
-                                  "#9dccca"));
+        item->setForeground(color);
     }
 }
 

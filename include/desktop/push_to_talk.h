@@ -8,6 +8,7 @@
 
 class QKeyEvent;
 struct xcb_connection_t;
+struct __IOHIDManager;
 
 // Reads the key globally on Windows, X11 and macOS with Input Monitoring;
 // elsewhere only presses while this app is active count.
@@ -38,6 +39,7 @@ private:
     bool held_ = false;
     bool global_ = false;
     xcb_connection_t* x11_ = nullptr;
+    __IOHIDManager* capsLock_ = nullptr;
 };
 
 class PushToTalkKeyButton final : public QPushButton {
