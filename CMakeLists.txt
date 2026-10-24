@@ -155,6 +155,16 @@ if(BUILD_DESKTOP_APP)
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages desktop_media
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
+    # Bundled so the app looks the same on every platform; both are OFL licensed.
+    qt_add_resources(disquisition-desktop "fonts"
+      PREFIX "/fonts"
+      BASE resources/fonts
+      FILES
+        resources/fonts/Inter-Regular.ttf
+        resources/fonts/Inter-SemiBold.ttf
+        resources/fonts/Inter-Bold.ttf
+        resources/fonts/CalSans-Regular.ttf
+        resources/fonts/JetBrainsMono-Regular.ttf)
     set(DISQUISITION_GIPHY_API_KEY "" CACHE STRING "Default GIPHY API key for the GIF picker")
     set(DISQUISITION_KLIPY_API_KEY "" CACHE STRING "Default KLIPY API key for the GIF picker")
     target_compile_definitions(disquisition-desktop PRIVATE

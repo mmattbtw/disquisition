@@ -60,9 +60,9 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     // Lets the statistics give way first when the tile is narrow.
     stats_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     stats_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    focusButton_ = new QPushButton("focus", this);
-    fullscreenButton_ = new QPushButton("fullscreen", this);
-    stopButton_ = new QPushButton("stop watching", this);
+    focusButton_ = new QPushButton("Focus", this);
+    fullscreenButton_ = new QPushButton("Fullscreen", this);
+    stopButton_ = new QPushButton("Stop Watching", this);
 
     auto* header = new QHBoxLayout;
     header->setSpacing(6);
@@ -77,7 +77,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     auto* inviteText = new QLabel(name + " is sharing their screen", invitation_);
     inviteText->setAlignment(Qt::AlignCenter);
     inviteText->setWordWrap(true);
-    auto* watchButton = new QPushButton("watch stream", invitation_);
+    auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
     auto* invitationLayout = new QVBoxLayout(invitation_);
     invitationLayout->addStretch();
@@ -118,7 +118,7 @@ void StreamTile::setWatching(bool watching) {
 
 void StreamTile::setFocusState(bool available, bool focused) {
     focusButton_->setVisible(available);
-    focusButton_->setText(focused ? "show all" : "focus");
+    focusButton_->setText(focused ? "Show All" : "Focus");
 }
 
 void StreamTile::showFrame(const QImage& image, qsizetype encodedBytes) {

@@ -1,5 +1,6 @@
 #include "desktop/chat_media.h"
 
+#include <QAbstractTextDocumentLayout>
 #include <QBuffer>
 #include <QDesktopServices>
 #include <QDialog>
@@ -95,8 +96,8 @@ void openViewer(QWidget* parent, const QByteArray& bytes) {
     }
 
     auto* buttons = new QHBoxLayout;
-    auto* save = new QPushButton("save…", dialog);
-    auto* close = new QPushButton("close", dialog);
+    auto* save = new QPushButton("Save…", dialog);
+    auto* close = new QPushButton("Close", dialog);
     buttons->addStretch();
     buttons->addWidget(save);
     buttons->addWidget(close);
@@ -122,19 +123,23 @@ std::unique_ptr<QMovie> movieFromBytes(const QByteArray& bytes) {
 }
 
 ChatMedia::ChatMedia(QTextBrowser* view, MediaFetcher* fetcher, QObject* parent) :
-    QObject(parent), view_(view), fetcher_(fetcher) {
+    QObject(parent), view_(view), window_(view->window()), fetcher_(fetcher) {
     view_->setOpenLinks(false);
     connect(view_, &QTextBrowser::anchorClicked, this, &ChatMedia::open);
     // Media finishes loading after its message was appended. Keep following
     // the newest message unless the reader has scrolled up.
     QScrollBar* bar = view_->verticalScrollBar();
-    connect(bar, &QScrollBar::valueChanged, this,
-            [this, bar](int value) { pinnedToBottom_ = value >= bar->maximum() - 4; });
+    connect(bar, &QScrollBar::valueChanged, this, [this, bar](int value) {
+        pinnedToBottom_ = value >= bar->maximum() - 4;
+        updatePlayback();
+    });
     connect(bar, &QScrollBar::rangeChanged, this, [this, bar](int, int maximum) {
         if (pinnedToBottom_) {
             bar->setValue(maximum);
         }
+        updatePlayback();
     });
+    window_->installEventFilter(this);
 }
 
 ChatMedia::~ChatMedia() = default;
@@ -175,6 +180,15 @@ bool ChatMedia::appendImage(const QByteArray& bytes) {
 void ChatMedia::clear() {
     embeds_.clear();
     playing_.clear();
+}
+
+bool ChatMedia::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == window_ &&
+        (event->type() == QEvent::WindowStateChange || event->type() == QEvent::Show ||
+         event->type() == QEvent::Hide)) {
+        updatePlayback();
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 int ChatMedia::insert(Embed embed, const QImage& placeholder) {
@@ -240,7 +254,7 @@ void ChatMedia::setFrame(int id, const QImage& frame) {
         document->markContentsDirty(embed.position, 1);
     }
     else {
-        view_->viewport()->update();
+        view_->viewport()->update(viewportRect(embed));
     }
 }
 
@@ -255,6 +269,37 @@ void ChatMedia::startPlaying(int id) {
             oldest->second.movie.reset();
         }
     }
+    updatePlayback();
+}
+
+// Decoding frames nobody can see slows down the whole app.
+void ChatMedia::updatePlayback() {
+    const bool windowShown = view_->isVisible() && !window_->isMinimized();
+    const QRect viewport = view_->viewport()->rect();
+    for (const int id : playing_) {
+        const auto found = embeds_.find(id);
+        if (found == embeds_.end() || !found->second.movie) {
+            continue;
+        }
+        QMovie* movie = found->second.movie.get();
+        const bool onScreen = windowShown && viewportRect(found->second).intersects(viewport);
+        if (onScreen && movie->state() == QMovie::Paused) {
+            movie->setPaused(false);
+        }
+        else if (!onScreen && movie->state() == QMovie::Running) {
+            movie->setPaused(true);
+        }
+    }
+}
+
+// Each embed is a paragraph of its own.
+QRect ChatMedia::viewportRect(const Embed& embed) const {
+    QTextDocument* document = view_->document();
+    const QRectF bounds =
+        document->documentLayout()->blockBoundingRect(document->findBlock(embed.position));
+    return bounds
+        .translated(-view_->horizontalScrollBar()->value(), -view_->verticalScrollBar()->value())
+        .toAlignedRect();
 }
 
 void ChatMedia::open(const QUrl& link) {

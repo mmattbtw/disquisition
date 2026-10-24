@@ -90,10 +90,13 @@ GifPicker::GifPicker(GifSearch* search, MediaFetcher* fetcher, QWidget* parent) 
     connect(results_, &QListWidget::itemActivated, this,
             [this](QListWidgetItem* item) { choose(item->data(kUrlRole).toUrl()); });
     connect(results_->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+        updatePlayback();
         if (value >= results_->verticalScrollBar()->maximum() - kLoadMoreMarginPx) {
             loadMore();
         }
     });
+    connect(results_->verticalScrollBar(), &QScrollBar::rangeChanged, this,
+            [this] { updatePlayback(); });
     connect(search_, &GifSearch::pageReady, this, &GifPicker::showPage);
     connect(search_, &GifSearch::failed, this, &GifPicker::showFailure);
 }
@@ -128,18 +131,14 @@ void GifPicker::popup(QWidget* anchor, const QString& query) {
 
 void GifPicker::showEvent(QShowEvent* event) {
     QFrame::showEvent(event);
-    for (const auto& preview : previews_) {
-        if (preview->state() == QMovie::Paused) {
-            preview->setPaused(false);
-        }
-    }
+    updatePlayback();
 }
 
 void GifPicker::hideEvent(QHideEvent* event) {
     debounce_.stop();
-    for (const auto& preview : previews_) {
-        if (preview->state() == QMovie::Running) {
-            preview->setPaused(true);
+    for (const Preview& preview : previews_) {
+        if (preview.movie->state() == QMovie::Running) {
+            preview.movie->setPaused(true);
         }
     }
     QFrame::hideEvent(event);
@@ -265,10 +264,8 @@ void GifPicker::showPage(GifProvider source, const QString& query, int page,
                                 item->setIcon(QIcon(frame));
                             });
                             raw->start();
-                            if (!isVisible()) {
-                                raw->setPaused(true);
-                            }
-                            previews_.push_back(std::move(movie));
+                            previews_.push_back({item, std::move(movie)});
+                            updatePlayback(previews_.back());
                         });
     }
     // A short first page may not fill the view, so there is nothing to scroll.
@@ -292,6 +289,26 @@ void GifPicker::showFailure(GifProvider source, const QString& query, int page,
 void GifPicker::setStatus(const QString& text) {
     status_->setText(text);
     status_->setVisible(!text.isEmpty());
+}
+
+// Every page scrolled past keeps its previews, and animating them all makes
+// scrolling stutter. Those out of view keep their current frame.
+void GifPicker::updatePlayback() {
+    for (const Preview& preview : previews_) {
+        updatePlayback(preview);
+    }
+}
+
+void GifPicker::updatePlayback(const Preview& preview) {
+    const bool onScreen =
+        isVisible() &&
+        results_->visualItemRect(preview.item).intersects(results_->viewport()->rect());
+    if (onScreen && preview.movie->state() == QMovie::Paused) {
+        preview.movie->setPaused(false);
+    }
+    else if (!onScreen && preview.movie->state() == QMovie::Running) {
+        preview.movie->setPaused(true);
+    }
 }
 
 void GifPicker::choose(const QUrl& gif) {
