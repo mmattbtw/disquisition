@@ -208,7 +208,7 @@ void testClosingFullscreenRestoresEscape() {
     stage->addStream("alice", true);
     window.show();
     for (auto* button : stage->findChildren<QPushButton*>()) {
-        if (button->text() == "fullscreen")
+        if (button->text() == "Fullscreen")
             button->click();
     }
     QPointer<QWidget> fullscreen;
