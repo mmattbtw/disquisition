@@ -394,6 +394,83 @@ void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
     CHECK(bystander.next(chat::MsgType::ScreenShare).fields == (Fields{"screen_sharer", "0"}));
 }
 
+// Drawing is an opaque peer channel. The discovery server only introduces
+// peers; no annotation messages go to it, and it owns no drawing state.
+void testRelayPeerData(std::uint16_t serverPort, std::uint16_t relayPort) {
+    using chat::Message;
+    using chat::MsgType;
+    RawSession alice(relayPort), bob(relayPort), bystander(relayPort);
+    signIn(alice, "data_alice");
+    signIn(bob, "data_bob");
+    signIn(bystander, "data_bystander");
+    const std::string payload("opaque\0drawing bytes", 20);
+    const Message forged = chat::peerDataMessage(
+        {"forged_sender", "data_bob", "screen-drawing", payload});
+    Message received;
+    CHECK(waitFor([&] {
+        CHECK(alice.connection.send(forged));
+        Message message;
+        while (bob.connection.poll(message)) {
+            if (message.type == MsgType::PeerData) {
+                received = message;
+                return true;
+            }
+        }
+        return false;
+    }));
+    chat::PeerData data;
+    CHECK(chat::parsePeerData(received, data));
+    CHECK(data.sender == "data_alice" && data.target == "data_bob");
+    CHECK(data.channel == "screen-drawing" && data.data == payload);
+    // Targeting is generic; the relay does not interpret the channel or bytes.
+    CHECK(bob.connection.send(
+        chat::peerDataMessage({"spoof", "data_alice", "another-channel", "reply"})));
+    CHECK(chat::parsePeerData(alice.next(MsgType::PeerData), data));
+    CHECK(data.sender == "data_bob" && data.data == "reply" && data.channel == "another-channel");
+    // The reply fences forwarding of the first message; nobody else receives it.
+    Message unexpected;
+    while (bystander.connection.poll(unexpected))
+        CHECK(unexpected.type != MsgType::PeerData);
+
+    // A real peer mesh exchanges the same opaque data with a hosted user.
+    chat::PeerNetwork direct;
+    std::string error;
+    CHECK(direct.start(0, error));
+    direct.setMyName("data_direct");
+    RawSession roster(serverPort);
+    CHECK(roster.connection.send(
+        {MsgType::Login, {"data_direct", std::to_string(direct.port()), ""}}));
+    CHECK(roster.next(MsgType::LoginOk).fields[0] == "data_direct");
+    chat::PeerAddress address;
+    CHECK(waitFor([&] {
+        Message message;
+        while (roster.connection.poll(message)) {
+            if (chat::parsePeerAddress(message, address))
+                direct.addPeer(address.name, address.host, address.port, address.advertised);
+        }
+        chat::PeerNetwork::Event event;
+        while (direct.poll(event)) {
+        }
+        return direct.connectedTo("data_alice");
+    }));
+    CHECK(direct.sendData("data_alice", "screen-drawing", "direct to relay"));
+    CHECK(chat::parsePeerData(alice.next(MsgType::PeerData), data));
+    CHECK(data.sender == "data_direct" && data.data == "direct to relay");
+    CHECK(alice.connection.send(
+        chat::peerDataMessage({"spoof", "data_direct", "screen-drawing", "relay to direct"})));
+    bool delivered = false;
+    CHECK(waitFor([&] {
+        chat::PeerNetwork::Event event;
+        while (direct.poll(event)) {
+            if (event.kind == chat::PeerNetwork::Event::Kind::Data) {
+                CHECK(event.data.sender == "data_alice" && event.data.data == "relay to direct");
+                delivered = true;
+            }
+        }
+        return delivered;
+    }));
+}
+
 // Image chunks cross the mesh into and out of the relay. The relay stamps
 // each chunk with its hosted user's name, whatever the frame claims.
 void testRelayImages(std::uint16_t relayPort) {
@@ -500,6 +577,7 @@ int main(int argc, char** argv) {
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
     testScreenSharing(gServer.port, gRelay.port);
+    testRelayPeerData(gServer.port, gRelay.port);
     testRelayDuplicateNames(gRelay.port);
     testRelayImages(gRelay.port);
 

@@ -39,10 +39,30 @@ The build creates `build/server`, `build/client`, `build/relay` and the static
 
 ## Desktop app
 
+Local builds, including `make` and direct CMake builds, default to
+`disquisition development`, even when building a checkout of `main`.
+The desktop workflow builds pull requests as `disquisition staging` and
+`main` as `disquisition`. Manual workflow runs use production on `main`
+and staging on other branches.
+
+Each channel has a separate macOS bundle identifier, preferences and
+application-data directory, so development and staging do not reuse production's
+permission grants or settings. Production keeps its existing identity and paths.
+Permission grants still depend on the signing identity described below.
+
+To select a channel explicitly, use `make BUILD_CHANNEL=staging` or configure
+CMake with `-DDISQUISITION_BUILD_CHANNEL=staging`. Valid channels are
+`development`, `staging` and `production`. CMake remembers the selected channel
+in the build directory; `make` selects development unless `BUILD_CHANNEL` is set.
+
 The desktop target also needs Qt 6.6 or newer with Widgets, Network and
 Multimedia, plus pkg-config and FFmpeg development libraries. CMake checks for
 `libavcodec` version 60 or newer, `libavutil` and `libswscale`. It skips the
 desktop app if Qt or FFmpeg is missing.
+On Linux, install the XCB development package, such as `libxcb1-dev` on
+Debian or Ubuntu, for the presenter drawing overlay on X11. CMake detects
+it through pkg-config. Without it, annotations remain available in the
+video preview and fullscreen viewer.
 
 ```sh
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON
@@ -74,6 +94,25 @@ cmake --build build --config Release --target disquisition-desktop
 The [desktop workflow](../.github/workflows/desktop.yml) has the full dependency
 setup for all three platforms.
 
+### Native macOS drawing test
+
+The regular drawing tests use Qt's offscreen platform. To also check the
+presenter panels against AppKit, run this from a macOS desktop session:
+
+```sh
+cmake --build build --target mac_drawing_panel_test
+./build/mac_drawing_panel_test
+```
+
+This test checks that enabling the overlay and pen leaves the app inactive,
+accepts native panel mouse events, forwards strokes to the shared drawing,
+and renders the shared colors. It also supports selection and erasing, and
+restores click-through on Escape. It briefly
+shows native windows, so it runs separately from `ctest`.
+For a manual check, put another app over Disquisition, enable the presenter
+pen, draw, change colors, and press Escape. The client should stay behind the
+shared app, and Escape should let clicks reach that app again.
+
 ### macOS signing
 
 On macOS, local builds automatically use the first valid Apple Development
@@ -99,11 +138,13 @@ To package a local macOS build, use a baresip executable built with the static
 voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
 
 ```sh
-scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip build/disquisition.dmg
+scripts/package-macos.sh "build/disquisition development.app" build-baresip/output/baresip build/disquisition-development.dmg
 ```
 
 The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
-installer window layout. It bundles dependencies and signs the finished app
+installer window layout. Pass the bundle for the channel you built, such as
+`build/disquisition staging.app` or `build/disquisition.app`.
+It preserves the app's name, bundles dependencies and signs the finished app
 using the same automatic certificate selection as the build, with ad-hoc
 signing as a fallback. If you configured a specific signing identity, set
 `DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.

@@ -1,0 +1,143 @@
+#include <QApplication>
+#include <CoreGraphics/CoreGraphics.h>
+#import <AppKit/AppKit.h>
+
+#include "check.h"
+#include "desktop/screen_drawing.h"
+#include "desktop/screen_drawing_session.h"
+
+int main(int argc, char** argv) {
+    // Avoid Qt activating this test process during AppKit launch completion.
+    QCoreApplication::setAttribute(Qt::AA_PluginApplication);
+    QApplication app(argc, argv);
+    QWidget mainWindow;
+    ScreenDrawing drawing;
+    ScreenDrawingSession session("alice", "alice", &drawing, true);
+    ShareSource source;
+    source.nativeId = CGMainDisplayID();
+    PresenterOverlay overlay(source, &drawing, &mainWindow);
+
+    const bool wasActive = NSApp.active;
+    CHECK(!wasActive);
+    drawing.setState(true, 1);
+    NSPanel* canvas = nil;
+    NSPanel* toolbar = nil;
+    for (NSWindow* window in NSApp.windows) {
+        if (!window.visible)
+            continue;
+        if ([window.title isEqualToString:@"Screen drawing overlay"])
+            canvas = static_cast<NSPanel*>(window);
+        if ([window.title isEqualToString:@"Screen drawing"])
+            toolbar = static_cast<NSPanel*>(window);
+    }
+    CHECK(canvas && toolbar);
+    CHECK((canvas.styleMask & NSWindowStyleMaskNonactivatingPanel) != 0);
+    CHECK((toolbar.styleMask & NSWindowStyleMaskNonactivatingPanel) != 0);
+    CHECK(canvas.visible && toolbar.visible && canvas.ignoresMouseEvents);
+    CHECK(toolbar.level > canvas.level);
+    CHECK(NSApp.active == wasActive);
+    CHECK(!mainWindow.isVisible());
+
+    // Pointer events must pass through the panel's keyboard interception without
+    // reading keyboard-only NSEvent properties and raising an AppKit exception.
+    for (NSPanel* panel in @[canvas, toolbar]) {
+        for (const auto type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseDragged,
+                                NSEventTypeLeftMouseUp}) {
+            NSEvent* event = [NSEvent mouseEventWithType:type location:NSZeroPoint
+                modifierFlags:0 timestamp:0 windowNumber:panel.windowNumber context:nil
+                eventNumber:0 clickCount:1 pressure:1];
+            [panel sendEvent:event];
+        }
+    }
+    CHECK(!drawing.penActive() && drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive);
+
+    drawing.setPenActive(true);
+    CHECK(!canvas.ignoresMouseEvents);
+    CHECK(NSApp.active == wasActive);
+    CHECK(!mainWindow.isVisible());
+    const auto mouse = [&](NSEventType type, CGFloat x, CGFloat y) {
+        return [NSEvent mouseEventWithType:type location:NSMakePoint(x, y)
+            modifierFlags:0 timestamp:0 windowNumber:canvas.windowNumber context:nil
+            eventNumber:0 clickCount:1 pressure:1];
+    };
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    CHECK(drawing.segments().size() == 2);
+    CHECK(drawing.segments()[0].x1 < drawing.segments()[1].x2);
+    CHECK(drawing.segments()[0].y1 > drawing.segments()[1].y2);
+    // The native host uses the shared Qt renderer with AppKit's flipped
+    // coordinates. Check a pixel in the middle of the actual pen stroke.
+    NSView* view = canvas.contentView;
+    NSBitmapImageRep* bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+    [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
+    const CGFloat scale = bitmap.pixelsWide / view.bounds.size.width;
+    NSColor* pixel = [[bitmap colorAtX:200 * scale y:(view.bounds.size.height - 150) * scale]
+                      colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+    CHECK(pixel.greenComponent > pixel.redComponent + 0.1);
+    NSEvent* undo = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+        modifierFlags:NSEventModifierFlagCommand timestamp:0 windowNumber:canvas.windowNumber context:nil
+        characters:@"z" charactersIgnoringModifiers:@"z" isARepeat:NO keyCode:6];
+    [canvas sendEvent:undo];
+    CHECK(drawing.segments().isEmpty() && NSApp.active == wasActive);
+    [view mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [view mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    [toolbar sendEvent:undo];
+    CHECK(drawing.segments().isEmpty() && NSApp.active == wasActive);
+    [view mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [view mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    CHECK(drawing.segments().size() == 2 && !mainWindow.isVisible());
+    // Exercise AppKit key dispatch, including when Qt's application shortcut
+    // machinery has no active main window.
+    NSEvent* escape = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+        modifierFlags:0 timestamp:0 windowNumber:canvas.windowNumber context:nil
+        characters:@"\x1b" charactersIgnoringModifiers:@"\x1b" isARepeat:NO keyCode:53];
+    [canvas sendEvent:escape];
+    CHECK(!drawing.penActive() && canvas.ignoresMouseEvents);
+    CHECK(NSApp.active == wasActive);
+    drawing.setPenActive(true);
+    [toolbar sendEvent:escape];
+    CHECK(!drawing.penActive() && canvas.ignoresMouseEvents);
+    CHECK(NSApp.active == wasActive);
+    // Native selection and Delete share the same hit testing as video previews.
+    drawing.setTool(ScreenDrawing::Tool::Select);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 200, 150)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 200, 150)];
+    CHECK(drawing.selectedStrokes().size() == 1);
+    NSEvent* remove = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+        modifierFlags:0 timestamp:0 windowNumber:canvas.windowNumber context:nil
+        characters:@"\x7f" charactersIgnoringModifiers:@"\x7f" isARepeat:NO keyCode:51];
+    [canvas sendEvent:remove];
+    CHECK(drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive);
+    drawing.setPenActive(true);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 100, 100)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 300, 200)];
+    drawing.setTool(ScreenDrawing::Tool::Eraser);
+    [canvas.contentView mouseDown:mouse(NSEventTypeLeftMouseDown, 200, 150)];
+    [canvas.contentView mouseUp:mouse(NSEventTypeLeftMouseUp, 200, 150)];
+    CHECK(drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive);
+    drawing.setTool(ScreenDrawing::Tool::Laser);
+    CHECK(canvas.acceptsMouseMovedEvents && !canvas.ignoresMouseEvents);
+    [view updateTrackingAreas];
+    bool tracksInactiveMouse = false;
+    for (NSTrackingArea* area in view.trackingAreas)
+        tracksInactiveMouse |= (area.options & NSTrackingMouseMoved) && (area.options & NSTrackingActiveAlways);
+    CHECK(tracksInactiveMouse);
+    [canvas sendEvent:mouse(NSEventTypeMouseMoved, 100, 100)]; // panel must accept non-key hover events
+    [view mouseMoved:mouse(NSEventTypeMouseMoved, 100, 100)];
+    CHECK(drawing.lasers().size() == 1 && drawing.lasers()["alice"].point.visible);
+    CHECK(drawing.segments().isEmpty());
+    CHECK(NSApp.active == wasActive && !mainWindow.isVisible());
+    [view mouseExited:mouse(NSEventTypeMouseMoved, 100, 100)];
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    [view mouseMoved:mouse(NSEventTypeMouseMoved, 300, 200)];
+    CHECK(drawing.lasers()["alice"].point.visible);
+    [toolbar sendEvent:escape];
+    CHECK(!drawing.lasers()["alice"].point.visible);
+    CHECK(!drawing.penActive() && canvas.ignoresMouseEvents && NSApp.active == wasActive);
+    drawing.setState(false, 2);
+    CHECK(!canvas.visible && !toolbar.visible);
+    std::puts("mac_drawing_panel_test: ok");
+}

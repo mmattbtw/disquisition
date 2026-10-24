@@ -1,11 +1,14 @@
 # Used by scripts/package-macos.sh after Qt deployment and signing.
 set(CPACK_GENERATOR "DragNDrop")
+# Retry only hdiutil's transient create and detach failures, without rerunning
+# deployment, signing, or Finder layout. hdiutil-retry.sh handles detach and
+# hands the rest to hdiutil-with-retry.sh. Quote the path for checkouts with spaces.
+set(CPACK_COMMAND_HDIUTIL "\"${CMAKE_CURRENT_LIST_DIR}/../scripts/hdiutil-retry.sh\"")
 set(CPACK_PACKAGE_NAME "disquisition")
 set(CPACK_PACKAGE_VERSION "1.0")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "disquisition desktop chat")
 set(CPACK_PACKAGE_DESCRIPTION "disquisition desktop chat")
 set(CPACK_DMG_VOLUME_NAME "disquisition")
 set(CPACK_DMG_FORMAT "UDZO")
-set(CPACK_COMMAND_HDIUTIL "${CMAKE_CURRENT_LIST_DIR}/../scripts/hdiutil-retry.sh")
 set(CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_CURRENT_LIST_DIR}/../resources/macos/dmg-background.tiff")
 set(CPACK_DMG_DS_STORE_SETUP_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/../scripts/dmg-layout.applescript")

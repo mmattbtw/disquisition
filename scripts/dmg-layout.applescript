@@ -12,7 +12,9 @@ on run argv
             set icon size of options to 96
             set text size of options to 13
             set background picture of options to file ".background:background.tiff"
-            set position of item "disquisition.app" to {145, 225}
+            repeat with appItem in (every item whose name extension is "app")
+                set position of appItem to {145, 225}
+            end repeat
             set position of item "Applications" to {435, 225}
             close
             open

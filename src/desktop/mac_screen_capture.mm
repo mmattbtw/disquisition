@@ -158,8 +158,15 @@ void MacScreenCapture::startDisplay(quint32 displayId) {
       for (SCDisplay* display in content.displays) {
           if (display.displayID == displayId) {
               *size = CGSizeMake(display.width, display.height);
+              // Exclude our windows, including annotation windows created
+              // after capture starts, so ink is never baked into the video.
+              NSMutableArray<SCRunningApplication*>* excluded = [NSMutableArray array];
+              for (SCRunningApplication* application in content.applications) {
+                  if (application.processID == NSProcessInfo.processInfo.processIdentifier)
+                      [excluded addObject:application];
+              }
               return [[SCContentFilter alloc] initWithDisplay:display
-                                        excludingApplications:@[]
+                                        excludingApplications:excluded
                                              exceptingWindows:@[]];
           }
       }
@@ -197,4 +204,25 @@ void listMacShareSources(std::function<void(QList<ShareSource>)> done) {
                                          completionHandler:^(SCShareableContent* content, NSError* error) {
       done(error ? QList<ShareSource>() : windowSources(content) + displaySources(content));
     }];
+}
+
+QRect macShareSourceGeometry(const ShareSource& source) {
+    CGRect bounds = CGRectZero;
+    if (source.kind == ShareSource::Kind::Screen) {
+        if (!CGDisplayIsActive(source.nativeId)) return {};
+        bounds = CGDisplayBounds(source.nativeId);
+    }
+    else {
+        CFArrayRef info = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
+                                                   source.nativeId);
+        if (!info) return {};
+        NSArray* windows = CFBridgingRelease(info);
+        if (windows.count != 1) return {};
+        NSDictionary* window = windows[0];
+        if (![window[(__bridge NSString*)kCGWindowIsOnscreen] boolValue]) return {};
+        if (!CGRectMakeWithDictionaryRepresentation(
+                (__bridge CFDictionaryRef)window[(__bridge NSString*)kCGWindowBounds], &bounds)) return {};
+    }
+    return QRect(qRound(bounds.origin.x), qRound(bounds.origin.y),
+                 qRound(bounds.size.width), qRound(bounds.size.height));
 }

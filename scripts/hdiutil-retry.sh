@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Everything else goes through the create retry.
 if [[ ${1:-} != detach ]]; then
-    exec hdiutil "$@"
+    exec "$(dirname "$0")/hdiutil-with-retry.sh" "$@"
 fi
 
 # Finder can keep the image busy briefly after CPack lays out its window.
