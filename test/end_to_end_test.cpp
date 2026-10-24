@@ -239,11 +239,15 @@ void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) 
     RawSession direct(serverPort);
     CHECK(direct.connection.send(
         chat::Message{chat::MsgType::Login, {"voice_direct", "1", ""}}));
-    CHECK(direct.next(chat::MsgType::LoginOk).fields.at(0) == "voice_direct");
+    const chat::Message directOk = direct.next(chat::MsgType::LoginOk);
+    CHECK(directOk.fields.at(0) == "voice_direct");
+    CHECK(chat::hasFeature(directOk.fields.at(2), chat::kSpeakingFeature));
 
     RawSession relayed(relayPort);
     CHECK(relayed.connection.send(chat::Message{chat::MsgType::Login, {"voice_relay", "0", ""}}));
-    CHECK(relayed.next(chat::MsgType::LoginOk).fields.at(0) == "voice_relay");
+    const chat::Message relayedOk = relayed.next(chat::MsgType::LoginOk);
+    CHECK(relayedOk.fields.at(0) == "voice_relay");
+    CHECK(chat::hasFeature(relayedOk.fields.at(2), chat::kSpeakingFeature));
 
     CHECK(direct.connection.send(chat::Message{chat::MsgType::VoicePort, {"5060"}}));
     CHECK(relayed.next(chat::MsgType::VoicePort).fields ==
@@ -256,6 +260,15 @@ void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) 
         chat::Message{chat::MsgType::VoiceState, {"voice_relay", "1", "0"}}));
     CHECK(direct.next(chat::MsgType::VoiceState).fields ==
           (std::vector<std::string>{"voice_relay", "1", "0"}));
+
+    CHECK(relayed.connection.send(chat::Message{chat::MsgType::Speaking, {"1"}}));
+    CHECK(direct.next(chat::MsgType::Speaking).fields ==
+          (std::vector<std::string>{"voice_relay", "1"}));
+    // A malformed update is dropped without cutting the sender off.
+    CHECK(direct.connection.send(chat::Message{chat::MsgType::Speaking, {"2"}}));
+    CHECK(direct.connection.send(chat::Message{chat::MsgType::Speaking, {"0"}}));
+    CHECK(relayed.next(chat::MsgType::Speaking).fields ==
+          (std::vector<std::string>{"voice_direct", "0"}));
 
     const std::string pcm(640, '\0');
     CHECK(relayed.connection.send(chat::Message{chat::MsgType::VoiceAudio, {pcm}}));

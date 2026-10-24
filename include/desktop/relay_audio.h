@@ -49,4 +49,5 @@ private:
     bool muted_ = false;
     bool deafened_ = false;
     bool speaking_ = false;
+    int quietFrames_ = 0;
 };

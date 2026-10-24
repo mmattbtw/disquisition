@@ -25,7 +25,7 @@ enum class MsgType : std::uint8_t {
     VoiceAudio = 20,   // client: [16 kHz mono signed-16 PCM]; server: [sender, PCM]
 
     // Server -> client
-    LoginOk = 3,     // [assigned name, welcome text]
+    LoginOk = 3,     // [assigned name, welcome text, features (may be absent)]
     Error = 4,       // [reason]
     History = 6,     // [timestamp, sender, body, color]
     System = 7,      // [text]
@@ -56,6 +56,7 @@ enum class MsgType : std::uint8_t {
     // chunks of the same transfer, each carrying the whole header:
     // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
     PeerImage = 26,
+    Speaking = 27, // client: [1 talking | 0 quiet]; server: [name, 1|0]
 };
 
 struct Message {
@@ -77,6 +78,12 @@ constexpr std::uint32_t kMaxImageChunks =
 constexpr std::array<const char*, 7> kColorNames = {"pink",  "mint", "butter", "periwinkle",
                                                     "lilac", "aqua", "peach"};
 constexpr std::size_t kColorCount = kColorNames.size();
+
+// LoginOk's third field lists, space separated, the messages a server takes
+// beyond the original protocol. Older servers disconnect anyone who sends a
+// message they do not know, so clients check this list first.
+constexpr const char* kSpeakingFeature = "speaking";
+bool hasFeature(const std::string& features, const std::string& feature);
 
 std::string encode(const Message& message);
 

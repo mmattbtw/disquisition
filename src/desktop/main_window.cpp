@@ -157,8 +157,6 @@ QString localAdvertiseHost(const QHostAddress& routeAddress) {
     return {};
 }
 
-// Lit like a TeamSpeak bubble while the member talks. Each client judges
-// that from the audio it receives, so nothing extra goes over the wire.
 QIcon memberBubble(const QColor& color, bool inVoice, bool talking, qreal scale) {
     QPixmap pixmap(QSize(16, 16) * scale);
     pixmap.setDevicePixelRatio(scale);
@@ -396,25 +394,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         sendFrame(&server_, chat::Message {chat::MsgType::VoiceAudio,
                    {std::string(pcm.constData(), static_cast<std::size_t>(pcm.size()))}});
     });
+    // This capture also runs during SIP voice, so it judges talking in both modes.
     connect(&relayAudio_, &RelayAudio::speakingChanged, this, [this](bool speaking) {
-        if (usingRelay_ && localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
+        if (localSpeaking_ == speaking) return;
+        localSpeaking_ = speaking;
+        if (voiceWanted_ && serverSpeaking_ &&
+            server_.state() == QAbstractSocket::ConnectedState) {
+            sendFrame(&server_, chat::Message {chat::MsgType::Speaking, {speaking ? "1" : "0"}});
         }
+        refreshMembers();
     });
-    speakingExpiry_.setInterval(200);
-    connect(&speakingExpiry_, &QTimer::timeout, this, [this] {
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        bool changed = false;
-        for (Peer& peer : peers_) {
-            if (peer.lastAudioMs && peer.speaking && now - peer.lastAudioMs > 250) {
-                peer.speaking = false;
-                changed = true;
-            }
-        }
-        if (changed) refreshMembers();
-    });
-    speakingExpiry_.start();
     connect(&voice_, &VoiceEngine::ready, this, [this] {
         if (!voiceWanted_ || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
             return;
@@ -433,22 +422,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             leaveVoice();
         }
     });
-    connect(&voice_, &VoiceEngine::localSpeakingChanged, this, [this](bool speaking) {
-        if (usingRelay_) return;
-        if (localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
-        }
-    });
     connect(&voice_, &VoiceEngine::peerVoiceChanged, this,
-            [this](const QString& name, bool connected, bool speaking) {
+            [this](const QString& name, bool connected) {
         if (!peers_.contains(name)) {
             return;
         }
         Peer& peer = peers_[name];
-        if (peer.voiceConnected != connected || peer.speaking != speaking) {
+        if (peer.voiceConnected != connected) {
             peer.voiceConnected = connected;
-            peer.speaking = speaking;
             refreshMembers();
         }
             });
@@ -1373,6 +1354,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         loginTimer_.stop();
         const QString previousName = myName_;
         myName_ = q(message.fields[0]);
+        serverSpeaking_ = message.fields.size() >= 3 &&
+                          chat::hasFeature(message.fields[2], chat::kSpeakingFeature);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
                                                : serverHost_ + ":" + QString::number(serverPort_)) +
@@ -1430,21 +1413,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
             (usingRelay_ || peers_[sender].voicePort == 65535)) {
             const std::string& bytes = message.fields[1];
             relayAudio_.receive(sender, QByteArray(bytes.data(), static_cast<qsizetype>(bytes.size())));
-            if (bytes.size() == 640) {
-                double sum = 0;
-                for (std::size_t i = 0; i < bytes.size(); i += 2) {
-                    const auto lo = static_cast<unsigned char>(bytes[i]);
-                    const auto hi = static_cast<unsigned char>(bytes[i + 1]);
-                    const auto sample = static_cast<qint16>(lo | (hi << 8));
-                    sum += static_cast<double>(sample) * sample;
-                }
-                Peer& peer = peers_[sender];
-                const bool speaking = sum / 320 > 450.0 * 450.0;
-                peer.lastAudioMs = QDateTime::currentMSecsSinceEpoch();
-                if (peer.speaking != speaking) {
-                    peer.speaking = speaking;
-                    refreshMembers();
-                }
+        }
+    } else if (message.type == chat::MsgType::Speaking && message.fields.size() == 2) {
+        const QString sender = q(message.fields[0]);
+        if (peers_.contains(sender) && peers_[sender].voicePort != 0) {
+            const bool speaking = message.fields[1] == "1";
+            if (peers_[sender].speaking != speaking) {
+                peers_[sender].speaking = speaking;
+                refreshMembers();
             }
         }
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() == 3) {

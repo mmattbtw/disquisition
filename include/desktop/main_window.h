@@ -58,7 +58,6 @@ private:
         bool muted = false;
         bool deafened = false;
         bool sharingScreen = false;
-        qint64 lastAudioMs = 0;
     };
 
     void buildUi();
@@ -180,6 +179,7 @@ private:
     QString klipyCustomerId_;
     bool showLinkedMedia_ = true;
     bool localSpeaking_ = false;
+    bool serverSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
@@ -199,7 +199,6 @@ private:
     quint64 screenShareGeneration_ = 0;
     ScreenFrameAssembler screenAssembler_;
     std::map<QString, ScreenStreamDecoder> watchedStreams_;
-    QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
     QTimer loginTimer_;
