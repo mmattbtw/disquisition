@@ -23,6 +23,8 @@ class ChatMedia;
 class GifPicker;
 class GifSearch;
 class MediaFetcher;
+class PenguinOverlay;
+class QAction;
 class QLabel;
 class QComboBox;
 class QLineEdit;
@@ -139,6 +141,12 @@ private:
     QLabel* voiceLabel_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
     ScreenStage* stage_ = nullptr;
+    PenguinOverlay* penguins_ = nullptr;
+    QAction* penguinsAction_ = nullptr;
+    bool penguinsUnlocked_ = false;
+    bool showPenguins_ = false;
+    bool penguinsWander_ = true;
+    int penguinsIdleMinutes_ = 10;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;
