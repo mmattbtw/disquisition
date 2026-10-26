@@ -71,12 +71,23 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl@3 ffmpeg pkgconf
 
-      - name: Restore Windows vcpkg cache
+      # vcpkg package hashes depend on the runner image's ports tree, MSVC and
+      # CMake, so a cache saved on an older image restores nothing and OpenSSL
+      # rebuilds from source. Key the cache on the image so each image gets its own.
+      - name: Compute Windows vcpkg cache key
+        id: vcpkg-key
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        shell: pwsh
+        run: |
+          "key=vcpkg-$env:ImageOS-$env:ImageVersion-openssl-sqlite3-pkgconf-x64-windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore Windows vcpkg cache
+        id: vcpkg-cache
+        if: runner.os == 'Windows'
+        uses: actions/cache/restore@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-openssl-sqlite3-pkgconf-x64-windows-v1
+          key: ${{ steps.vcpkg-key.outputs.key }}
 
       - name: Install Windows voice dependencies
         if: runner.os == 'Windows'
@@ -90,6 +101,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
           "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Save as soon as the packages are built, so a later build failure doesn't discard them.
+      - name: Save Windows vcpkg cache
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Install prebuilt Windows FFmpeg
         if: runner.os == 'Windows'
