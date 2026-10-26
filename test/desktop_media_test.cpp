@@ -11,7 +11,7 @@
 #include <memory>
 
 #include "check.h"
-#include "common/protocol.h"
+#include "common/media_limits.h"
 #include "desktop/gif_search.h"
 #include "desktop/image_transfer.h"
 #include "desktop/remote_media.h"

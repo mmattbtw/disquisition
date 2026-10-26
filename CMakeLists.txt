@@ -2,152 +2,106 @@ cmake_minimum_required(VERSION 3.16)
 project(disquisition LANGUAGES CXX)
 
 option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
-option(BUILD_COMMUNITIES "Build decentralized communities (Qt Network and OpenSSL)" ON)
+option(BUILD_RELAY "Build the community relay" ON)
 include(cmake/AppIdentity.cmake)
-if(WIN32)
-  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
-else()
-  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" ON)
-endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-
-include(FetchContent)
-FetchContent_Declare(
-  spdlog
-  GIT_REPOSITORY https://github.com/gabime/spdlog.git
-  GIT_TAG v1.15.3
-)
-FetchContent_MakeAvailable(spdlog)
-
 if(MSVC)
   add_compile_options(/W4 /utf-8)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
-# Exposes the POSIX socket and signal declarations on platforms such as
-# Cygwin/MSYS2 whose strict C++ mode would otherwise hide them.
-add_compile_definitions(_GNU_SOURCE)
 
-# Homebrew's SQLite is keg-only, so CMake can otherwise pick the older macOS SDK
-# copy. Use installed Homebrew dependencies when present, including on Intel Macs.
-if(APPLE)
-  find_program(HOMEBREW_EXECUTABLE brew)
-  if(HOMEBREW_EXECUTABLE)
-    execute_process(
-      COMMAND "${HOMEBREW_EXECUTABLE}" --prefix sqlite
-      OUTPUT_VARIABLE HOMEBREW_SQLITE_PREFIX
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-    if((NOT DEFINED SQLite3_LIBRARY OR
-        SQLite3_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
-       EXISTS "${HOMEBREW_SQLITE_PREFIX}/include/sqlite3.h" AND
-       EXISTS "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib")
-      set(SQLite3_INCLUDE_DIR "${HOMEBREW_SQLITE_PREFIX}/include" CACHE PATH "SQLite3 headers" FORCE)
-      set(SQLite3_LIBRARY "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib" CACHE FILEPATH "SQLite3 library" FORCE)
-    endif()
-  endif()
-endif()
-
-find_package(SQLite3 3.24 REQUIRED)
+include(FetchContent)
 include(CTest)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Network)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 
-# CMake renamed this imported target at some point; support both spellings.
-if(TARGET SQLite3::SQLite3)
-  set(SQLITE_TARGET SQLite3::SQLite3)
-else()
-  set(SQLITE_TARGET SQLite::SQLite3)
-endif()
-
-if(BUILD_LEGACY_TARGETS)
-  if(APPLE AND HOMEBREW_EXECUTABLE)
-    execute_process(
-      COMMAND "${HOMEBREW_EXECUTABLE}" --prefix ncurses
-      OUTPUT_VARIABLE HOMEBREW_NCURSES_PREFIX
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-    if((NOT DEFINED CURSES_NCURSES_LIBRARY OR
-        CURSES_NCURSES_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
-       EXISTS "${HOMEBREW_NCURSES_PREFIX}/include/ncurses.h" AND
-       EXISTS "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib")
-      set(CURSES_NCURSES_LIBRARY "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib" CACHE FILEPATH "ncurses library" FORCE)
-      set(CURSES_INCLUDE_PATH "${HOMEBREW_NCURSES_PREFIX}/include" CACHE PATH "ncurses headers" FORCE)
-    endif()
-  endif()
-
-  find_package(Threads REQUIRED)
-
-  set(CURSES_NEED_NCURSES TRUE)
-  find_package(Curses REQUIRED)
-endif()
-
-# Wire protocol and socket helpers shared by every program.
-add_library(chat_protocol STATIC
-  src/common/protocol.cpp
-  src/common/command_line.cpp
-  src/util/log.cpp)
-# The socket helpers use POSIX sockets. Only the legacy targets call them, so
-# a Windows build of the desktop app leaves them out.
-if(BUILD_LEGACY_TARGETS)
-  target_sources(chat_protocol PRIVATE src/common/net.cpp)
-endif()
-target_include_directories(chat_protocol PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(chat_protocol PUBLIC spdlog::spdlog)
-
-add_library(chat_recent_messages STATIC src/common/recent_messages.cpp)
-target_include_directories(chat_recent_messages PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(chat_recent_messages PRIVATE ${SQLITE_TARGET})
-if(BUILD_TESTING)
-  add_executable(recent_messages_test test/recent_messages_test.cpp)
-  target_link_libraries(recent_messages_test PRIVATE chat_recent_messages ${SQLITE_TARGET})
-  add_test(NAME recent_messages_test COMMAND recent_messages_test)
-endif()
-
-if(BUILD_COMMUNITIES)
-  find_package(Qt6 6.6 COMPONENTS Core Network QUIET)
-  if(TARGET Qt6::Network)
-    find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
-    add_library(chat_communities STATIC
-      include/community/node.h
-      src/community/identity.cpp
-      src/community/model.cpp
-      src/community/store.cpp
-      src/community/node.cpp)
-    target_include_directories(chat_communities PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE OpenSSL::Crypto)
-    set_target_properties(chat_communities PROPERTIES AUTOMOC ON)
-    add_library(chat_community_router STATIC
-      include/relay/community_router.h src/relay/community_router.cpp)
-    target_link_libraries(chat_community_router PUBLIC chat_communities)
-    set_target_properties(chat_community_router PROPERTIES AUTOMOC ON)
-    if(BUILD_TESTING)
-      add_executable(community_model_test test/community_model_test.cpp)
-      target_link_libraries(community_model_test PRIVATE chat_communities)
-      add_test(NAME community_model_test COMMAND community_model_test)
-      set_tests_properties(community_model_test PROPERTIES TIMEOUT 120)
-      add_executable(community_network_test test/community_network_test.cpp)
-      target_link_libraries(community_network_test PRIVATE chat_communities chat_community_router chat_protocol)
-      add_test(NAME community_network_test COMMAND community_network_test)
-      set_tests_properties(community_network_test PROPERTIES TIMEOUT 120)
-      if(APPLE OR WIN32)
-        if(APPLE)
-          set(COMMUNITY_NATIVE_TLS_BACKEND securetransport)
-        else()
-          set(COMMUNITY_NATIVE_TLS_BACKEND schannel)
-        endif()
-        add_test(NAME community_native_tls_test COMMAND community_network_test)
-        set_tests_properties(community_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
-          ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
+# SQLite is only used for local desktop message saving and its tests. A
+# relay-only build needs Qt Core/Network and OpenSSL, with no database.
+if(BUILD_DESKTOP_APP OR BUILD_TESTING)
+  if(APPLE)
+    find_program(HOMEBREW_EXECUTABLE brew)
+    if(HOMEBREW_EXECUTABLE)
+      execute_process(COMMAND "${HOMEBREW_EXECUTABLE}" --prefix sqlite
+        OUTPUT_VARIABLE HOMEBREW_SQLITE_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+      if((NOT DEFINED SQLite3_LIBRARY OR
+          SQLite3_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
+         EXISTS "${HOMEBREW_SQLITE_PREFIX}/include/sqlite3.h" AND
+         EXISTS "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib")
+        set(SQLite3_INCLUDE_DIR "${HOMEBREW_SQLITE_PREFIX}/include" CACHE PATH "SQLite3 headers" FORCE)
+        set(SQLite3_LIBRARY "${HOMEBREW_SQLITE_PREFIX}/lib/libsqlite3.dylib" CACHE FILEPATH "SQLite3 library" FORCE)
       endif()
     endif()
+  endif()
+  find_package(SQLite3 3.24 REQUIRED)
+  if(TARGET SQLite3::SQLite3)
+    set(SQLITE_TARGET SQLite3::SQLite3)
   else()
-    message(STATUS "Qt Network 6.6+ not found; skipping community support")
+    set(SQLITE_TARGET SQLite::SQLite3)
+  endif()
+  add_library(chat_recent_messages STATIC src/common/recent_messages.cpp)
+  target_include_directories(chat_recent_messages PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(chat_recent_messages PRIVATE ${SQLITE_TARGET})
+  if(BUILD_TESTING)
+    add_executable(recent_messages_test test/recent_messages_test.cpp)
+    target_link_libraries(recent_messages_test PRIVATE chat_recent_messages ${SQLITE_TARGET})
+    add_test(NAME recent_messages_test COMMAND recent_messages_test)
+  endif()
+endif()
+
+add_library(chat_communities STATIC
+  include/community/node.h
+  src/community/identity.cpp src/community/model.cpp src/community/store.cpp src/community/node.cpp)
+target_include_directories(chat_communities PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE OpenSSL::Crypto)
+set_target_properties(chat_communities PROPERTIES AUTOMOC ON)
+
+if(BUILD_RELAY OR BUILD_TESTING)
+  add_library(chat_community_router STATIC
+    include/relay/community_router.h src/relay/community_router.cpp)
+  target_link_libraries(chat_community_router PUBLIC chat_communities)
+  set_target_properties(chat_community_router PROPERTIES AUTOMOC ON)
+endif()
+if(BUILD_RELAY)
+  add_executable(relay src/relay/main.cpp src/relay/relay.cpp)
+  target_link_libraries(relay PRIVATE chat_community_router)
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME app_identity_test
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
+  add_test(NAME macos_dmg_retry_test
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
+  add_test(NAME macos_codesign_test
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
+  add_executable(community_model_test test/community_model_test.cpp)
+  target_link_libraries(community_model_test PRIVATE chat_communities)
+  add_test(NAME community_model_test COMMAND community_model_test)
+  set_tests_properties(community_model_test PROPERTIES TIMEOUT 120)
+  add_executable(community_network_test test/community_network_test.cpp)
+  target_link_libraries(community_network_test PRIVATE chat_communities chat_community_router)
+  set(COMMUNITY_RELAY_TEST_ARGS)
+  if(TARGET relay)
+    add_dependencies(community_network_test relay)
+    list(APPEND COMMUNITY_RELAY_TEST_ARGS "$<TARGET_FILE:relay>")
+  endif()
+  add_test(NAME community_network_test COMMAND community_network_test ${COMMUNITY_RELAY_TEST_ARGS})
+  set_tests_properties(community_network_test PROPERTIES TIMEOUT 120)
+  if(APPLE OR WIN32)
+    if(APPLE)
+      set(COMMUNITY_NATIVE_TLS_BACKEND securetransport)
+    else()
+      set(COMMUNITY_NATIVE_TLS_BACKEND schannel)
+    endif()
+    add_test(NAME community_native_tls_test COMMAND community_network_test ${COMMUNITY_RELAY_TEST_ARGS})
+    set_tests_properties(community_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+      ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
   endif()
 endif()
 
@@ -162,28 +116,26 @@ if(BUILD_DESKTOP_APP)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
-  if(Qt6_FOUND AND FFMPEG_FOUND AND TARGET chat_communities)
-    if(TARGET chat_communities)
-      # Keep the barcode dependency static without changing the app's other
-      # dependency defaults. Pinned source supports both QR export and import.
-      function(configure_community_qr)
-        set(BUILD_SHARED_LIBS OFF)
-        set(ZXING_READERS ON CACHE BOOL "" FORCE)
-        set(ZXING_WRITERS OLD CACHE STRING "" FORCE)
-        set(ZXING_EXAMPLES OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(community_zxing
-          GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
-          GIT_TAG d6068bcebeb8fd9f0d35a99b00d202be86a14dbe)
-        FetchContent_MakeAvailable(community_zxing)
-      endfunction()
-      configure_community_qr()
-      add_library(community_qr STATIC src/community/qr.cpp)
-      target_link_libraries(community_qr PUBLIC chat_communities Qt6::Gui PRIVATE ZXing::ZXing)
-      if(BUILD_TESTING)
-        add_executable(community_qr_test test/community_qr_test.cpp)
-        target_link_libraries(community_qr_test PRIVATE community_qr)
-        add_test(NAME community_qr_test COMMAND community_qr_test)
-      endif()
+  if(Qt6_FOUND AND FFMPEG_FOUND)
+    # Keep the barcode dependency static without changing the app's other
+    # dependency defaults. Pinned source supports both QR export and import.
+    function(configure_community_qr)
+      set(BUILD_SHARED_LIBS OFF)
+      set(ZXING_READERS ON CACHE BOOL "" FORCE)
+      set(ZXING_WRITERS OLD CACHE STRING "" FORCE)
+      set(ZXING_EXAMPLES OFF CACHE BOOL "" FORCE)
+      FetchContent_Declare(community_zxing
+        GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
+        GIT_TAG d6068bcebeb8fd9f0d35a99b00d202be86a14dbe)
+      FetchContent_MakeAvailable(community_zxing)
+    endfunction()
+    configure_community_qr()
+    add_library(community_qr STATIC src/community/qr.cpp)
+    target_link_libraries(community_qr PUBLIC chat_communities Qt6::Gui PRIVATE ZXing::ZXing)
+    if(BUILD_TESTING)
+      add_executable(community_qr_test test/community_qr_test.cpp)
+      target_link_libraries(community_qr_test PRIVATE community_qr)
+      add_test(NAME community_qr_test COMMAND community_qr_test)
     endif()
     # GIF search, media links and image transfer, kept apart from the
     # widgets so they can be tested without a display.
@@ -195,7 +147,16 @@ if(BUILD_DESKTOP_APP)
       src/desktop/image_transfer.cpp
       src/desktop/remote_media.cpp)
     set_target_properties(desktop_media PROPERTIES AUTOMOC ON)
-    target_link_libraries(desktop_media PUBLIC chat_protocol Qt6::Gui Qt6::Network)
+    target_include_directories(desktop_media PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_media PUBLIC Qt6::Gui Qt6::Network)
+
+    add_library(chat_drawing STATIC src/common/drawing_protocol.cpp)
+    target_include_directories(chat_drawing PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    if(BUILD_TESTING)
+      add_executable(drawing_protocol_test test/drawing_protocol_test.cpp)
+      target_link_libraries(drawing_protocol_test PRIVATE chat_drawing)
+      add_test(NAME drawing_protocol_test COMMAND drawing_protocol_test)
+    endif()
 
     # Kept apart from the widgets so it can be tested without a display.
     add_library(desktop_notifications STATIC
@@ -218,7 +179,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/screen_stage.cpp
       src/desktop/share_source.cpp)
     set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
-    target_link_libraries(desktop_screen PUBLIC chat_protocol Qt6::Widgets Qt6::Multimedia)
+    target_link_libraries(desktop_screen PUBLIC chat_drawing Qt6::Widgets Qt6::Multimedia)
     if(UNIX AND NOT APPLE)
       pkg_check_modules(XCB QUIET IMPORTED_TARGET xcb)
       if(XCB_FOUND)
@@ -258,16 +219,13 @@ if(BUILD_DESKTOP_APP)
       src/desktop/screen_h264.cpp
       src/desktop/share_picker.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
-    if(TARGET chat_communities)
-      target_sources(disquisition-desktop PRIVATE
-        include/desktop/community_panel.h src/desktop/community_panel.cpp)
-      target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
-      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_COMMUNITIES=1)
-    endif()
+    target_sources(disquisition-desktop PRIVATE
+      include/desktop/community_panel.h src/desktop/community_panel.cpp)
+    target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages desktop_media desktop_notifications desktop_screen
+      chat_recent_messages desktop_media desktop_notifications desktop_screen
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -361,7 +319,7 @@ if(BUILD_DESKTOP_APP)
         COMMAND ${DISQUISITION_SIGN_COMMAND}
         COMMENT "Signing disquisition for macOS permissions"
         VERBATIM)
-      # macdeployqt and bundling baresip modify the app after POST_BUILD.
+      # macdeployqt modifies the app after POST_BUILD.
       # Re-sign with the same configured identity once deployment is finished.
       add_custom_target(disquisition-sign-macos
         COMMAND ${DISQUISITION_SIGN_COMMAND}
@@ -371,91 +329,9 @@ if(BUILD_DESKTOP_APP)
     endif()
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
-  elseif(NOT TARGET chat_communities)
-    message(STATUS "Community support is required for disquisition-desktop; skipping desktop app")
   else()
     message(STATUS "FFmpeg (libavcodec, libavutil, libswscale) not found; skipping disquisition-desktop")
   endif()
-endif()
-
-if(BUILD_LEGACY_TARGETS)
-# Client-side networking: server/relay connections and the peer mesh. The
-# relay reuses the mesh to host its users.
-add_library(chat_network STATIC
-  src/client/connection.cpp
-  src/client/peer_network.cpp)
-target_link_libraries(chat_network PUBLIC chat_protocol Threads::Threads)
-
-# The public client library. Its header exposes Connection and PeerNetwork,
-# so chat_network is part of its interface.
-add_library(disquisition_client STATIC src/client/client.cpp)
-add_library(disquisition::client ALIAS disquisition_client)
-set_target_properties(disquisition_client PROPERTIES OUTPUT_NAME disquisition-client)
-target_link_libraries(disquisition_client PUBLIC chat_network)
-
-add_executable(server
-  src/server/main.cpp
-  src/server/options.cpp
-  src/server/server.cpp
-  src/server/database.cpp)
-target_link_libraries(server PRIVATE chat_protocol ${SQLITE_TARGET})
-
-add_executable(client
-  src/client/main.cpp
-  src/client/options.cpp
-  src/client/text_wrap.cpp
-  src/client/tui.cpp)
-target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(client PRIVATE chat_network chat_recent_messages ${CURSES_LIBRARIES})
-
-add_executable(relay
-  src/relay/main.cpp
-  src/relay/options.cpp
-  src/relay/relay.cpp)
-target_link_libraries(relay PRIVATE chat_network)
-if(TARGET chat_community_router)
-  if(BUILD_TESTING)
-    add_dependencies(community_network_test relay server)
-    # The existing relay must serve both protocols on one public port.
-    add_test(NAME community_shared_relay_test COMMAND community_network_test
-      $<TARGET_FILE:relay> $<TARGET_FILE:server>)
-    set_tests_properties(community_shared_relay_test PROPERTIES TIMEOUT 120)
-  endif()
-  target_compile_definitions(relay PRIVATE DISQUISITION_COMMUNITIES=1)
-  target_link_libraries(relay PRIVATE chat_community_router)
-endif()
-
-if(BUILD_TESTING)
-  add_test(NAME app_identity_test
-    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
-  add_test(NAME macos_codesign_test
-    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
-  add_test(NAME macos_dmg_retry_test
-    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
-  add_executable(protocol_test test/protocol_test.cpp)
-  target_link_libraries(protocol_test PRIVATE chat_protocol)
-  add_test(NAME protocol_test COMMAND protocol_test)
-
-  add_executable(connection_test test/connection_test.cpp)
-  target_link_libraries(connection_test PRIVATE chat_network)
-  add_test(NAME connection_test COMMAND connection_test)
-
-  add_executable(text_wrap_test test/text_wrap_test.cpp src/client/text_wrap.cpp)
-  target_include_directories(text_wrap_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  add_test(NAME text_wrap_test COMMAND text_wrap_test)
-
-  add_executable(client_library_test test/client_library_test.cpp)
-  target_link_libraries(client_library_test PRIVATE disquisition_client)
-  add_test(NAME client_library_test COMMAND client_library_test)
-
-  # Runs the real server and relay executables as child processes.
-  add_executable(end_to_end_test test/end_to_end_test.cpp)
-  target_link_libraries(end_to_end_test PRIVATE disquisition_client)
-  add_test(NAME end_to_end_test
-    COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
-
-  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
-endif()
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_media)
@@ -465,7 +341,7 @@ if(BUILD_TESTING AND TARGET desktop_media)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
 endif()
 
-if(BUILD_TESTING AND TARGET disquisition-desktop AND TARGET chat_communities)
+if(BUILD_TESTING AND TARGET disquisition-desktop)
   # Exercise the actual widgets and their wiring, including modal dialogs,
   # with isolated identity/settings directories and no audio hardware access.
   get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)
@@ -501,14 +377,6 @@ if(BUILD_TESTING AND APPLE AND TARGET desktop_screen)
   add_executable(mac_drawing_panel_test EXCLUDE_FROM_ALL test/mac_drawing_panel_test.mm)
   target_compile_options(mac_drawing_panel_test PRIVATE -fobjc-arc)
   target_link_libraries(mac_drawing_panel_test PRIVATE desktop_screen ${APPKIT_FRAMEWORK})
-endif()
-
-if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_network)
-  add_executable(screen_drawing_network_test test/screen_drawing_network_test.cpp)
-  target_link_libraries(screen_drawing_network_test PRIVATE desktop_screen chat_network)
-  add_test(NAME screen_drawing_network_test
-    COMMAND screen_drawing_network_test $<TARGET_FILE:server> $<TARGET_FILE:relay>)
-  set_tests_properties(screen_drawing_network_test PROPERTIES TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_communities)

@@ -5,8 +5,8 @@ can host its metadata and admit peers with an existing valid invite. The
 discovery `server` process is not involved in community connections.
 
 Communities are a feature of the desktop client and the existing `relay`.
-The relay accepts community connections and room connections on the same TCP
-port. The terminal client continues to use the original room protocol.
+The relay only accepts community registrations and encrypted peer tunnels.
+The desktop app and relay are the project's two application targets.
 
 ## Start on a LAN
 
@@ -51,10 +51,9 @@ The relay sees the connecting addresses and routing IDs, but peer traffic,
 invite challenges, metadata, chat, and media travel inside mutual TLS tunnels.
 
 Build the relay with community support enabled, then restart it with the
-updated binary. Community routing works without the discovery `server` process;
-room clients still use that server through the relay. The same `--listen` port
-handles both protocols, with no additional process or community port. This
-repository change does not deploy or upgrade any public relay service.
+updated binary. The relay has no upstream server or database. Its `--listen`
+port handles community registrations and encrypted tunnels. This repository
+change does not deploy or upgrade any public relay service.
 
 The relay keeps only live routing registrations and pending tunnels. It does
 not own community metadata, issue invites, decide permissions, or store history.
@@ -145,16 +144,18 @@ channel or losing membership stops the local call and share.
 **Connection & saving** controls optional SQLite saving, its file path, and an
 optional maximum number of messages. Only chat this device received or sent
 is saved. History is scoped by community and channel, including after restart.
-Existing legacy message files upgrade in place; their messages stay in the
-legacy room. As in the existing client, uploaded images are not saved as chat
-history. Community metadata and identity storage are independent of this option.
+Existing message files upgrade in place without deleting their records.
+Messages without a community/channel scope are not mixed into community chat.
+Uploaded images are not saved as chat history. Community metadata and identity
+storage are independent of this option.
 
 ## Build and verification
 
 Community support needs Qt 6.6+ Core/Network and OpenSSL 3+. The desktop also
 uses the existing Qt Multimedia/FFmpeg dependencies. QR support fetches a pinned
-ZXing-C++ release and links it statically. `-DBUILD_COMMUNITIES=OFF` builds only
-the existing room protocol. Builds without Qt Network skip community targets.
+ZXing-C++ release and links it statically. `-DBUILD_DESKTOP_APP=OFF` builds the
+relay and core tests without multimedia dependencies. Use `-DBUILD_RELAY=OFF`
+for desktop-only builds.
 
 The community model tests cover signatures, permission boundaries, independent
 admin decisions, admissions without admins, revocations, split reconciliation,
@@ -167,6 +168,6 @@ The desktop UI test connects an isolated client, exercises creation and admin
 dialogs, checks channel separation and undelivered local echoes, and captures
 `build/community-ui.png` without accessing microphone or screen hardware.
 
-On POSIX builds, the shared relay test launches the real `relay` and `server`,
-checks room chat alongside community connections on one port, then stops
-discovery and checks community admission, host migration, and recovery.
+When the relay target is enabled, network tests launch the actual `relay`
+without any discovery service and check admission, host migration, recovery,
+invalid options, and rejection of the retired room protocol.

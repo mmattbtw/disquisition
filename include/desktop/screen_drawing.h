@@ -9,7 +9,7 @@
 #include <QWidget>
 #include <optional>
 
-#include "common/protocol.h"
+#include "common/drawing_protocol.h"
 #include "desktop/share_source.h"
 
 class QPainter;

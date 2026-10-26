@@ -1,21 +1,21 @@
-#include "common/protocol.h"
+#include "common/drawing_protocol.h"
 
 #include <algorithm>
 #include <utility>
 
 namespace chat {
 namespace {
-
 constexpr std::size_t kLengthSize = 4;
 // Keeps value * 10 from overflowing int64 while parsing.
 constexpr std::size_t kMaxDigits = 18;
 
-// Rooms use short names; communities use SHA-256 public-key fingerprints.
+// Drawing fixtures use local labels; community peers use key fingerprints.
 bool drawingIdentity(const std::string& value) {
-    return !value.empty() && (value.size() <= kMaxNameLength ||
-        (value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c) {
-            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-        })));
+    return !value.empty() &&
+           (value.size() <= 20 ||
+            (value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c) {
+                 return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+             })));
 }
 
 void appendU32(std::string& out, std::uint32_t value) {
@@ -42,11 +42,6 @@ bool parseU32(const std::string& text, std::uint32_t& out) {
     return true;
 }
 
-bool isControl(char character) {
-    const auto value = static_cast<unsigned char>(character);
-    return value < 0x20 || value == 0x7F;
-}
-
 } // namespace
 
 std::string encode(const Message& message) {
@@ -69,7 +64,7 @@ DecodeStatus decode(std::string& buffer, Message& out) {
         return DecodeStatus::Incomplete;
     }
     const std::uint32_t size = readU32(buffer.data());
-    if (size == 0 || size > kMaxFrameSize) {
+    if (size == 0 || size > kMaxDrawingFrameSize) {
         return DecodeStatus::Malformed;
     }
     if (buffer.size() < kLengthSize + size) {
@@ -83,6 +78,16 @@ DecodeStatus decode(std::string& buffer, Message& out) {
     message.type = static_cast<MsgType>(static_cast<unsigned char>(*cursor));
     ++cursor;
     --remaining;
+    switch (message.type) {
+        case MsgType::ScreenDrawState:
+        case MsgType::ScreenDraw:
+        case MsgType::ScreenDrawWatch:
+        case MsgType::ScreenDrawErase:
+        case MsgType::ScreenLaser:
+            break;
+        default:
+            return DecodeStatus::Malformed;
+    }
 
     while (remaining > 0) {
         if (remaining < kLengthSize) {
@@ -102,72 +107,6 @@ DecodeStatus decode(std::string& buffer, Message& out) {
     buffer.erase(0, kLengthSize + size);
     out = std::move(message);
     return DecodeStatus::Ok;
-}
-
-bool parseColorIndex(const std::string& color, int& index) {
-    if (color.empty() || color.size() > 3) {
-        return false;
-    }
-    int value = 0;
-    for (const char digit : color) {
-        if (digit < '0' || digit > '9') {
-            return false;
-        }
-        value = value * 10 + (digit - '0');
-    }
-    if (value > 255) {
-        return false;
-    }
-    index = value;
-    return true;
-}
-
-bool isReservedSystemColor(int index) {
-    return index == 1 || index == 2 || index == 250;
-}
-
-bool isValidColor(const std::string& color) {
-    if (std::find(kColorNames.begin(), kColorNames.end(), color) != kColorNames.end()) {
-        return true;
-    }
-    int index = 0;
-    return parseColorIndex(color, index) && !isReservedSystemColor(index);
-}
-
-std::string sanitizeName(const std::string& name) {
-    std::string cleaned = trim(name);
-    if (cleaned.size() > kMaxNameLength) {
-        cleaned.resize(kMaxNameLength);
-    }
-    for (char& character : cleaned) {
-        if (character == ' ' || character == '\t') {
-            character = '_';
-        }
-        else if (isControl(character)) {
-            character = '?';
-        }
-    }
-    return trim(cleaned);
-}
-
-std::string sanitizeBody(const std::string& body) {
-    std::string cleaned = body;
-    std::replace_if(cleaned.begin(), cleaned.end(), isControl, ' ');
-    cleaned = trim(cleaned);
-    if (cleaned.size() > kMaxBodyLength) {
-        cleaned.resize(kMaxBodyLength);
-    }
-    return cleaned;
-}
-
-std::string trim(const std::string& text) {
-    constexpr const char* kWhitespace = " \t\r\n";
-    const auto begin = text.find_first_not_of(kWhitespace);
-    if (begin == std::string::npos) {
-        return "";
-    }
-    const auto end = text.find_last_not_of(kWhitespace);
-    return text.substr(begin, end - begin + 1);
 }
 
 bool parseInt64(const std::string& text, std::int64_t& out) {
@@ -192,76 +131,6 @@ bool parseInt64(const std::string& text, std::int64_t& out) {
     return true;
 }
 
-bool parsePort(const std::string& text, std::uint16_t& out, bool allowZero) {
-    std::int64_t value = 0;
-    const std::int64_t minimum = allowZero ? 0 : 1;
-    if (!parseInt64(text, value) || value < minimum || value > 65535) {
-        return false;
-    }
-    out = static_cast<std::uint16_t>(value);
-    return true;
-}
-
-bool parsePeerChat(const Message& message, ChatPayload& out) {
-    if (message.type != MsgType::PeerChat || message.fields.size() < 4) {
-        return false;
-    }
-    std::int64_t timestamp = 0;
-    std::string body = sanitizeBody(message.fields[2]);
-    std::string color = sanitizeBody(message.fields[3]);
-    if (!parseInt64(message.fields[1], timestamp) || timestamp <= 0 || body.empty() ||
-        !isValidColor(color)) {
-        return false;
-    }
-    out.sender = message.fields[0];
-    out.timestamp = timestamp;
-    out.body = std::move(body);
-    out.color = std::move(color);
-    return true;
-}
-
-bool parsePeerImage(const Message& message, ImageChunk& out) {
-    if (message.type != MsgType::PeerImage || message.fields.size() != 7) {
-        return false;
-    }
-    ImageChunk chunk;
-    if (!parseInt64(message.fields[1], chunk.timestamp) || chunk.timestamp <= 0 ||
-        !isValidColor(message.fields[2]) || !parseU32(message.fields[3], chunk.transferId) ||
-        !parseU32(message.fields[4], chunk.index) || !parseU32(message.fields[5], chunk.count) ||
-        chunk.count == 0 || chunk.count > kMaxImageChunks || chunk.index >= chunk.count ||
-        message.fields[6].empty() || message.fields[6].size() > kImageChunkSize) {
-        return false;
-    }
-    chunk.sender = message.fields[0];
-    chunk.color = message.fields[2];
-    chunk.data = message.fields[6];
-    out = std::move(chunk);
-    return true;
-}
-
-Message peerImageMessage(const ImageChunk& chunk) {
-    return Message{MsgType::PeerImage,
-                   {chunk.sender, std::to_string(chunk.timestamp), chunk.color,
-                    std::to_string(chunk.transferId), std::to_string(chunk.index),
-                    std::to_string(chunk.count), chunk.data}};
-}
-
-bool parsePeerData(const Message& message, PeerData& out) {
-    if (message.type != MsgType::PeerData || message.fields.size() != 4)
-        return false;
-    const auto& fields = message.fields;
-    if (fields[0].empty() || fields[0].size() > kMaxNameLength || fields[1].empty() ||
-        fields[1].size() > kMaxNameLength || fields[2].empty() || fields[2].size() > 64 ||
-        fields[3].empty() || fields[3].size() > kMaxPeerDataBytes)
-        return false;
-    out = PeerData{fields[0], fields[1], fields[2], fields[3]};
-    return true;
-}
-
-Message peerDataMessage(const PeerData& data) {
-    return Message{MsgType::PeerData, {data.sender, data.target, data.channel, data.data}};
-}
-
 bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out) {
     const std::size_t legacySize = fromOwner ? 9 : 8;
     if (message.type != MsgType::ScreenDraw ||
@@ -270,8 +139,8 @@ bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out) {
     }
     ScreenDraw draw;
     draw.sharer = message.fields[0];
-    if (!drawingIdentity(draw.sharer) ||
-        !parseInt64(message.fields[1], draw.epoch) || draw.epoch <= 0)
+    if (!drawingIdentity(draw.sharer) || !parseInt64(message.fields[1], draw.epoch) ||
+        draw.epoch <= 0)
         return false;
     const std::size_t idIndex = fromOwner ? 3 : 2;
     if (!parseU32(message.fields[idIndex], draw.id))
@@ -323,8 +192,7 @@ bool parseScreenErase(const Message& message, ScreenErase& out) {
     ScreenErase erase;
     erase.sharer = message.fields[0];
     erase.author = message.fields[2];
-    if (!drawingIdentity(erase.sharer) ||
-        !drawingIdentity(erase.author) ||
+    if (!drawingIdentity(erase.sharer) || !drawingIdentity(erase.author) ||
         !parseInt64(message.fields[1], erase.epoch) || erase.epoch <= 0)
         return false;
     for (std::size_t i = 3; i < message.fields.size(); ++i) {
@@ -350,8 +218,8 @@ bool parseScreenLaser(const Message& message, bool fromOwner, ScreenLaser& out) 
         return false;
     ScreenLaser laser;
     laser.sharer = message.fields[0];
-    if (!drawingIdentity(laser.sharer) ||
-        !parseInt64(message.fields[1], laser.epoch) || laser.epoch <= 0)
+    if (!drawingIdentity(laser.sharer) || !parseInt64(message.fields[1], laser.epoch) ||
+        laser.epoch <= 0)
         return false;
     if (fromOwner) {
         laser.author = message.fields[2];
@@ -378,40 +246,10 @@ Message screenLaserMessage(const ScreenLaser& laser, bool fromOwner) {
     Message message{MsgType::ScreenLaser, {laser.sharer, std::to_string(laser.epoch)}};
     if (fromOwner)
         message.fields.push_back(laser.author);
-    for (const auto& value : {std::to_string(laser.id), std::to_string(laser.x),
-                              std::to_string(laser.y), std::to_string(laser.rgb),
-                              std::string(laser.visible ? "1" : "0")})
+    for (const auto& value :
+         {std::to_string(laser.id), std::to_string(laser.x), std::to_string(laser.y),
+          std::to_string(laser.rgb), std::string(laser.visible ? "1" : "0")})
         message.fields.push_back(value);
-    return message;
-}
-
-bool parsePeerAddress(const Message& message, PeerAddress& out) {
-    if ((message.type != MsgType::Peer && message.type != MsgType::PeerJoined) ||
-        message.fields.size() < 4) {
-        return false;
-    }
-    std::uint16_t port = 0;
-    if (!parsePort(message.fields[2], port, false)) {
-        return false;
-    }
-    out.name = message.fields[0];
-    out.host = message.fields[1];
-    out.port = port;
-    out.advertised = message.fields[3] == "1";
-    out.voicePort = 0;
-    if (message.fields.size() >= 5 &&
-        !parsePort(message.fields[4], out.voicePort, true)) {
-        return false;
-    }
-    return true;
-}
-
-Message peerMessage(MsgType type, const PeerAddress& peer) {
-    Message message{type,
-                    {peer.name, peer.host, std::to_string(peer.port), peer.advertised ? "1" : "0"}};
-    if (peer.voicePort != 0) {
-        message.fields.push_back(std::to_string(peer.voicePort));
-    }
     return message;
 }
 

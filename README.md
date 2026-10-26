@@ -1,13 +1,12 @@
 # disquisition
 
-Disquisition is a C++20 group chat app with desktop and terminal clients.
+Disquisition is a C++20 desktop group chat app.
 Communities live on member devices, with text channels, channel voice and
 screen sharing, invite links and QR codes, and automatic hosting by online
 members. Desktop peers connect directly or through the relay; no discovery
 server is needed. Chat is live-only, with optional local saving.
 
-Community connections use authenticated TLS and signed metadata. The separate
-legacy room mode still uses unencrypted, unauthenticated connections.
+Community connections use authenticated TLS and signed metadata.
 
 ## Download
 
@@ -25,47 +24,37 @@ See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
 
-For Linux or macOS, install a C++20 compiler, CMake 3.16+, SQLite 3.24+ and
-ncurses development headers. The first build also needs Git and network access.
+Install a C++20 compiler, CMake 3.16+, Qt 6.6+, OpenSSL 3+, SQLite 3.24+,
+FFmpeg development libraries, and pkg-config. The first desktop configure also
+needs Git and network access for the pinned QR-code library.
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite ncurses
-```
-
-Build and run the tests:
-
-```sh
+brew install cmake qt openssl@3 sqlite ffmpeg pkgconf
 make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app also needs Qt and FFmpeg. See [building and packaging](docs/building.md)
-for desktop dependencies, Windows builds and macOS signing.
+See [building and packaging](docs/building.md) for relay-only builds, Windows
+setup, and macOS signing. The project builds the desktop app and `relay`.
 
-## Run a local chat
-
-Start the server:
+## Run a local relay
 
 ```sh
-./build/server --port 9000 --db chat.db
+./build/relay --listen 3333
 ```
 
-Run each client in a separate terminal:
-
-```sh
-./build/client --host 127.0.0.1 --port 9000 --name matt
-./build/client --host 127.0.0.1 --port 9000 --name jesse
-```
+In the desktop app's **Connection & saving**, set **Relay** to
+`127.0.0.1:3333`, connect, and create a community. Share an invite with another
+desktop client. The relay needs no discovery server or database.
 
 ## Documentation
 
 - [Building and packaging](docs/building.md)
 - [Desktop app](docs/desktop.md)
 - [Communities, channels, invites and hosting](docs/communities.md)
-- [Servers, peers and relays](docs/networking.md)
-- [Terminal client and command-line reference](docs/command-line.md)
-- [C++ client library](docs/client-library.md)
+- [Peers, encrypted connections, and relay routing](docs/networking.md)
+- [Desktop and relay command-line reference](docs/command-line.md)
 - [Git crash course](docs/git_crash_course.md)
 
 ## Contributors

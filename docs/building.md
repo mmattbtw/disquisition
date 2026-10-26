@@ -4,34 +4,21 @@ Run commands from the repository root unless a section says otherwise.
 
 ## Requirements
 
-For the server, relay, terminal client and C++ library on Linux or macOS:
+Both the desktop app and relay need a C++20 compiler, CMake 3.16+, Qt 6.6+
+Core/Network, and OpenSSL 3+ Crypto.
 
-- A C++20 compiler and CMake 3.16 or newer
-- SQLite 3.24 or newer and ncurses, including development headers
-- POSIX sockets and `poll`
-- Git and network access on the first configure, to download spdlog
-
-Communities in the desktop app and relay additionally need Qt 6.6+ Core/Network
-and OpenSSL 3+. Without Qt Network, the legacy targets still build. Pass `-DBUILD_COMMUNITIES=OFF` to
-disable community support explicitly. Desktop community QR support downloads
-a pinned ZXing-C++ source revision on the first configure.
+The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
+and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, and `libswscale`.
+Git and network access are needed on the first desktop configure to fetch the
+pinned ZXing-C++ revision used for QR export and import. Voice uses Qt audio.
 
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite ncurses qt openssl@3
+brew install cmake qt openssl@3 sqlite ffmpeg pkgconf
 ```
-
-CMake uses the Homebrew libraries when available.
 
 ## Build and test
-
-```sh
-make
-ctest --test-dir build --output-on-failure
-```
-
-Or use CMake directly:
 
 ```sh
 cmake -S . -B build
@@ -39,12 +26,10 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The build creates `build/server`, `build/client`, `build/relay` and the static
-`disquisition::client` library. `make clean` removes the `build` directory.
-With community support, the existing `build/relay` also handles desktop
-communities on its usual listening port. The terminal client keeps its room
-interface. See [Communities](communities.md) for setup. A relay built with
-community support needs the Qt Core/Network and OpenSSL runtime libraries.
+`make` runs the configure and build commands. The application targets are
+`relay` and `disquisition-desktop`. CMake skips the desktop target when its
+Widgets/Multimedia or FFmpeg dependencies are unavailable. Core/Network and
+OpenSSL are required. `make clean` removes the build directory.
 
 ## Desktop app
 
@@ -64,41 +49,31 @@ CMake with `-DDISQUISITION_BUILD_CHANNEL=staging`. Valid channels are
 `development`, `staging` and `production`. CMake remembers the selected channel
 in the build directory; `make` selects development unless `BUILD_CHANNEL` is set.
 
-The desktop target also needs Qt 6.6 or newer with Widgets, Network and
-Multimedia, plus pkg-config and FFmpeg development libraries. CMake checks for
-`libavcodec` version 60 or newer, `libavutil` and `libswscale`. It skips the
-desktop app if Qt or FFmpeg is missing.
-On Linux, install the XCB development package, such as `libxcb1-dev` on
-Debian or Ubuntu, for the presenter drawing overlay on X11. CMake detects
-it through pkg-config. Without it, annotations remain available in the
-video preview and fullscreen viewer.
+On Linux, install `libxcb1-dev` for the X11 presenter overlay.
+
+To build only the desktop app, configure with `-DBUILD_RELAY=OFF`.
+For a relay-only build with no database or multimedia dependencies:
 
 ```sh
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON
-cmake --build build --target disquisition-desktop
+cmake -S . -B build-relay -DBUILD_DESKTOP_APP=OFF -DBUILD_TESTING=OFF
+cmake --build build-relay --target relay --parallel
+./build-relay/relay --listen 3333
 ```
 
-To build only the server, relay, terminal client and library, configure with
-`-DBUILD_DESKTOP_APP=OFF`. To build only the desktop pieces, use
-`-DBUILD_LEGACY_TARGETS=OFF`.
-
-The desktop app requires community support. `-DBUILD_COMMUNITIES=OFF` skips the
-desktop target while allowing the terminal client, server, and room relay to
-build. Community voice uses Qt audio and does not require baresip.
+The relay uses the Qt Core/Network and OpenSSL runtime libraries. It does not
+need SQLite, FFmpeg, ncurses, or a separate discovery service.
 
 ### Windows
 
-Windows builds only the desktop pieces by default because the other targets
-use POSIX sockets. Install the desktop dependencies above, including SQLite
-headers and FFmpeg libraries that pkg-config can find. Run the server on Linux
-or macOS.
+Install the dependencies above, including FFmpeg development libraries that
+pkg-config can find. Build with a configured Qt and OpenSSL toolchain:
 
 ```powershell
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+cmake -S . -B build -DBUILD_RELAY=OFF
 cmake --build build --config Release --target disquisition-desktop
 ```
 
-The [desktop workflow](../.github/workflows/desktop.yml) has the full dependency
+The [desktop workflow](../.github/workflows/desktop.yml) contains the dependency
 setup for all three platforms.
 
 ### Native macOS drawing test
@@ -141,11 +116,8 @@ certificate. Their permissions may need to be granted again after updates.
 
 ## Package a macOS build
 
-To package a local macOS build, use a baresip executable built with the static
-voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
-
 ```sh
-scripts/package-macos.sh "build/disquisition development.app" build-baresip/output/baresip build/disquisition-development.dmg
+scripts/package-macos.sh "build/disquisition development.app" build/disquisition-development.dmg
 ```
 
 The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
@@ -163,15 +135,12 @@ uses a light background for readable Finder labels. Regenerate the artwork with
 ## Repository layout
 
 ```text
-include/client/client.h        Public C++ library API
-include/                       Headers, one folder per component below
-src/common/                    Wire protocol, socket helpers and command-line parsing
-src/server/                    Discovery server
-src/client/                    Client library, terminal UI, connection and peer mesh
-src/relay/                     Multi-user relay
-src/desktop/                   Qt desktop app
+include/                       Component headers
+src/common/                    Local message storage
+src/community/                 Identities, signed metadata, and encrypted peer connections
+src/relay/                     Community registration and encrypted tunnel routing
+src/desktop/                   Qt desktop app and media
 src/web/                       Project website
-test/                          Unit and end-to-end tests (run with ctest)
-examples/                      Standalone library example
-docs/                          Build, usage and contributor guides
+test/                          Model, network, persistence, media, and UI tests
+docs/                          Build, usage, and contributor guides
 ```

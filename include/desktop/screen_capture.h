@@ -10,13 +10,11 @@
 #include <QSize>
 #include <QString>
 #include <QThreadPool>
-
 #include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
 
-#include "common/protocol.h"
 #include "desktop/screen_h264.h"
 #include "desktop/share_source.h"
 
@@ -31,8 +29,7 @@ class MacScreenCapture;
 // Requests macOS Screen Recording access when needed. Other platforms return true.
 bool requestScreenRecordingAccess();
 
-
-constexpr qsizetype kScreenChunkBytes = chat::kMaxFrameSize - 256;
+constexpr qsizetype kScreenChunkBytes = 16 * 1024 - 256;
 constexpr int kMaxScreenChunks = 64;
 // Frames are skipped while more than this is still queued on the socket, so
 // chat and voice never wait behind more than about 100 ms of video at 5 Mbps.
@@ -87,7 +84,7 @@ private:
     std::shared_ptr<H264Encoder> h264_;
     QString encoderName_;
     qint64 frameIntervalMs_ = 1000 / 30;
-    QSize maxSize_ {1920, 1080};
+    QSize maxSize_{1920, 1080};
     quint32 nextFrameId_ = 0;
 };
 

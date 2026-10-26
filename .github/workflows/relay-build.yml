@@ -1,4 +1,4 @@
-name: build
+name: relay
 
 on:
   push:
@@ -13,13 +13,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact: disquisition-linux-x64
+            artifact: disquisition-relay-linux-x64
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libncurses-dev libsqlite3-dev libssl-dev
+              sudo apt-get install -y libssl-dev
           - os: macos-latest
-            artifact: disquisition-macos-arm64
-            deps: brew install sqlite ncurses openssl@3
+            artifact: disquisition-relay-macos-arm64
+            deps: brew install openssl@3
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -35,13 +35,13 @@ jobs:
           cache: true
 
       - name: Build
-        run: make
+        run: |
+          cmake -S . -B build -DBUILD_DESKTOP_APP=OFF -DBUILD_TESTING=OFF
+          cmake --build build --target relay --parallel
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            build/client
-            build/server
-            build/relay
+          path: build/relay
+          if-no-files-found: error

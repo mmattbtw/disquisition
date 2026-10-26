@@ -21,7 +21,7 @@ jobs:
           - os: ubuntu-latest
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libncurses-dev libsqlite3-dev libssl-dev
+              sudo apt-get install -y libsqlite3-dev libssl-dev
           - os: macos-latest
             deps: brew install openssl@3
     runs-on: ${{ matrix.os }}
@@ -64,7 +64,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libncurses-dev libsqlite3-dev libssl-dev
+          sudo apt-get install -y libsqlite3-dev libssl-dev
 
       - name: Install Qt for communities
         uses: jurplel/install-qt-action@v4
