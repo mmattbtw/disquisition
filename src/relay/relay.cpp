@@ -295,8 +295,9 @@ void Relay::serveClientLogin(User& user) {
         return;
     }
     user.clientWaiting = false;
-    sendToClient(user,
-                 Message{MsgType::LoginOk, {user.assignedName, "welcome, " + user.assignedName}});
+    sendToClient(user, Message{MsgType::LoginOk, {user.assignedName,
+                                                  "welcome, " + user.assignedName,
+                                                  user.serverFeatures}});
     replayRoster(user);
 }
 
@@ -324,6 +325,7 @@ void Relay::handleServerMessage(User& user, const Message& message) {
             if (!message.fields.empty()) {
                 user.assignedName = message.fields[0];
             }
+            user.serverFeatures = message.fields.size() >= 3 ? message.fields[2] : "";
             user.peers.setMyName(user.assignedName);
             user.serverReady = true;
             LOG_INFO("{} signed in as '{}'", user.requestedName, user.assignedName);
@@ -359,6 +361,7 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::System:
         case MsgType::VoiceAudio:
         case MsgType::VoiceState:
+        case MsgType::Speaking:
         case MsgType::ScreenShare:
         case MsgType::ScreenFrame:
             sendToClient(user, message);
@@ -403,6 +406,14 @@ void Relay::handleClientMessage(User& user, const Message& message) {
         case MsgType::ScreenWatch:
         case MsgType::ScreenFrame:
             if (user.serverReady && !user.server.failed()) {
+                user.server.send(message);
+            }
+            break;
+
+        case MsgType::Speaking:
+            // A server reached after the client signed in may not take it.
+            if (user.serverReady && !user.server.failed() &&
+                hasFeature(user.serverFeatures, kSpeakingFeature)) {
                 user.server.send(message);
             }
             break;
