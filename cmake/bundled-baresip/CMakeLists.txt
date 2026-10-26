@@ -9,7 +9,7 @@ find_package(OpenSSL REQUIRED)
 
 set(STATIC ON CACHE BOOL "Link baresip modules into the executable" FORCE)
 set(MODULES
-  "account;g711;menu;mixminus;vumeter;ctrl_tcp;${BARESIP_AUDIO_MODULE}"
+  "account;g711;menu;mixminus;ctrl_tcp;${BARESIP_AUDIO_MODULE}"
   CACHE STRING "Baresip modules needed by Disquisition" FORCE)
 
 add_subdirectory("${BARESIP_SOURCE_DIR}" baresip)
@@ -19,6 +19,14 @@ foreach(module IN LISTS MODULES)
     message(FATAL_ERROR "Required baresip module ${module} was not built")
   endif()
 endforeach()
+
+# Baresip reads its options only when libre finds getopt.h, which MSVC lacks.
+# Without them it ignores -f and never loads the profile the app writes.
+if(MSVC)
+  target_sources(baresip_exe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/getopt/getopt.c")
+  target_include_directories(baresip_exe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/getopt")
+  target_compile_definitions(baresip_exe PRIVATE HAVE_GETOPT)
+endif()
 
 # Baresip's FindRE module records the static libre archive but does not carry
 # its OpenSSL link dependencies into the executable.

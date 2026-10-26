@@ -21,8 +21,8 @@ Each time you open the app, it picks a random default message color from the
 presets: pink, mint, butter, periwinkle, lilac, aqua, or peach. Use `/color <value>`
 to change it. Your color stays the same when you reconnect.
 
-Fresh installs default to server `relay.mmatt.net:9000` and relay
-`relay.mmatt.net:3333`, so they connect through the relay without changing
+Fresh installs default to server `server.disquisition.app:9000` and relay
+`relay.disquisition.app:3333`, so they connect through the relay without changing
 Preferences. Saved connection settings take precedence over these defaults.
 For your own server, set the server address and port in Preferences. Use Cmd+,
 on macOS to open it. Set the relay address, or leave it blank to connect directly.

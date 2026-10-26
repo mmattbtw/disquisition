@@ -194,6 +194,16 @@ bool parsePort(const std::string& text, std::uint16_t& out, bool allowZero) {
     return true;
 }
 
+bool hasFeature(const std::string& features, const std::string& feature) {
+    std::size_t start = 0;
+    while (start <= features.size()) {
+        const std::size_t end = std::min(features.find(' ', start), features.size());
+        if (features.compare(start, end - start, feature) == 0) return true;
+        start = end + 1;
+    }
+    return false;
+}
+
 bool parsePeerChat(const Message& message, ChatPayload& out) {
     if (message.type != MsgType::PeerChat || message.fields.size() < 4) {
         return false;

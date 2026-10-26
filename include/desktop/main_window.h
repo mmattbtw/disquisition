@@ -16,6 +16,7 @@
 #include "common/protocol.h"
 #include "common/recent_messages.h"
 #include "desktop/image_transfer.h"
+#include "desktop/push_to_talk.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
 #include "desktop/screen_drawing_session.h"
@@ -63,7 +64,6 @@ private:
         bool muted = false;
         bool deafened = false;
         bool sharingScreen = false;
-        qint64 lastAudioMs = 0;
     };
 
     void buildUi();
@@ -109,6 +109,8 @@ private:
     void joinVoice();
     void leaveVoice();
     void restoreVoiceState();
+    void applyMicState();
+    void updatePushToTalk();
     void showPreferences();
     void startTransport(bool relay);
     void handleTransportClosed();
@@ -164,12 +166,12 @@ private:
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
     QHash<QString, Peer> peers_;
     QString myName_;
-    QString serverHost_ = "relay.mmatt.net";
+    QString serverHost_ = "server.disquisition.app";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
     bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
-    QString relayHost_ = "relay.mmatt.net";
+    QString relayHost_ = "relay.disquisition.app";
     quint16 relayPort_ = 3333;
     bool leakMyIp_ = false;
     bool usingRelay_ = false;
@@ -194,9 +196,14 @@ private:
     QString klipyCustomerId_;
     bool showLinkedMedia_ = true;
     bool localSpeaking_ = false;
+    bool serverSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
+    bool pushToTalkEnabled_ = false;
+    std::optional<quint32> pushToTalkKey_;
+    QString pushToTalkKeyName_;
+    PushToTalk pushToTalk_;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
     // Screen frames travel through the server, which forwards each share
@@ -213,7 +220,6 @@ private:
     quint64 screenShareGeneration_ = 0;
     ScreenFrameAssembler screenAssembler_;
     std::map<QString, ScreenStreamDecoder> watchedStreams_;
-    QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
     QTimer loginTimer_;

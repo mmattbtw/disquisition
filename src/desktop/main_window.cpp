@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHostAddress>
+#include <QIcon>
 #include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
@@ -30,6 +31,8 @@
 #include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QNetworkInterface>
+#include <QPainter>
+#include <QPixmap>
 #include <QPointer>
 #include <QDir>
 #include <QPushButton>
@@ -187,6 +190,32 @@ QString localAdvertiseHost(const QHostAddress& routeAddress) {
     return {};
 }
 
+QIcon memberBubble(const QColor& color, bool inVoice, bool talking, qreal scale) {
+    QPixmap pixmap(QSize(16, 16) * scale);
+    pixmap.setDevicePixelRatio(scale);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QPointF center(8, 8);
+    if (talking) {
+        QColor glow = color;
+        glow.setAlphaF(0.35);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(glow);
+        painter.drawEllipse(center, 7.5, 7.5);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else if (inVoice) {
+        painter.setPen(QPen(color, 1.5));
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 2, 2);
+    }
+    return QIcon(pixmap);
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
@@ -211,6 +240,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
+    pushToTalkEnabled_ = settings.value("voice/pushToTalk", false).toBool();
+    if (settings.contains("voice/pushToTalkKey"))
+        pushToTalkKey_ = settings.value("voice/pushToTalkKey").toUInt();
+    pushToTalkKeyName_ = settings.value("voice/pushToTalkKeyName").toString();
     // KLIPY asks for a stable, anonymous identifier per user.
     klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
     if (klipyCustomerId_.isEmpty()) {
@@ -349,8 +382,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         muted_ = !muted_;
-        voice_.setMuted(muted_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         muteButton_->setChecked(muted_);
         muteButton_->setText(muted_ ? "Unmute" : "Mute");
         sendVoiceState();
@@ -365,7 +397,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
         voice_.setDeafened(deafened_);
         relayAudio_.setDeafened(deafened_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         deafenButton_->setChecked(deafened_);
         deafenButton_->setText(deafened_ ? "Undeafen" : "Deafen");
         if (deafened_) {
@@ -378,6 +410,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             muteButton_->setEnabled(true);
         }
         sendVoiceState();
+    });
+    connect(&pushToTalk_, &PushToTalk::heldChanged, this, [this] {
+        applyMicState();
+        refreshMembers();
     });
     connect(name_, &QLineEdit::textChanged, this, [this](const QString& value) {
         if (!value.trimmed().isEmpty() && name_->property("invalid").toBool()) {
@@ -399,25 +435,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         sendFrame(&server_, chat::Message {chat::MsgType::VoiceAudio,
                    {std::string(pcm.constData(), static_cast<std::size_t>(pcm.size()))}});
     });
+    // This capture also runs during SIP voice, so it judges talking in both modes.
     connect(&relayAudio_, &RelayAudio::speakingChanged, this, [this](bool speaking) {
-        if (usingRelay_ && localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
+        if (localSpeaking_ == speaking) return;
+        localSpeaking_ = speaking;
+        if (voiceWanted_ && serverSpeaking_ &&
+            server_.state() == QAbstractSocket::ConnectedState) {
+            sendFrame(&server_, chat::Message {chat::MsgType::Speaking, {speaking ? "1" : "0"}});
         }
+        refreshMembers();
     });
-    speakingExpiry_.setInterval(200);
-    connect(&speakingExpiry_, &QTimer::timeout, this, [this] {
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        bool changed = false;
-        for (Peer& peer : peers_) {
-            if (peer.lastAudioMs && peer.speaking && now - peer.lastAudioMs > 250) {
-                peer.speaking = false;
-                changed = true;
-            }
-        }
-        if (changed) refreshMembers();
-    });
-    speakingExpiry_.start();
     connect(&voice_, &VoiceEngine::ready, this, [this] {
         if (!voiceWanted_ || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
             return;
@@ -436,22 +463,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             leaveVoice();
         }
     });
-    connect(&voice_, &VoiceEngine::localSpeakingChanged, this, [this](bool speaking) {
-        if (usingRelay_) return;
-        if (localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
-        }
-    });
     connect(&voice_, &VoiceEngine::peerVoiceChanged, this,
-            [this](const QString& name, bool connected, bool speaking) {
+            [this](const QString& name, bool connected) {
         if (!peers_.contains(name)) {
             return;
         }
         Peer& peer = peers_[name];
-        if (peer.voiceConnected != connected || peer.speaking != speaking) {
+        if (peer.voiceConnected != connected) {
             peer.voiceConnected = connected;
-            peer.speaking = speaking;
             refreshMembers();
         }
             });
@@ -678,7 +697,9 @@ void MainWindow::joinVoice() {
         }
         if (usingRelay_) {
             restoreVoiceState();
+            applyMicState();
             voiceWanted_ = true;
+            updatePushToTalk();
             activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
             sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
             voiceButton_->setText("Leave Voice");
@@ -719,7 +740,8 @@ void MainWindow::joinVoice() {
         }
         restoreVoiceState();
         if (deafened_) voice_.setDeafened(true);
-        else if (muted_) voice_.setMuted(true);
+        applyMicState();
+        updatePushToTalk();
         voiceButton_->setText("Leave Voice");
         muteButton_->setEnabled(!deafened_);
         deafenButton_->setEnabled(true);
@@ -735,7 +757,6 @@ void MainWindow::restoreVoiceState() {
     muted_ = resumeMuted_;
     deafened_ = resumeDeafened_;
     mutedBeforeDeafen_ = resumeMutedBeforeDeafen_;
-    relayAudio_.setMuted(muted_);
     relayAudio_.setDeafened(deafened_);
     muteButton_->setChecked(muted_);
     muteButton_->setText(muted_ ? "Unmute" : "Mute");
@@ -745,6 +766,20 @@ void MainWindow::restoreVoiceState() {
     resumeVoice_ = false;
 }
 
+void MainWindow::applyMicState() {
+    const bool silent = muted_ || (pushToTalkEnabled_ && !pushToTalk_.held());
+    voice_.setMuted(silent);
+    relayAudio_.setMuted(silent);
+}
+
+void MainWindow::updatePushToTalk() {
+    if (voiceWanted_ && pushToTalkEnabled_ && pushToTalkKey_) {
+        pushToTalk_.start(*pushToTalkKey_);
+    } else {
+        pushToTalk_.stop();
+    }
+}
+
 void MainWindow::leaveVoice() {
     const bool wasInVoice = voiceWanted_;
     voiceWanted_ = false;
@@ -752,6 +787,7 @@ void MainWindow::leaveVoice() {
         sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"0"}});
     }
     activeVoicePort_ = 0;
+    updatePushToTalk();
     voice_.stop();
     relayAudio_.stop();
     muted_ = false;
@@ -1085,6 +1121,21 @@ void MainWindow::showPreferences() {
                                     &dialog);
     showMedia->setChecked(showLinkedMedia_);
     showMedia->setToolTip("Loading them lets those sites see your IP address.");
+    auto* pushToTalk = new QCheckBox("Hold a key to talk", &dialog);
+    pushToTalk->setChecked(pushToTalkEnabled_);
+#if defined(Q_OS_MACOS)
+    pushToTalk->setToolTip("To use it while another app is focused, or to hold "
+                           "Caps Lock, allow Input Monitoring in System Settings.");
+#endif
+    auto* pushToTalkKey = new PushToTalkKeyButton(&dialog);
+    pushToTalkKey->setKey(pushToTalkKey_, pushToTalkKeyName_);
+    pushToTalkKey->setEnabled(pushToTalkEnabled_);
+    connect(pushToTalk, &QCheckBox::toggled, pushToTalkKey, &QWidget::setEnabled);
+    auto* pushToTalkRow = new QWidget(&dialog);
+    auto* pushToTalkLayout = new QHBoxLayout(pushToTalkRow);
+    pushToTalkLayout->setContentsMargins(0, 0, 0, 0);
+    pushToTalkLayout->addWidget(pushToTalk, 1);
+    pushToTalkLayout->addWidget(pushToTalkKey);
     const NotificationSettings shownNotifications = notifications_->settings();
     auto* muteNotifications = new QCheckBox("Mute all notifications", &dialog);
     muteNotifications->setChecked(shownNotifications.muted);
@@ -1119,6 +1170,7 @@ void MainWindow::showPreferences() {
     form->addRow("public host", advertisedHost);
     form->addRow("", advertiseLocal);
     form->addRow("voice SIP port", sipPort);
+    form->addRow("push to talk", pushToTalkRow);
     form->addRow("relay address", relayHost);
     form->addRow("relay port", relayPort);
     form->addRow("", leakIp);
@@ -1140,6 +1192,10 @@ void MainWindow::showPreferences() {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         const QString path = messageFile->text().trimmed();
         const QString count = maximum->text().trimmed();
+        if (pushToTalk->isChecked() && !pushToTalkKey->key()) {
+            QMessageBox::warning(&dialog, "Push to talk", "Choose a push-to-talk key.");
+            return;
+        }
         if (saveMessages->isChecked() && path.isEmpty()) {
             QMessageBox::warning(&dialog, "Message saving", "Choose a SQLite file.");
             return;
@@ -1174,7 +1230,7 @@ void MainWindow::showPreferences() {
     }
     serverHost_ = host->text().trimmed();
     if (serverHost_.isEmpty()) {
-        serverHost_ = "relay.mmatt.net";
+        serverHost_ = "server.disquisition.app";
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
@@ -1187,6 +1243,16 @@ void MainWindow::showPreferences() {
     messageFile_ = messageFile->text().trimmed();
     maxSavedMessages_ = chosenMaximum;
     showLinkedMedia_ = showMedia->isChecked();
+    const bool pushToTalkChanged = pushToTalk->isChecked() != pushToTalkEnabled_ ||
+                                   pushToTalkKey->key() != pushToTalkKey_;
+    pushToTalkEnabled_ = pushToTalk->isChecked();
+    pushToTalkKey_ = pushToTalkKey->key();
+    pushToTalkKeyName_ = pushToTalkKey->keyName();
+    if (pushToTalkChanged) {
+        updatePushToTalk();
+        applyMicState();
+        refreshMembers();
+    }
     NotificationSettings chosenNotifications;
     chosenNotifications.muted = muteNotifications->isChecked();
     chosenNotifications.level = static_cast<NotifyLevel>(notifyLevel->currentData().toInt());
@@ -1209,6 +1275,11 @@ void MainWindow::showPreferences() {
     settings.setValue("server/advertisedHost", advertiseHost_);
     settings.setValue("server/advertiseLocal", advertiseLocal_);
     settings.setValue("voice/sipPort", preferredVoicePort_);
+    settings.setValue("voice/pushToTalk", pushToTalkEnabled_);
+    if (pushToTalkKey_) {
+        settings.setValue("voice/pushToTalkKey", *pushToTalkKey_);
+        settings.setValue("voice/pushToTalkKeyName", pushToTalkKeyName_);
+    }
     settings.setValue("relay/host", relayHost_);
     settings.setValue("relay/port", relayPort_);
     settings.setValue("relay/leakMyIp", leakMyIp_);
@@ -1437,6 +1508,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         loginTimer_.stop();
         const QString previousName = myName_;
         myName_ = q(message.fields[0]);
+        serverSpeaking_ = message.fields.size() >= 3 &&
+                          chat::hasFeature(message.fields[2], chat::kSpeakingFeature);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
                                                : serverHost_ + ":" + QString::number(serverPort_)) +
@@ -1509,21 +1582,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
             (usingRelay_ || peers_[sender].voicePort == 65535)) {
             const std::string& bytes = message.fields[1];
             relayAudio_.receive(sender, QByteArray(bytes.data(), static_cast<qsizetype>(bytes.size())));
-            if (bytes.size() == 640) {
-                double sum = 0;
-                for (std::size_t i = 0; i < bytes.size(); i += 2) {
-                    const auto lo = static_cast<unsigned char>(bytes[i]);
-                    const auto hi = static_cast<unsigned char>(bytes[i + 1]);
-                    const auto sample = static_cast<qint16>(lo | (hi << 8));
-                    sum += static_cast<double>(sample) * sample;
-                }
-                Peer& peer = peers_[sender];
-                const bool speaking = sum / 320 > 450.0 * 450.0;
-                peer.lastAudioMs = QDateTime::currentMSecsSinceEpoch();
-                if (peer.speaking != speaking) {
-                    peer.speaking = speaking;
-                    refreshMembers();
-                }
+        }
+    } else if (message.type == chat::MsgType::Speaking && message.fields.size() == 2) {
+        const QString sender = q(message.fields[0]);
+        if (peers_.contains(sender) && peers_[sender].voicePort != 0) {
+            const bool speaking = message.fields[1] == "1";
+            if (peers_[sender].speaking != speaking) {
+                peers_[sender].speaking = speaking;
+                refreshMembers();
             }
         }
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() == 3) {
@@ -2111,14 +2177,17 @@ void MainWindow::showMemberMenu(const QPoint& position) {
 
 void MainWindow::refreshMembers() {
     members_->clear();
+    const qreal scale = members_->devicePixelRatioF();
     if (!myName_.isEmpty()) {
-        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :
-                                  localSpeaking_ ? "  talking" :
-                                  voiceWanted_ ? "  mic" : "  text";
-        auto* self = new QListWidgetItem((localSpeaking_ && !muted_ ? "● " : "○ ") + myName_ +
-                                         selfState + (sharingScreen_ ? "  LIVE" : ""), members_);
-        self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
-                                   localSpeaking_ ? "#6ee7a2" : "#9dccca"));
+        const bool talking = localSpeaking_ && !muted_ &&
+                             (!pushToTalkEnabled_ || pushToTalk_.held());
+        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" : "";
+        const QColor color(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
+                           talking ? "#6ee7a2" : "#9dccca");
+        auto* self = new QListWidgetItem(memberBubble(color, voiceWanted_, talking, scale),
+                                         myName_ + selfState + (sharingScreen_ ? "  LIVE" : ""),
+                                         members_);
+        self->setForeground(color);
     }
     QStringList names = peers_.keys();
     names.sort(Qt::CaseInsensitive);
@@ -2126,14 +2195,14 @@ void MainWindow::refreshMembers() {
     for (const QString& name : names) {
         const Peer& peer = peers_[name];
         const bool inVoice = peer.voicePort != 0;
-        const QString marker = peer.speaking && !peer.muted && inVoice ? "● " :
-                               inVoice ? "○ " : "· ";
-        const QString state = !inVoice ? "  text" : peer.deafened ? "  deafened" : peer.muted ? "  muted" :
-                              peer.speaking ? "  talking" :
-                              peer.voiceConnected ? "  voice" : "  in voice";
-        auto* item = new QListWidgetItem(marker + name + state +
-                                         (peer.sharingScreen ? "  LIVE" : "") +
-                                         (sharingScreen_ && drawingBans_.contains(name) ? "  drawing banned" : ""), members_);
+        const QString state = !inVoice ? "" : peer.deafened ? "  deafened" : peer.muted ? "  muted" : "";
+        const QColor color(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
+                           peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" : "#9dccca");
+        const bool talking = inVoice && peer.speaking && !peer.muted;
+        auto* item = new QListWidgetItem(memberBubble(color, inVoice, talking, scale),
+                                         name + state + (peer.sharingScreen ? "  LIVE" : "") +
+                                         (sharingScreen_ && drawingBans_.contains(name) ? "  drawing banned" : ""),
+                                         members_);
         item->setData(Qt::UserRole, name);
         QStringList tips;
         if (peer.sharingScreen)
@@ -2142,9 +2211,7 @@ void MainWindow::refreshMembers() {
             tips.append(drawingBans_.contains(name) ? "banned from drawing on your stream; right-click to unban" :
                                                    "right-click to ban drawing on your stream");
         item->setToolTip(tips.join('\n'));
-        item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
-                                  peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
-                                  "#9dccca"));
+        item->setForeground(color);
     }
 }
 

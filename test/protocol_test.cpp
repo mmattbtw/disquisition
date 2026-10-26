@@ -134,6 +134,15 @@ void testTrim() {
     CHECK(chat::trim("x") == "x");
 }
 
+void testFeatures() {
+    CHECK(chat::hasFeature("speaking", "speaking"));
+    CHECK(chat::hasFeature("video speaking", "speaking"));
+    CHECK(chat::hasFeature("speaking video", "speaking"));
+    CHECK(!chat::hasFeature("", "speaking"));
+    CHECK(!chat::hasFeature("speakingx", "speaking"));
+    CHECK(!chat::hasFeature("speak", "speaking"));
+}
+
 void testParseNumbers() {
     std::int64_t value = 0;
     CHECK(chat::parseInt64("0", value) && value == 0);
@@ -404,6 +413,7 @@ int main() {
     testMalformedFrames();
     testSanitize();
     testTrim();
+    testFeatures();
     testParseNumbers();
     testColors();
     testPeerChat();
