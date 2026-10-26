@@ -15,6 +15,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # MSVC reads extra flags from CL; /MP compiles each project's sources in
+      # parallel instead of one file at a time. Other compilers ignore it.
+      CL: /MP
     strategy:
       fail-fast: false
       matrix:
