@@ -45,6 +45,7 @@ private:
         PeerNetwork peers;
         bool serverReady = false;   // logged in on the current server connection
         bool clientWaiting = false; // client has not been sent LoginOk yet
+        std::string serverFeatures; // LoginOk's feature list from the current server
         std::chrono::steady_clock::time_point nextServerAttempt;
         std::map<std::string, PeerAddress> roster;
         Message lastUsers{MsgType::Users, {}};

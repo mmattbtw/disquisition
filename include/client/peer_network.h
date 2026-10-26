@@ -25,7 +25,7 @@ namespace chat {
 class PeerNetwork {
 public:
     struct Event {
-        enum class Kind { Chat, Join, Leave, Note, Image };
+        enum class Kind { Chat, Join, Leave, Note, Image, Data };
         Kind kind = Kind::Note;
         std::int64_t timestamp = 0;
         std::string name;
@@ -34,6 +34,7 @@ public:
         // Set for Image. Its sender is the name the link was established
         // with, which may differ from the one written in the frame.
         ImageChunk image;
+        PeerData data;
     };
 
     PeerNetwork() = default;
@@ -72,6 +73,7 @@ public:
     void sendChat(std::int64_t timestamp, const std::string& body, const std::string& color);
     // Sends one chunk of an image to every linked peer as this user.
     void sendImageChunk(const ImageChunk& chunk);
+    bool sendData(const std::string& target, const std::string& channel, const std::string& data);
     // Returns the next event. Also completes inbound handshakes and notices
     // dropped links.
     bool poll(Event& out);

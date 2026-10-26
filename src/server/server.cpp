@@ -275,6 +275,9 @@ bool Server::handleFrames(Client& client) {
             case MsgType::VoiceState:
                 handleVoiceState(client, message);
                 break;
+            case MsgType::Speaking:
+                handleSpeaking(client, message);
+                break;
             case MsgType::ScreenShare:
                 handleScreenShare(client, message);
                 break;
@@ -323,7 +326,8 @@ void Server::handleLogin(Client& client, const Message& message) {
         return;
     }
     client.authenticated = true;
-    send(client, Message{MsgType::LoginOk, {client.name, "welcome, " + client.name}});
+    send(client, Message{MsgType::LoginOk,
+                         {client.name, "welcome, " + client.name, kSpeakingFeature}});
 
     // The newcomer learns the roster first, then everyone learns about it.
     for (const Client& other : clients_) {
@@ -413,6 +417,14 @@ void Server::handleVoiceState(Client& client, const Message& message) {
     }
     broadcast(Message{MsgType::VoiceState,
                       {client.name, message.fields[1], message.fields[2]}}, &client);
+}
+
+void Server::handleSpeaking(Client& client, const Message& message) {
+    if (!client.authenticated || client.voicePort == 0 || message.fields.size() != 1 ||
+        (message.fields[0] != "0" && message.fields[0] != "1")) {
+        return;
+    }
+    broadcast(Message{MsgType::Speaking, {client.name, message.fields[0]}}, &client);
 }
 
 void Server::handleScreenShare(Client& client, const Message& message) {

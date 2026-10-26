@@ -222,6 +222,16 @@ void PeerNetwork::sendImageChunk(const ImageChunk& chunk) {
     }
 }
 
+bool PeerNetwork::sendData(const std::string& target, const std::string& channel,
+                           const std::string& data) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto peer = peers_.find(target);
+    const Message message = peerDataMessage(PeerData{myName_, target, channel, data});
+    PeerData validated;
+    return parsePeerData(message, validated) && peer != peers_.end() && peer->second.connection &&
+           peer->second.connection->send(message);
+}
+
 bool PeerNetwork::poll(Event& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     drainPending();
@@ -412,6 +422,7 @@ void PeerNetwork::drainPeers() {
             // Trust the name the link was established with, not the frame.
             ChatPayload payload;
             ImageChunk chunk;
+            PeerData data;
             if (parsePeerChat(message, payload)) {
                 pushEvent(Event::Kind::Chat, peer.name, payload.body, payload.timestamp,
                           payload.color);
@@ -422,6 +433,14 @@ void PeerNetwork::drainPeers() {
                 event.kind = Event::Kind::Image;
                 event.name = peer.name;
                 event.image = std::move(chunk);
+                events_.push_back(std::move(event));
+            }
+            else if (parsePeerData(message, data) && data.target == myName_) {
+                data.sender = peer.name;
+                Event event;
+                event.kind = Event::Kind::Data;
+                event.name = peer.name;
+                event.data = std::move(data);
                 events_.push_back(std::move(event));
             }
         }

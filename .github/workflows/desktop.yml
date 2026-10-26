@@ -13,6 +13,8 @@ jobs:
   build:
     name: ${{ matrix.artifact }}
     runs-on: ${{ matrix.os }}
+    env:
+      DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +65,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libssl-dev pkg-config libavcodec-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y libasound2-dev libssl-dev libxcb1-dev pkg-config libavcodec-dev libavutil-dev libswscale-dev
 
       - name: Install macOS voice dependencies
         if: runner.os == 'macOS'
@@ -122,14 +124,14 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
 
       - name: Build desktop client
         run: cmake --build build --config Release --target disquisition-desktop --parallel
@@ -147,11 +149,12 @@ jobs:
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: |
-          mkdir -p build/disquisition.app/Contents/Resources/licenses
-          cp third_party/baresip/LICENSE build/disquisition.app/Contents/Resources/licenses/baresip.LICENSE
-          cp third_party/re/LICENSE build/disquisition.app/Contents/Resources/licenses/libre.LICENSE
-          cp "$(brew --prefix openssl@3)/LICENSE.txt" build/disquisition.app/Contents/Resources/licenses/OpenSSL.LICENSE
-          scripts/package-macos.sh build/disquisition.app build-baresip/output/baresip disquisition-desktop-macos-arm64.dmg
+          app=$(cat build/disquisition-app-bundle-Release.txt)
+          mkdir -p "$app/Contents/Resources/licenses"
+          cp third_party/baresip/LICENSE "$app/Contents/Resources/licenses/baresip.LICENSE"
+          cp third_party/re/LICENSE "$app/Contents/Resources/licenses/libre.LICENSE"
+          cp "$(brew --prefix openssl@3)/LICENSE.txt" "$app/Contents/Resources/licenses/OpenSSL.LICENSE"
+          scripts/package-macos.sh "$app" build-baresip/output/baresip disquisition-desktop-macos-arm64.dmg
 
       - name: Package Windows app
         if: runner.os == 'Windows'
