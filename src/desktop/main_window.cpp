@@ -1230,7 +1230,7 @@ void MainWindow::showPreferences() {
     }
     serverHost_ = host->text().trimmed();
     if (serverHost_.isEmpty()) {
-        serverHost_ = "relay.mmatt.net";
+        serverHost_ = "server.disquisition.app";
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
