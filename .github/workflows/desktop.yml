@@ -15,6 +15,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # MSVC reads extra flags from CL; /MP compiles each project's sources in
+      # parallel instead of one file at a time. Other compilers ignore it.
+      CL: /MP
     strategy:
       fail-fast: false
       matrix:
@@ -31,12 +34,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # install-qt-action otherwise picks the newest Python, which on Windows is
+      # 3.15 and has no py7zr dependency wheels yet, so they compile every run.
+      - name: Set up Python for Qt installer
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
           modules: qtmultimedia
           cache: true
+          setup-python: false
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -48,23 +59,47 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl@3 sqlite ffmpeg pkgconf
 
-      - name: Restore Windows vcpkg cache
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: .vcpkg-cache
-          key: vcpkg-openssl-sqlite3-pkgconf-x64-windows-v1
-
-      - name: Install Windows desktop dependencies
+      # The Windows caches below hold binaries built with the runner image's MSVC
+      # and vcpkg ports tree, so key them on the image: a cache from an older
+      # image would otherwise keep restoring stale binaries and never be replaced.
+      - name: Identify Windows runner image
+        id: image
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path .vcpkg-cache -Force | Out-Null
-          $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $env:GITHUB_WORKSPACE '.vcpkg-cache'
+          "id=$env:ImageOS-$env:ImageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # Cache the installed tree rather than vcpkg's binary cache: even when every
+      # package is cached, vcpkg install spends ~40s fetching CMake and hashing the compiler.
+      - name: Restore Windows vcpkg packages
+        id: vcpkg-cache
+        if: runner.os == 'Windows'
+        uses: actions/cache/restore@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-installed-${{ steps.image.outputs.id }}-openssl-sqlite3-pkgconf
+
+      - name: Install Windows desktop dependencies
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
           & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install pkgconf:x64-windows sqlite3:x64-windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Save as soon as the packages are built, so a later build failure doesn't discard them.
+      - name: Save Windows vcpkg packages
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:/vcpkg/installed
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      - name: Use vcpkg pkg-config
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
           $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
           "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$installed/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
