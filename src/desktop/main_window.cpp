@@ -42,7 +42,9 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStyle>
+#include <QTextBlock>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUdpSocket>
 #include <QUrl>
@@ -58,6 +60,9 @@
 #include "desktop/chat_media.h"
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
+#include "desktop/mention_completer.h"
+#include "desktop/mentions.h"
+#include "desktop/notification_center.h"
 #include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
 
@@ -85,6 +90,33 @@ QString safeHtml(const QString& value) {
 
 // A drop of more files than this sends only the first ones.
 constexpr int kMaxDroppedImages = 10;
+
+// Screen shares announced this soon after signing in were already running.
+constexpr qint64 kSignInSettleMs = 3000;
+
+const QColor kMentionedBackground(0x45, 0x3d, 0x2c);
+
+QString withMentions(const QString& body, const QList<Mention>& mentions) {
+    QString html;
+    qsizetype written = 0;
+    for (const Mention& mention : mentions) {
+        // Members whose names differ only in case can share one mention.
+        if (mention.start < written) continue;
+        html += safeHtml(body.mid(written, mention.start - written)) +
+                "<span style='background-color:#3e4372;color:#c9cdfb'>" +
+                safeHtml(body.mid(mention.start, mention.length)) + "</span>";
+        written = mention.start + mention.length;
+    }
+    return html + safeHtml(body.mid(written));
+}
+
+// A lone GIF link would show as a long URL.
+QString messagePreview(const QString& body) {
+    const QList<MediaLink> media = findMediaLinks(body);
+    return media.size() == 1 && body.trimmed() == media.first().text
+               ? QStringLiteral("sent a GIF")
+               : body;
+}
 
 QColor xtermColor(int index) {
     static const int basic[][3] = {
@@ -219,9 +251,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         settings.setValue("gifs/klipyCustomerId", klipyCustomerId_);
     }
     imagePool_.setMaxThreadCount(1);
+    notifications_ = new NotificationCenter(this);
     buildUi();
     setWindowTitle(QApplication::applicationDisplayName());
     resize(980, 680);
+    showNotificationSettings(notifications_->settings());
+    connect(notifications_, &NotificationCenter::settingsChanged, this,
+            &MainWindow::showNotificationSettings);
+    connect(notifications_, &NotificationCenter::badgeChanged, this,
+            [this](const UnreadBadge& badge) { setWindowTitle(badgedTitle("disquisition", badge)); });
 
     reconnectTimer_.setSingleShot(true);
     reconnectTimer_.setInterval(3000);
@@ -485,6 +523,8 @@ void MainWindow::buildUi() {
     connect(preferencesAction, &QAction::triggered, this, &MainWindow::showPreferences);
     auto* saveAction = appMenu->addAction("Message saving…");
     connect(saveAction, &QAction::triggered, this, &MainWindow::showPreferences);
+    appMenu->addSeparator();
+    appMenu->addAction(notifications_->muteAction());
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -512,9 +552,14 @@ void MainWindow::buildUi() {
 
     auto* state = new QHBoxLayout;
     connectionLabel_ = new QLabel("* disconnected", root);
+    notificationsLabel_ = new QLabel("notifications muted", root);
+    notificationsLabel_->setObjectName("notificationsMuted");
+    notificationsLabel_->setToolTip("/dnd or the app menu turns them back on");
     voiceLabel_ = new QLabel("voice: off", root);
     state->addWidget(connectionLabel_);
     state->addStretch();
+    state->addWidget(notificationsLabel_);
+    state->addSpacing(12);
     state->addWidget(voiceLabel_);
     page->addLayout(state);
 
@@ -550,6 +595,7 @@ void MainWindow::buildUi() {
     composer_->setPlaceholderText("> type a message");
     composer_->setEnabled(false);
     composer_->installEventFilter(this);
+    mentionCompleter_ = new MentionCompleter(composer_);
     gifButton_ = new QPushButton("GIF", root);
     gifButton_->setToolTip("search GIFs (/gif)");
     gifButton_->setEnabled(false);
@@ -608,7 +654,11 @@ void MainWindow::buildUi() {
         QFrame#gifPicker QListWidget::item:hover, QFrame#gifPicker QListWidget::item:selected { background: #9dccca; }
         QLabel#gifStatus, QLabel#gifAttribution { color: #8a9099; font-size: 12px; }
         QLabel#dropOverlay { background: rgba(32, 38, 44, 225); color: #9dccca; border: 2px dashed #9dccca; font-size: 16px; font-weight: 700; }
+        QLabel#notificationsMuted { color: #d9a441; }
+        QListView#mentionSuggestions { border: 1px solid #777f89; selection-background-color: #9dccca; selection-color: #20262c; }
     )");
+    // The popup is a window of its own, so it does not inherit the style sheet.
+    mentionCompleter_->popup()->setStyleSheet(styleSheet());
 }
 
 void MainWindow::startJoining() {
@@ -890,6 +940,9 @@ void MainWindow::handleScreenShare(const chat::Message& message) {
     if (sharing) {
         stage_->addStream(name, false);
         appendChat("Screen", name + " started sharing their screen", {}, true);
+        if (signedIn_.isValid() && signedIn_.hasExpired(kSignInSettleMs)) {
+            notifications_->activityOccurred(name, "started sharing their screen");
+        }
     } else {
         endRemoteStream(name);
         appendChat("Screen", name + " stopped sharing their screen", {}, true);
@@ -1083,6 +1136,27 @@ void MainWindow::showPreferences() {
     pushToTalkLayout->setContentsMargins(0, 0, 0, 0);
     pushToTalkLayout->addWidget(pushToTalk, 1);
     pushToTalkLayout->addWidget(pushToTalkKey);
+    const NotificationSettings shownNotifications = notifications_->settings();
+    auto* muteNotifications = new QCheckBox("Mute all notifications", &dialog);
+    muteNotifications->setChecked(shownNotifications.muted);
+    muteNotifications->setToolTip("No desktop notifications or taskbar alerts. "
+                                  "Unread badges still count what you miss.");
+    auto* notifyLevel = new QComboBox(&dialog);
+    notifyLevel->addItem("all messages", static_cast<int>(NotifyLevel::AllMessages));
+    notifyLevel->addItem("only @mentions", static_cast<int>(NotifyLevel::MentionsOnly));
+    notifyLevel->setCurrentIndex(
+        notifyLevel->findData(static_cast<int>(shownNotifications.level)));
+    auto* suppressEveryone = new QCheckBox("Suppress @everyone and @here", &dialog);
+    suppressEveryone->setChecked(shownNotifications.suppressEveryone);
+    suppressEveryone->setToolTip("They notify and count as unread like any other message.");
+    auto* notifyActivity =
+        new QCheckBox("Notify when someone joins or starts sharing their screen", &dialog);
+    notifyActivity->setChecked(shownNotifications.activity);
+    // Suppressing @everyone stays enabled: it still decides what the badge counts.
+    notifyLevel->setEnabled(!shownNotifications.muted);
+    notifyActivity->setEnabled(!shownNotifications.muted);
+    connect(muteNotifications, &QCheckBox::toggled, notifyLevel, &QWidget::setDisabled);
+    connect(muteNotifications, &QCheckBox::toggled, notifyActivity, &QWidget::setDisabled);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -1104,6 +1178,10 @@ void MainWindow::showPreferences() {
     form->addRow("SQLite file", messageFileRow);
     form->addRow("maximum messages", maximum);
     form->addRow("", showMedia);
+    form->addRow("", muteNotifications);
+    form->addRow("notify me about", notifyLevel);
+    form->addRow("", suppressEveryone);
+    form->addRow("", notifyActivity);
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -1175,6 +1253,12 @@ void MainWindow::showPreferences() {
         applyMicState();
         refreshMembers();
     }
+    NotificationSettings chosenNotifications;
+    chosenNotifications.muted = muteNotifications->isChecked();
+    chosenNotifications.level = static_cast<NotifyLevel>(notifyLevel->currentData().toInt());
+    chosenNotifications.suppressEveryone = suppressEveryone->isChecked();
+    chosenNotifications.activity = notifyActivity->isChecked();
+    notifications_->setSettings(chosenNotifications);
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1438,6 +1522,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
         gifButton_->setEnabled(true);
+        signedIn_.start();
         // A relay signs in again after losing the server, which forgets every
         // screen share. The server re-announces the others; announce ours.
         endRemoteStreams();
@@ -1462,7 +1547,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         }
     } else if ((message.type == chat::MsgType::Peer ||
                 message.type == chat::MsgType::PeerJoined) && message.fields.size() >= 4) {
+        // Peer lists who was already here; PeerJoined announces a newcomer.
+        const QString name = q(message.fields[0]);
+        const bool joined = message.type == chat::MsgType::PeerJoined && !peers_.contains(name);
         addPeer(message);
+        if (joined) {
+            appendChat("Room", name + " joined", {}, true);
+            notifications_->activityOccurred(name, "joined the room");
+        }
     } else if (message.type == chat::MsgType::PeerLeft && !message.fields.empty()) {
         removePeer(q(message.fields[0]));
     } else if (message.type == chat::MsgType::VoicePort && message.fields.size() == 2) {
@@ -1520,9 +1612,7 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         drawingPeerChanged(q(message.fields[0]), message.fields[1] == "1");
     }
     else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
-        appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
-        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
-                    message.fields[2], message.fields[3]});
+        receiveChat(message);
     }
     else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
@@ -1659,9 +1749,7 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
         }
     }
     else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
-        appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
-        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
-                    message.fields[2], message.fields[3]});
+        receiveChat(message);
     }
     else if (message.type == chat::MsgType::PeerImage) {
         // Trust the name the link was established with, not the frame.
@@ -1717,6 +1805,28 @@ void MainWindow::sendChat(const QString& body) {
     }
     appendChat(myName_, body, "231");
     recordChat({timestampSeconds, s(myName_), s(body), s(messageColor_)});
+}
+
+void MainWindow::receiveChat(const chat::Message& message) {
+    const QString sender = q(message.fields[0]);
+    const QString body = q(message.fields[2]);
+    appendChat(sender, body, q(message.fields[3]));
+    recordChat({q(message.fields[1]).toLongLong(), message.fields[0], message.fields[2],
+                message.fields[3]});
+    if (sender != myName_) {
+        notifications_->messageReceived(sender, messagePreview(body),
+                                        mentionOf(findMentions(body, memberNames()), myName_));
+    }
+}
+
+QStringList MainWindow::memberNames() const {
+    QStringList names = peers_.keys();
+    if (!myName_.isEmpty()) names.append(myName_);
+    return names;
+}
+
+void MainWindow::showNotificationSettings(const NotificationSettings& settings) {
+    notificationsLabel_->setVisible(settings.muted);
 }
 
 void MainWindow::runCommand(const QString& command) {
@@ -1816,6 +1926,10 @@ void MainWindow::runCommand(const QString& command) {
             deafenButton_->click();
         }
         appendChat("Voice", "incoming audio restored", {}, true);
+    } else if (name == "/dnd") {
+        QAction* mute = notifications_->muteAction();
+        mute->toggle();
+        appendChat("Notifications", mute->isChecked() ? "muted" : "on", {}, true);
     } else if (name == "/leave") {
         disconnectAll();
     } else if (name == "/quit" || name == "/exit") {
@@ -1832,9 +1946,11 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Help", "/gif [search]   pick a GIF to send", {}, true);
         appendChat("Help", "/clear          clear the local message pane", {}, true);
         appendChat("Help", "/save           configure continuous local message saving", {}, true);
+        appendChat("Help", "/dnd            mute or unmute notifications", {}, true);
         appendChat("Help", "/leave          leave this room", {}, true);
         appendChat("Help", "/quit, /exit    close this app window", {}, true);
         appendChat("Help", "drag images into the window to send them to the room", {}, true);
+        appendChat("Help", "@name mentions someone; @everyone and @here mention the room", {}, true);
     } else {
         appendChat("Command", "unknown command: " + name + " (try /help)", {}, true);
     }
@@ -1852,9 +1968,20 @@ void MainWindow::appendChat(const QString& sender, const QString& body,
         system || !showLinkedMedia_ ? QList<MediaLink>() : findMediaLinks(body);
     // As in Discord, a message that is only a GIF link shows just the GIF.
     const bool onlyMedia = media.size() == 1 && body.trimmed() == media.first().text;
+    const QList<Mention> mentions = system ? QList<Mention>() : findMentions(body, memberNames());
     transcript_->append("<div style='margin:1px 0;color:" + color + "'>" + prefix +
                         safeHtml(sender) + (system ? " " : ": ") +
-                        (onlyMedia ? QString() : safeHtml(body)) + "</div>");
+                        (onlyMedia ? QString() : withMentions(body, mentions)) + "</div>");
+    // Appended HTML loses its block background, and each new block copies
+    // the one before it, so every line sets its own.
+    QTextCursor line(transcript_->document()->lastBlock());
+    QTextBlockFormat format = line.blockFormat();
+    if (sender != myName_ && mentionOf(mentions, myName_) != Mentioned::No) {
+        format.setBackground(kMentionedBackground);
+    } else {
+        format.clearBackground();
+    }
+    line.setBlockFormat(format);
     for (const MediaLink& link : media) {
         media_->appendRemote(link.url);
     }
@@ -2017,7 +2144,10 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
         sender, chunk.transferId, chunk.index, chunk.count,
         QByteArray(chunk.data.data(), static_cast<qsizetype>(chunk.data.size())),
         QDateTime::currentMSecsSinceEpoch());
-    if (image) appendImage(sender, *image, q(chunk.color), chunk.timestamp);
+    if (image) {
+        appendImage(sender, *image, q(chunk.color), chunk.timestamp);
+        notifications_->messageReceived(sender, "sent an image", Mentioned::No);
+    }
 }
 
 void MainWindow::showMemberMenu(const QPoint& position) {
@@ -2061,6 +2191,7 @@ void MainWindow::refreshMembers() {
     }
     QStringList names = peers_.keys();
     names.sort(Qt::CaseInsensitive);
+    mentionCompleter_->setMembers(names);
     for (const QString& name : names) {
         const Peer& peer = peers_[name];
         const bool inVoice = peer.voicePort != 0;
