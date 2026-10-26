@@ -4,9 +4,9 @@ project(disquisition LANGUAGES CXX)
 option(BUILD_DESKTOP_APP "Build the Qt desktop chat and voice app" ON)
 include(cmake/AppIdentity.cmake)
 if(WIN32)
-  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" OFF)
+  option(BUILD_LEGACY_TARGETS "Build the server, relay and C++ client library" OFF)
 else()
-  option(BUILD_LEGACY_TARGETS "Build the server, relay, terminal client and library" ON)
+  option(BUILD_LEGACY_TARGETS "Build the server, relay and C++ client library" ON)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -64,25 +64,7 @@ else()
 endif()
 
 if(BUILD_LEGACY_TARGETS)
-  if(APPLE AND HOMEBREW_EXECUTABLE)
-    execute_process(
-      COMMAND "${HOMEBREW_EXECUTABLE}" --prefix ncurses
-      OUTPUT_VARIABLE HOMEBREW_NCURSES_PREFIX
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-    if((NOT DEFINED CURSES_NCURSES_LIBRARY OR
-        CURSES_NCURSES_LIBRARY MATCHES "MacOSX[.]sdk|CommandLineTools") AND
-       EXISTS "${HOMEBREW_NCURSES_PREFIX}/include/ncurses.h" AND
-       EXISTS "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib")
-      set(CURSES_NCURSES_LIBRARY "${HOMEBREW_NCURSES_PREFIX}/lib/libncurses.dylib" CACHE FILEPATH "ncurses library" FORCE)
-      set(CURSES_INCLUDE_PATH "${HOMEBREW_NCURSES_PREFIX}/include" CACHE PATH "ncurses headers" FORCE)
-    endif()
-  endif()
-
   find_package(Threads REQUIRED)
-
-  set(CURSES_NEED_NCURSES TRUE)
-  find_package(Curses REQUIRED)
 endif()
 
 # Wire protocol and socket helpers shared by every program.
@@ -323,14 +305,6 @@ add_executable(server
   src/server/database.cpp)
 target_link_libraries(server PRIVATE chat_protocol ${SQLITE_TARGET})
 
-add_executable(client
-  src/client/main.cpp
-  src/client/options.cpp
-  src/client/text_wrap.cpp
-  src/client/tui.cpp)
-target_include_directories(client PRIVATE ${CURSES_INCLUDE_DIRS})
-target_link_libraries(client PRIVATE chat_network chat_recent_messages ${CURSES_LIBRARIES})
-
 add_executable(relay
   src/relay/main.cpp
   src/relay/options.cpp
@@ -361,10 +335,6 @@ if(BUILD_TESTING)
   target_link_libraries(connection_test PRIVATE chat_network)
   add_test(NAME connection_test COMMAND connection_test)
 
-  add_executable(text_wrap_test test/text_wrap_test.cpp src/client/text_wrap.cpp)
-  target_include_directories(text_wrap_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  add_test(NAME text_wrap_test COMMAND text_wrap_test)
-
   add_executable(client_library_test test/client_library_test.cpp)
   target_link_libraries(client_library_test PRIVATE disquisition_client)
   add_test(NAME client_library_test COMMAND client_library_test)
@@ -375,7 +345,7 @@ if(BUILD_TESTING)
   add_test(NAME end_to_end_test
     COMMAND end_to_end_test $<TARGET_FILE:server> $<TARGET_FILE:relay> "${CMAKE_CURRENT_BINARY_DIR}")
 
-  set_tests_properties(protocol_test text_wrap_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
+  set_tests_properties(protocol_test connection_test client_library_test end_to_end_test PROPERTIES TIMEOUT 120)
 endif()
 endif()
 

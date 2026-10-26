@@ -4,17 +4,17 @@ Run commands from the repository root unless a section says otherwise.
 
 ## Requirements
 
-For the server, relay, terminal client and C++ library on Linux or macOS:
+For the server, relay and C++ library on Linux or macOS:
 
 - A C++20 compiler and CMake 3.16 or newer
-- SQLite 3.24 or newer and ncurses, including development headers
+- SQLite 3.24 or newer, including development headers
 - POSIX sockets and `poll`
 - Git and network access on the first configure, to download spdlog
 
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite ncurses
+brew install cmake sqlite
 ```
 
 CMake uses the Homebrew libraries when available.
@@ -34,7 +34,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The build creates `build/server`, `build/client`, `build/relay` and the static
+The build creates `build/server`, `build/relay` and the static
 `disquisition::client` library. `make clean` removes the `build` directory.
 
 ## Desktop app
@@ -69,7 +69,7 @@ cmake -S . -B build -DBUILD_DESKTOP_APP=ON
 cmake --build build --target disquisition-desktop
 ```
 
-To build only the server, relay, terminal client and library, configure with
+To build only the server, relay and library, configure with
 `-DBUILD_DESKTOP_APP=OFF`. To build only the desktop pieces, use
 `-DBUILD_LEGACY_TARGETS=OFF`.
 
@@ -160,7 +160,7 @@ include/client/client.h        Public C++ library API
 include/                       Headers, one folder per component below
 src/common/                    Wire protocol, socket helpers and command-line parsing
 src/server/                    Discovery server
-src/client/                    Client library, terminal UI, connection and peer mesh
+src/client/                    Client library, connection and peer mesh
 src/relay/                     Multi-user relay
 src/desktop/                   Qt desktop app
 src/web/                       Project website
