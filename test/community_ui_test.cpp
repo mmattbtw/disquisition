@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QDeadlineTimer>
 #include <QDialog>
+#include <QCheckBox>
+#include <QKeyEvent>
 #include <QHostAddress>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -21,6 +23,9 @@
 #include "community/store.h"
 #include "desktop/community_panel.h"
 #include "desktop/main_window.h"
+#include "desktop/notification_center.h"
+#include "desktop/push_to_talk.h"
+#include "desktop/screen_stage.h"
 static bool until(const std::function<bool()>& test) {
     QDeadlineTimer deadline(6000);
     while (!deadline.hasExpired()) {
@@ -38,6 +43,10 @@ int main(int argc, char** argv) {
     app.setApplicationName("Disquisition-ui-test");
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, directory.path());
+    auto notifications = NotificationSettings::load(QSettings());
+    notifications.muted = true; // Exercise badges without posting OS notifications.
+    QSettings notificationSettings;
+    notifications.save(notificationSettings);
     const auto data = directory.path() + "/community";
     app.setProperty("communityDataDirectory", data);
     QSettings().setValue("community/name", "Alice");
@@ -177,10 +186,94 @@ int main(int argc, char** argv) {
         }
     CHECK(selfUnderChannel);
     CHECK(window.grab().save("community-voice.png"));
+    // Exercise the real hotkey event filter and community presence without audio hardware.
+    QSettings().setValue("voice/pushToTalk", true);
+    QSettings().setValue("voice/pushToTalkKey", 42);
+    auto* ptt = panel->findChild<PushToTalk*>();
+    CHECK(ptt);
+    ptt->start(42, false);
+    auto* mute = panel->findChild<QPushButton*>("communityMute");
+    auto* deafen = panel->findChild<QPushButton*>("communityDeafen");
+    deafen->setChecked(false);
+    mute->setChecked(false);
+    CHECK(node->presence(cid, node->peerId()).muted);
+    QKeyEvent down(QEvent::KeyPress, Qt::Key_F8, Qt::NoModifier, 42, 42, 0);
+    QKeyEvent up(QEvent::KeyRelease, Qt::Key_F8, Qt::NoModifier, 42, 42, 0);
+    QApplication::sendEvent(composer, &down);
+    CHECK(ptt->held() && !node->presence(cid, node->peerId()).muted);
+    mute->setChecked(true);
+    CHECK(node->presence(cid, node->peerId()).muted);
+    QApplication::sendEvent(composer, &up);
+    QApplication::sendEvent(composer, &down);
+    CHECK(node->presence(cid, node->peerId()).muted); // Holding the key cannot undo manual mute.
+    mute->setChecked(false);
+    deafen->setChecked(true);
+    CHECK(node->presence(cid, node->peerId()).muted && node->presence(cid, node->peerId()).deafened);
+    deafen->setChecked(false);
+    CHECK(!node->presence(cid, node->peerId()).muted);
+    QApplication::sendEvent(composer, &up);
+    CHECK(node->presence(cid, node->peerId()).muted && !mute->isChecked());
+    QApplication::sendEvent(composer, &down);
     panel->findChild<QPushButton*>("communityVoice")->click();
     CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
     CHECK(!panel->findChild<QPushButton*>("communityDeafen")->isVisible());
     CHECK(!panel->findChild<QPushButton*>("communityShare")->isVisible());
+    CHECK(!ptt->held());
+    QSettings().setValue("voice/pushToTalk", false);
+    // Incoming channel messages pass through mention detection and update the app badge.
+    QTemporaryDir remoteData;
+    community::Node remote(remoteData.path());
+    CHECK(remote.start("Bob", "127.0.0.1"));
+    remote.joinCommunity(node->invite(cid));
+    CHECK(until([&] { return node->online(cid).size() == 2 && remote.online(cid).size() == 2; }));
+    QString textChannel;
+    for (const auto& channel : node->communities()[cid].channels)
+        if (channel.type == "text" && channel.name == "general") textChannel = channel.id;
+    auto* center = window.findChild<NotificationCenter*>();
+    CHECK(center && center->settings().muted);
+    UnreadBadge badge;
+    QObject::connect(center, &NotificationCenter::badgeChanged, [&](const UnreadBadge& next) { badge = next; });
+    window.hide();
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Hi @Alice"}}) == 1);
+    CHECK(until([&] { return badge.mentions == 1; }));
+    CHECK(badge.unread);
+    CHECK(transcript->toHtml().contains("#a8e6df"));
+    composer->setText("/dnd");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(!center->settings().muted && composer->text().isEmpty());
+    // Watch a remote community share and exchange ink through the actual panel wiring.
+    node->setVoice(cid, voiceChannel);
+    remote.setVoice(cid, voiceChannel, false, false, true);
+    auto* stage = panel->findChild<ScreenStage*>();
+    CHECK(stage);
+    CHECK(until([&] { return stage->drawing(remote.peerId()) != nullptr &&
+                            remote.presence(cid, node->peerId()).voiceChannel == voiceChannel; }));
+    ScreenDrawing ownerInk;
+    ScreenDrawingSession owner(remote.peerId(), remote.peerId(), &ownerInk, true);
+    QObject::connect(&owner, &ScreenDrawingSession::sendToPeer, &remote,
+        [&](const QString& target, const chat::Message& message) {
+            remote.sendPacket(cid, voiceChannel, "drawing", {{"target", target},
+                {"bytes", QString::fromLatin1(QByteArray::fromStdString(chat::encode(message)).toBase64())}});
+        });
+    QObject::connect(&remote, &community::Node::packetReceived, &owner,
+        [&](const QString&, const QString&, const QString& sender, const QString& type, const QJsonObject& data) {
+            if (type != "drawing") return;
+            auto bytes = QByteArray::fromBase64(data["bytes"].toString().toLatin1()).toStdString();
+            chat::Message message;
+            CHECK(chat::decode(bytes, message) == chat::DecodeStatus::Ok && bytes.empty());
+            owner.receive(sender, message);
+        });
+    ownerInk.permissionRequested(true);
+    stage->watchRequested(remote.peerId());
+    CHECK(until([&] { return stage->drawing(remote.peerId())->drawingAllowed(); }));
+    CHECK(stage->drawing(remote.peerId())->authorName(remote.peerId()) == "Bob");
+    chat::ScreenDraw stroke;
+    stroke.id = stroke.stroke = 1;
+    stage->drawing(remote.peerId())->segmentDrawn(stroke);
+    CHECK(until([&] { return ownerInk.segments().size() == 1; }));
+    CHECK(ownerInk.segments().first().author == node->peerId().toStdString());
+    panel->findChild<QPushButton*>("communityVoice")->click();
+    CHECK(!stage->drawing(remote.peerId()));
     online->click();
     CHECK(composer->isEnabled() == false);
     std::puts("community_ui_test: ok");

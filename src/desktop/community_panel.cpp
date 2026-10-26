@@ -1,6 +1,8 @@
 #include "desktop/community_panel.h"
 
 #include <QApplication>
+#include <QAction>
+#include <QMenu>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QClipboard>
@@ -28,6 +30,7 @@
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QScrollBar>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -45,6 +48,8 @@
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
 #include "desktop/remote_media.h"
+#include "desktop/notification_center.h"
+#include "desktop/mention_completer.h"
 #include "desktop/screen_stage.h"
 #include "desktop/share_picker.h"
 
@@ -101,7 +106,7 @@ QPixmap voiceIndicator(const QString& kind) {
 }
 } // namespace
 
-CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWidget(parent) {
+CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWidget(parent), pushToTalk_(this) {
     try {
         const auto override = qApp->property("communityDataDirectory").toString();
         const auto path = !directory.isEmpty() ? directory
@@ -114,7 +119,9 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     catch (const std::exception& error) {
         failure_ = QString::fromUtf8(error.what());
     }
+    notifications_ = new NotificationCenter(window());
     buildUi();
+    connect(&pushToTalk_, &PushToTalk::heldChanged, this, &CommunityPanel::voiceState);
     imagePool_.setMaxThreadCount(1);
     if (node_) {
         connect(node_.get(), &community::Node::changed, this, [this] {
@@ -291,6 +298,25 @@ void CommunityPanel::buildUi() {
     members_ = new QListWidget(content);
     members_->setObjectName("communityMembers");
     members_->setMinimumWidth(190);
+    members_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(members_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& position) {
+        auto* item = members_->itemAt(position);
+        if (!item || !capture_.running() || cid_ != voiceCid_)
+            return;
+        const auto peer = item->data(Qt::UserRole).toString();
+        const auto own = drawings_.find(node_->peerId());
+        if (peer == node_->peerId() || own == drawings_.end())
+            return;
+        const bool banned = own->second->isBanned(peer);
+        QMenu menu(this);
+        auto* toggle = menu.addAction(banned ? "Unban from drawing on my stream"
+                                            : "Ban from drawing on my stream");
+        if (menu.exec(members_->viewport()->mapToGlobal(position)) == toggle) {
+            const auto session = drawings_.find(node_->peerId());
+            if (session != drawings_.end())
+                session->second->setBanned(peer, !banned);
+        }
+    });
     content->addWidget(center);
     content->addWidget(members_);
     content->setStretchFactor(0, 1);
@@ -332,6 +358,7 @@ void CommunityPanel::buildUi() {
     composer_ = new QLineEdit(this);
     composer_->setObjectName("communityComposer");
     composer_->setPlaceholderText("Message this channel");
+    mentions_ = new MentionCompleter(composer_);
     send_ = button("Send", "communitySend", this);
     image_ = button("Image", "communityImage", this);
     gif_ = button("GIF", "communityGif", this);
@@ -352,6 +379,15 @@ void CommunityPanel::buildUi() {
     status_->setObjectName("communityStatus");
     status_->setWordWrap(true);
     layout->addWidget(status_);
+    notificationStatus_ = new QLabel("Notifications muted", this);
+    notificationStatus_->setObjectName("notificationsMuted");
+    notificationStatus_->setVisible(notifications_->settings().muted);
+    layout->addWidget(notificationStatus_);
+    addAction(notifications_->muteAction());
+    connect(notifications_, &NotificationCenter::settingsChanged, this,
+            [this](const NotificationSettings& settings) {
+                notificationStatus_->setVisible(settings.muted);
+            });
     status_->setTextFormat(Qt::PlainText);
     auto* network = new QNetworkAccessManager(this);
     auto* fetcher = new MediaFetcher(network, this);
@@ -417,7 +453,13 @@ void CommunityPanel::settings() {
     QSettings saved;
     QDialog dialog(this);
     dialog.setWindowTitle("Community connection & local saving");
-    auto* form = new QFormLayout(&dialog);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* scroll = new QScrollArea(&dialog);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget(scroll);
+    auto* form = new QFormLayout(content);
+    scroll->setWidget(content);
+    layout->addWidget(scroll, 1);
     auto relayAddress = saved.value("community/relay", "relay.disquisition.app").toString();
     if (relayAddress.startsWith("relay://"))
         relayAddress.remove(0, 8);
@@ -462,6 +504,36 @@ void CommunityPanel::settings() {
     output->setEnabled(voiceCid_.isEmpty());
     form->addRow("Microphone", input);
     form->addRow("Audio output", output);
+    auto* ptt = new QCheckBox("Hold a key to talk", &dialog);
+    ptt->setObjectName("communityPushToTalk");
+    ptt->setChecked(saved.value("voice/pushToTalk", false).toBool());
+    auto* pttKey = new PushToTalkKeyButton(&dialog);
+    pttKey->setObjectName("communityPushToTalkKey");
+    pttKey->setKey(saved.contains("voice/pushToTalkKey")
+                       ? std::optional<quint32>(saved.value("voice/pushToTalkKey").toUInt())
+                       : std::nullopt, saved.value("voice/pushToTalkKeyName").toString());
+    pttKey->setEnabled(ptt->isChecked());
+    connect(ptt, &QCheckBox::toggled, pttKey, &QWidget::setEnabled);
+    form->addRow(ptt, pttKey);
+    auto* pttHelp = new QLabel("Global push-to-talk needs Input Monitoring on macOS. "
+                              "Restart after granting access. On Wayland it works while the app is focused.", &dialog);
+    pttHelp->setWordWrap(true);
+    form->addRow(pttHelp);
+    auto* muted = new QCheckBox("Mute all notifications", &dialog);
+    muted->setObjectName("communityMuteNotifications");
+    muted->setChecked(notifications_->settings().muted);
+    auto* level = new QComboBox(&dialog);
+    level->addItem("All messages", int(NotifyLevel::AllMessages));
+    level->addItem("Only @mentions", int(NotifyLevel::MentionsOnly));
+    level->setCurrentIndex(level->findData(int(notifications_->settings().level)));
+    auto* suppress = new QCheckBox("Suppress @everyone and @here", &dialog);
+    suppress->setChecked(notifications_->settings().suppressEveryone);
+    auto* activity = new QCheckBox("Notify on joins and screen shares", &dialog);
+    activity->setChecked(notifications_->settings().activity);
+    form->addRow(muted);
+    form->addRow("Notify for", level);
+    form->addRow(suppress);
+    form->addRow(activity);
     auto* explanation =
         new QLabel("Community metadata is always saved. Chat history stays on this device; missed "
                    "messages are not downloaded. Disconnect to change connection settings.",
@@ -470,10 +542,12 @@ void CommunityPanel::settings() {
     form->addRow(explanation);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                          &dialog);
-    form->addRow(buttons);
+    layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         attempt([&] {
+            if (ptt->isChecked() && !pttKey->key())
+                throw std::runtime_error("Choose a push-to-talk key before enabling it.");
             const auto address = relay->text().trimmed();
             community::normalizeRelayEndpoint(address);
             bool validMaximum = false;
@@ -488,6 +562,15 @@ void CommunityPanel::settings() {
                     path->text().trimmed().toStdString(), maximum->text().trimmed().isEmpty()
                                                               ? std::nullopt
                                                               : std::optional<std::int64_t>(count));
+            saved.setValue("voice/pushToTalk", ptt->isChecked());
+            if (pttKey->key()) {
+                saved.setValue("voice/pushToTalkKey", *pttKey->key());
+                saved.setValue("voice/pushToTalkKeyName", pttKey->keyName());
+            }
+            notifications_->setSettings({muted->isChecked(), NotifyLevel(level->currentData().toInt()),
+                                         suppress->isChecked(), activity->isChecked()});
+            updatePushToTalk();
+            voiceState();
             saved.setValue("community/relay", address);
             saved.setValue("community/host", host->text().trimmed());
             saved.setValue("community/port", port->value());
@@ -503,7 +586,7 @@ void CommunityPanel::settings() {
             dialog.accept();
         });
     });
-    dialog.resize(620, 430);
+    dialog.resize(620, 600);
     dialog.exec();
 }
 
@@ -913,7 +996,7 @@ void CommunityPanel::refresh() {
         const auto presence = node_->presence(voiceCid_, node_->peerId());
         QSignalBlocker mute(mute_), deafen(deafen_);
         deafen_->setChecked(presence.deafened);
-        if (!presence.deafened)
+        if (!presence.deafened && !QSettings().value("voice/pushToTalk", false).toBool())
             mute_->setChecked(presence.muted);
     }
     for (auto* action : {invite_, manage_, send_, image_, gif_, voice_, mute_, deafen_, share_})
@@ -1048,7 +1131,22 @@ void CommunityPanel::refresh() {
             }
         }
     }
+    for (const auto& community : node_->communities()) {
+        const auto online = online_ ? node_->online(community.id) : QSet<QString>{};
+        QSet<QString> sharing;
+        for (const auto& peer : online) {
+            if (peer == node_->peerId()) continue;
+            if (node_->presence(community.id, peer).sharing) sharing.insert(peer);
+            if (previousOnline_.contains(community.id) && !previousOnline_[community.id].contains(peer))
+                notifications_->activityOccurred(memberName(community.id, peer), "joined " + community.name);
+        }
+        for (const auto& peer : sharing - previousSharing_.value(community.id))
+            notifications_->activityOccurred(memberName(community.id, peer), "started sharing in " + community.name);
+        previousOnline_[community.id] = online;
+        previousSharing_[community.id] = sharing;
+    }
     const auto model = node_->communities().value(cid_);
+    mentions_->setMembers(memberNames(cid_));
     if (!model.id.isEmpty() && !model.channels.contains(channel_)) {
         channel_.clear();
         for (const auto& item : orderedChannels(model))
@@ -1090,6 +1188,7 @@ void CommunityPanel::refresh() {
         else if (peer.admin)
             label += " · admin";
         auto* item = new QListWidgetItem(label, members_);
+        item->setData(Qt::UserRole, peer.id);
         item->setToolTip(peer.id + "\n" + peer.endpoint);
         if (!present)
             item->setForeground(QColor("#858c96"));
@@ -1121,9 +1220,12 @@ void CommunityPanel::refresh() {
         for (const auto& peer : audioPeers_ - active) {
             audio_.remove(peer);
             watchers_.remove(peer);
+            for (const auto& [_, session] : drawings_)
+                session->peerChanged(peer, false);
         }
         audioPeers_ = active;
         for (const auto& peer : streams_ - streaming) {
+            stopDrawing(peer);
             stage_->removeStream(peer);
             watching_.remove(peer);
             decoders_.erase(peer);
@@ -1132,6 +1234,11 @@ void CommunityPanel::refresh() {
         for (const auto& peer : streaming - streams_)
             stage_->addStream(peer, false, memberName(voiceCid_, peer));
         streams_ = streaming;
+        QHash<QString, QString> names;
+        for (const auto& member : node_->communities().value(voiceCid_).members)
+            names[member.id] = member.name;
+        for (const auto& [peer, session] : drawings_)
+            if (auto* drawing = stage_->drawing(peer)) drawing->setAuthorNames(names);
     }
     else
         voiceStatus_->setText("Voice disconnected");
@@ -1224,10 +1331,20 @@ void CommunityPanel::append(const QString& cid, const QString& channel, Entry en
 void CommunityPanel::showEntry(const Entry& entry) {
     const auto when = QDateTime::fromSecsSinceEpoch(entry.message.timestamp).toString("HH:mm");
     const auto body = text(entry.message.body);
+    QString html;
+    qsizetype written = 0;
+    for (const auto& mention : findMentions(body, memberNames(text(entry.message.communityId)))) {
+        if (mention.start < written) continue;
+        html += body.mid(written, mention.start - written).toHtmlEscaped() +
+                "<span style='background:#39484b;color:#a8e6df'>" +
+                body.mid(mention.start, mention.length).toHtmlEscaped() + "</span>";
+        written = mention.start + mention.length;
+    }
+    html += body.mid(written).toHtmlEscaped();
     transcript_->append(
         "<p style='margin:4px 0'><span style='color:#858c96'>" + when +
         "</span> <b style='color:#9dccca'>" + text(entry.message.sender).toHtmlEscaped() + "</b> " +
-        body.toHtmlEscaped().replace('\n', "<br>") +
+        html.replace('\n', "<br>") +
         (entry.undelivered
              ? " <span style='color:#d4ae77'>[not delivered: no peers connected]</span>"
              : "") +
@@ -1261,6 +1378,11 @@ void CommunityPanel::render() {
 void CommunityPanel::sendChat() {
     if (!online_ || composer_->text().trimmed().isEmpty())
         return;
+    if (composer_->text().trimmed() == "/dnd") {
+        notifications_->muteAction()->trigger();
+        composer_->clear();
+        return;
+    }
     attempt([&] {
         const auto body = composer_->text().trimmed();
         const auto id = freshId();
@@ -1325,6 +1447,9 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
                              const QString& type, const QJsonObject& data) {
     const auto sender = memberName(cid, peer);
     if (type == "chat") {
+        const auto body = data.value("body").toString();
+        notifications_->messageReceived(sender, body,
+            mentionOf(findMentions(body, memberNames(cid)), memberName(cid, node_->peerId())));
         if (cid == cid_ && channel == channel_ && entries_[key(cid, channel)].isEmpty()) {
             media_->clear();
             transcript_->clear();
@@ -1349,14 +1474,24 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
             return;
         const auto image = images_.add(key(cid, channel) + '/' + peer, quint32(transfer), index,
                                        count, bytes, QDateTime::currentMSecsSinceEpoch());
-        if (image && isDisplayableImage(*image))
+        if (image && isDisplayableImage(*image)) {
+            notifications_->messageReceived(sender, "sent an image", Mentioned::No);
             append(cid, channel,
                    {{QDateTime::currentSecsSinceEpoch(), sender.toStdString(), "", "mint"},
                     *image,
                     false},
                    false);
+        }
     }
-    else if (type == "watch") {
+    else if (type == "drawing" && cid == voiceCid_ && channel == voiceChannel_) {
+        auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1()).toStdString();
+        chat::Message payload;
+        if (chat::decode(bytes, payload) != chat::DecodeStatus::Ok || !bytes.empty() || payload.fields.empty())
+            return;
+        const auto session = drawings_.find(QString::fromStdString(payload.fields[0]));
+        if (session != drawings_.end()) session->second->receive(peer, payload);
+    }
+    else if (type == "watch" && cid == voiceCid_ && channel == voiceChannel_) {
         if (data.value("enabled").toBool() && capture_.running())
             watchers_.insert(peer);
         else
@@ -1406,6 +1541,7 @@ void CommunityPanel::joinVoice() {
         }
         voiceCid_ = cid;
         voiceChannel_ = selectedChannel;
+        updatePushToTalk();
         voiceState();
         refresh();
     });
@@ -1414,10 +1550,12 @@ void CommunityPanel::joinVoice() {
 void CommunityPanel::voiceState() {
     if (voiceCid_.isEmpty() || !node_)
         return;
-    audio_.setMuted(mute_->isChecked() || deafen_->isChecked());
+    const bool silent = mute_->isChecked() || deafen_->isChecked() ||
+        (QSettings().value("voice/pushToTalk", false).toBool() && !pushToTalk_.held());
+    audio_.setMuted(silent);
     audio_.setDeafened(deafen_->isChecked());
     attempt([&] {
-        node_->setVoice(voiceCid_, voiceChannel_, mute_->isChecked() || deafen_->isChecked(),
+        node_->setVoice(voiceCid_, voiceChannel_, silent,
                         deafen_->isChecked(), capture_.running());
     });
     refresh();
@@ -1425,7 +1563,11 @@ void CommunityPanel::voiceState() {
 
 void CommunityPanel::leaveVoice() {
     const auto previous = voiceCid_;
+    presenterOverlay_.reset();
+    for (const auto& [_, session] : drawings_) session->stop();
+    drawings_.clear();
     voiceCid_.clear();
+    pushToTalk_.stop();
     voiceChannel_.clear();
     stopSharing();
     if (node_ && online_ && !previous.isEmpty())
@@ -1467,11 +1609,15 @@ void CommunityPanel::share() {
         return;
     }
     stage_->addStream(node_->peerId(), true, name_->text().trimmed());
+    startDrawing(node_->peerId(), true);
+    presenterOverlay_ = std::make_unique<PresenterOverlay>(*dialog.chosen(), stage_->drawing(node_->peerId()), this);
     voiceState();
 }
 
 void CommunityPanel::stopSharing() {
     const bool wasSharing = capture_.running();
+    presenterOverlay_.reset();
+    if (node_) stopDrawing(node_->peerId());
     capture_.stop();
     watchers_.clear();
     if (node_) {
@@ -1488,9 +1634,12 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
     attempt([&] {
         node_->sendPacket(voiceCid_, voiceChannel_, "watch",
                           {{"target", peer}, {"enabled", enabled}});
-        if (enabled)
+        if (enabled) {
             watching_.insert(peer);
+            startDrawing(peer, false);
+        }
         else {
+            stopDrawing(peer);
             watching_.remove(peer);
             decoders_.erase(peer);
         }
@@ -1530,4 +1679,52 @@ bool CommunityPanel::eventFilter(QObject* watched, QEvent* event) {
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+QStringList CommunityPanel::memberNames(const QString& cid) const {
+    QStringList result;
+    if (node_)
+        for (const auto& member : node_->communities().value(cid).members)
+            result.append(member.name);
+    return result;
+}
+
+void CommunityPanel::updatePushToTalk() {
+    QSettings settings;
+    if (!voiceCid_.isEmpty() && settings.value("voice/pushToTalk", false).toBool() &&
+        settings.contains("voice/pushToTalkKey"))
+        pushToTalk_.start(settings.value("voice/pushToTalkKey").toUInt());
+    else
+        pushToTalk_.stop();
+}
+
+void CommunityPanel::startDrawing(const QString& peer, bool owner) {
+    stopDrawing(peer);
+    auto* drawing = stage_->drawing(peer);
+    if (!drawing) return;
+    auto session = std::make_unique<ScreenDrawingSession>(node_->peerId(), peer, drawing, owner);
+    QHash<QString, QString> names;
+    for (const auto& member : node_->communities().value(voiceCid_).members)
+        names[member.id] = member.name;
+    drawing->setAuthorNames(names);
+    const auto cid = voiceCid_, channel = voiceChannel_;
+    connect(session.get(), &ScreenDrawingSession::sendToPeer, this,
+        [this, cid, channel](const QString& target, const chat::Message& payload) {
+            if (!online_) return;
+            attempt([&] {
+                node_->sendPacket(cid, channel, "drawing",
+                    {{"target", target}, {"bytes", QString::fromLatin1(
+                        QByteArray::fromStdString(chat::encode(payload)).toBase64())}});
+            });
+        });
+    auto* active = session.get();
+    drawings_[peer] = std::move(session);
+    if (!owner) active->start();
+}
+
+void CommunityPanel::stopDrawing(const QString& peer) {
+    const auto session = drawings_.find(peer);
+    if (session == drawings_.end()) return;
+    session->second->stop();
+    drawings_.erase(session);
 }

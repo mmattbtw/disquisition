@@ -28,6 +28,6 @@
         </dict>
     </array>
     <key>NSMicrophoneUsageDescription</key>
-    <string>disquisition uses your microphone when you join the group voice call.</string>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME} uses your microphone when you join the group voice call.</string>
 </dict>
 </plist>

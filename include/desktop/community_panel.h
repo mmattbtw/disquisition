@@ -9,6 +9,8 @@
 #include "community/node.h"
 #include "desktop/image_transfer.h"
 #include "desktop/relay_audio.h"
+#include "desktop/push_to_talk.h"
+#include "desktop/screen_drawing_session.h"
 #include "desktop/screen_capture.h"
 
 class QTreeWidget;
@@ -22,6 +24,8 @@ class ChatMedia;
 class GifPicker;
 class GifSearch;
 class ScreenStage;
+class NotificationCenter;
+class MentionCompleter;
 
 class CommunityPanel final : public QWidget {
     Q_OBJECT
@@ -68,6 +72,10 @@ private:
     void joinVoice();
     void leaveVoice();
     void voiceState();
+    void updatePushToTalk();
+    void startDrawing(const QString& peer, bool owner);
+    void stopDrawing(const QString& peer);
+    QStringList memberNames(const QString& cid) const;
     void share();
     void stopSharing();
     void watch(const QString& peer, bool enabled);
@@ -119,6 +127,13 @@ private:
     GifPicker* gifPicker_ = nullptr;
     GifSearch* gifSearch_ = nullptr;
     ScreenStage* stage_ = nullptr;
+    NotificationCenter* notifications_ = nullptr;
+    MentionCompleter* mentions_ = nullptr;
+    QLabel* notificationStatus_ = nullptr;
+    QMap<QString, QSet<QString>> previousOnline_, previousSharing_;
+    PushToTalk pushToTalk_;
+    std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawings_;
+    std::unique_ptr<PresenterOverlay> presenterOverlay_;
     RelayAudio audio_;
     ScreenCapture capture_;
     ImageAssembler images_;

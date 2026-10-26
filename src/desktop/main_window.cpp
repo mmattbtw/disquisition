@@ -4,9 +4,11 @@
 #include <QMenuBar>
 
 #include "desktop/community_panel.h"
+#include "desktop/app_identity.h"
+#include "desktop/notification_center.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle("disquisition");
+    setWindowTitle(QString::fromUtf8(disquisition::kAppName));
     resize(1080, 740);
     auto* communities = new CommunityPanel(this);
     setCentralWidget(communities);
@@ -15,15 +17,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     preferences->setMenuRole(QAction::PreferencesRole);
     preferences->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     connect(preferences, &QAction::triggered, communities, &CommunityPanel::showSettings);
+    auto* notifications = findChild<NotificationCenter*>();
+    appMenu->addAction(notifications->muteAction());
+    connect(notifications, &NotificationCenter::badgeChanged, this, [this](const UnreadBadge& badge) {
+        setWindowTitle(badgedTitle(QString::fromUtf8(disquisition::kAppName), badge));
+    });
     setStyleSheet(R"(
-        QWidget { background: #282c34; color: #c5c8c6; font-family: Menlo, Monaco, "Courier New"; font-size: 14px; }
-        QLabel#title { background: #9dccca; color: #20262c; font-size: 15px; font-weight: 700; padding: 3px 5px; }
+        QWidget { background: #282c34; color: #c5c8c6; font-family: Inter, "Segoe UI", "Helvetica Neue", sans-serif; font-size: 14px; }
+        QLabel#title { background: #9dccca; color: #20262c; font-family: "Cal Sans", Inter, sans-serif; font-size: 17px; font-weight: 400; padding: 3px 5px; }
         QLineEdit, QSpinBox, QComboBox, QTextBrowser, QListWidget, QTreeWidget { background: #282c34; color: #c5c8c6; border: 1px solid #545b66; border-radius: 0; padding: 5px; selection-background-color: #9dccca; selection-color: #20262c; }
         QLineEdit[invalid="true"] { background: #3b2529; color: #ffb3b3; border: 2px solid #e05252; }
         QComboBox QAbstractItemView { background: #282c34; color: #c5c8c6; selection-background-color: #9dccca; selection-color: #20262c; }
-        QTextBrowser { border: 0; padding: 0; }
+        QTextBrowser { border: 0; padding: 0; font-weight: 600; }
         QListWidget { border-left: 1px solid #545b66; border-top: 0; border-right: 0; border-bottom: 0; }
-        QPushButton { background: #333842; color: #d5d7d6; border: 1px solid #777f89; border-radius: 0; padding: 6px 12px; }
+        QPushButton { background: #333842; color: #d5d7d6; border: 1px solid #777f89; border-radius: 0; padding: 6px 12px; font-family: "Cal Sans", Inter, sans-serif; font-size: 15px; font-weight: 400; }
         QPushButton:hover { background: #9dccca; color: #20262c; }
         QPushButton#primary { background: #9dccca; color: #20262c; border-color: #9dccca; }
         QPushButton:checked { background: #e05252; color: #fff3f3; border-color: #ff8a8a; }
@@ -40,9 +47,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QSplitter::handle { width: 1px; background: #545b66; }
         QSplitter::handle:vertical { height: 1px; }
         QFrame#streamTile { border: 1px solid #545b66; }
-        QLabel#streamName { font-weight: 700; }
+        QLabel#streamName { font-family: "Cal Sans", Inter, sans-serif; font-size: 15px; }
         QLabel#live { background: #e05252; color: #fff3f3; font-size: 11px; font-weight: 700; padding: 1px 5px; }
-        QLabel#streamStats { color: #8a9099; font-size: 12px; }
+        QLabel#streamStats { color: #8a9099; font-family: "JetBrains Mono", monospace; font-size: 12px; }
         QScrollBar:vertical { background: #282c34; width: 10px; }
         QScrollBar::handle:vertical { background: #68717c; min-height: 24px; }
         QFrame#gifPicker { border: 1px solid #777f89; }

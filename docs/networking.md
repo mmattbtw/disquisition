@@ -98,8 +98,12 @@ Direct voice uses baresip SIP calls between peers. Relayed voice and all screen
 shares travel through the chat server. See the [desktop guide](desktop.md) for
 voice ports, direct fallback, screen sharing and permissions.
 
-Rebuild and restart both `server` and `relay` when updating desktop media
-support. Older servers reject voice messages and disconnect clients that start
-a screen share.
+Older servers reject voice messages and disconnect clients that start a screen
+share, so those video and voice updates require rebuilding `server` and `relay`.
+Screen drawing uses the peer mesh instead. Its permissions and history live in
+the presenting desktop client. The relay forwards a generic `PeerData` message
+with a target, channel name and opaque payload, stamping the sender from the
+established link. It does not interpret drawings or store drawing history.
+Drawing requires updated desktop clients and relays, but no server changes.
 
 For flags and defaults, see the [command-line reference](command-line.md).

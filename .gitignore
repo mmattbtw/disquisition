@@ -2,3 +2,12 @@
 /.cache/
 .cloudflare/
 *.db*
+
+# macOS metadata
+.DS_Store
+
+# Wii U build output
+/src/wiiu/build/
+/src/wiiu/*.elf
+/src/wiiu/*.rpx
+/src/wiiu/*.wuhb

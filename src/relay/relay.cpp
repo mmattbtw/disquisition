@@ -510,6 +510,13 @@ void Relay::handleClientMessage(User& user, const Message& message) {
             }
             break;
 
+        case MsgType::PeerData: {
+            PeerData data;
+            if (parsePeerData(message, data))
+                user.peers.sendData(data.target, data.channel, data.data);
+            break;
+        }
+
         case MsgType::PeerChat: {
             // The mesh stamps the user's own name on outgoing chat.
             ChatPayload payload;
@@ -543,10 +550,15 @@ void Relay::handlePeerEvent(User& user, const PeerNetwork::Event& event) {
         case PeerNetwork::Event::Kind::Image:
             sendToClient(user, peerImageMessage(event.image));
             break;
+        case PeerNetwork::Event::Kind::Data:
+            sendToClient(user, peerDataMessage(event.data));
+            break;
         case PeerNetwork::Event::Kind::Join:
+            sendToClient(user, Message{MsgType::PeerLink, {event.name, "1"}});
             LOG_INFO("{}: mesh link up with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Leave:
+            sendToClient(user, Message{MsgType::PeerLink, {event.name, "0"}});
             LOG_INFO("{}: mesh link down with {}", user.requestedName, event.name);
             break;
         case PeerNetwork::Event::Kind::Note:

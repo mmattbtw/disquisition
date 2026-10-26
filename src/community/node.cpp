@@ -947,6 +947,8 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
                QByteArray::fromBase64(data.value("bytes").toString().toLatin1()).size() == 640;
     if (type == "watch")
         return data.value("enabled").isBool() && target == peerId();
+    if (type == "drawing")
+        return target == peerId() && canonical(data).size() <= 24 * 1024;
     if (type == "screen")
         return remote.sharing && canonical(data).size() <= 24 * 1024;
     return false;

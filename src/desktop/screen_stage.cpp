@@ -11,7 +11,7 @@
 
 #include <cmath>
 
-StreamView::StreamView(QWidget* parent) : QWidget(parent) {
+StreamView::StreamView(QWidget* parent) : DrawingCanvas(parent) {
     setMinimumSize(160, 90);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
@@ -26,6 +26,14 @@ void StreamView::clear() {
     update();
 }
 
+QRectF StreamView::drawingRect() const {
+    if (image_.isNull())
+        return {};
+    const QSize fitted = image_.size().scaled(size(), Qt::KeepAspectRatio);
+    return QRectF(QPointF((width() - fitted.width()) / 2.0, (height() - fitted.height()) / 2.0),
+                  fitted);
+}
+
 void StreamView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), QColor("#16181d"));
@@ -35,15 +43,15 @@ void StreamView::paintEvent(QPaintEvent*) {
         return;
     }
     // Drawing in logical pixels lets Qt paint at full device resolution.
-    const QSize fitted = image_.size().scaled(size(), Qt::KeepAspectRatio);
-    const QRect target(QPoint((width() - fitted.width()) / 2, (height() - fitted.height()) / 2),
-                       fitted);
+    const QRectF target = drawingRect();
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.drawImage(target, image_);
+    paintDrawing(painter);
 }
 
 void StreamView::mouseDoubleClickEvent(QMouseEvent*) {
-    emit doubleClicked();
+    if (!drawing() || !drawing()->penActive())
+        emit doubleClicked();
 }
 
 StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QString& label)
@@ -62,9 +70,9 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     // Lets the statistics give way first when the tile is narrow.
     stats_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     stats_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    focusButton_ = new QPushButton("focus", this);
-    fullscreenButton_ = new QPushButton("fullscreen", this);
-    stopButton_ = new QPushButton("stop watching", this);
+    focusButton_ = new QPushButton("Focus", this);
+    fullscreenButton_ = new QPushButton("Fullscreen", this);
+    stopButton_ = new QPushButton("Stop Watching", this);
 
     auto* header = new QHBoxLayout;
     header->setSpacing(6);
@@ -79,7 +87,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     auto* inviteText = new QLabel(name + " is sharing their screen", invitation_);
     inviteText->setAlignment(Qt::AlignCenter);
     inviteText->setWordWrap(true);
-    auto* watchButton = new QPushButton("watch stream", invitation_);
+    auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
     auto* invitationLayout = new QVBoxLayout(invitation_);
     invitationLayout->addStretch();
@@ -88,6 +96,9 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     invitationLayout->addStretch();
 
     view_ = new StreamView(this);
+    drawing_ = new ScreenDrawing(this);
+    view_->setDrawing(drawing_);
+    drawingControls_ = new DrawingControls(drawing_, own, this);
     body_ = new QStackedWidget(this);
     body_->addWidget(invitation_);
     body_->addWidget(view_);
@@ -96,6 +107,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(6);
     layout->addLayout(header);
+    layout->addWidget(drawingControls_);
     layout->addWidget(body_, 1);
 
     connect(watchButton, &QPushButton::clicked, this, &StreamTile::watchClicked);
@@ -111,6 +123,9 @@ void StreamTile::setWatching(bool watching) {
     body_->setCurrentWidget(watching ? static_cast<QWidget*>(view_) : invitation_);
     fullscreenButton_->setVisible(watching);
     stopButton_->setVisible(watching && !own_);
+    drawingControls_->setVisible(watching);
+    if (!watching)
+        drawing_->setState(false, 0);
     view_->clear();
     stats_->clear();
     statsClock_.invalidate();
@@ -120,7 +135,7 @@ void StreamTile::setWatching(bool watching) {
 
 void StreamTile::setFocusState(bool available, bool focused) {
     focusButton_->setVisible(available);
-    focusButton_->setText(focused ? "show all" : "focus");
+    focusButton_->setText(focused ? "Show All" : "Focus");
 }
 
 void StreamTile::showFrame(const QImage& image, qsizetype encodedBytes) {
@@ -152,7 +167,30 @@ void StreamTile::showFrame(const QImage& image, qsizetype encodedBytes) {
 
 ScreenStage::ScreenStage(QWidget* parent) : QWidget(parent) {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // One shortcut covers tiles, fullscreen windows and the floating toolbar,
+    // including when the chat composer held focus before pen mode started.
+    escape_ = new QShortcut(Qt::Key_Escape, this);
+    escape_->setContext(Qt::ApplicationShortcut);
+    escape_->setEnabled(false);
+    connect(escape_, &QShortcut::activated, this, [this] {
+        bool hadPen = false;
+        for (StreamTile* tile : std::as_const(tiles_)) {
+            if (tile->drawing()->penActive()) {
+                hadPen = true;
+                tile->drawing()->setPenActive(false);
+            }
+        }
+        if (!hadPen)
+            exitFullscreen();
+    });
     relayout();
+}
+
+void ScreenStage::refreshEscapeShortcut() {
+    bool active = !fullscreen_.isNull();
+    for (StreamTile* tile : std::as_const(tiles_))
+        active |= tile->drawing()->penActive();
+    escape_->setEnabled(active);
 }
 
 void ScreenStage::addStream(const QString& name, bool own, const QString& label) {
@@ -160,6 +198,7 @@ void ScreenStage::addStream(const QString& name, bool own, const QString& label)
         return;
     }
     auto* tile = new StreamTile(name, own, this, label);
+    connect(tile->drawing(), &ScreenDrawing::changed, this, &ScreenStage::refreshEscapeShortcut);
     connect(tile, &StreamTile::watchClicked, this, [this, name] { emit watchRequested(name); });
     connect(tile, &StreamTile::stopWatchingClicked, this,
             [this, name] { emit stopWatchingRequested(name); });
@@ -184,6 +223,7 @@ void ScreenStage::removeStream(const QString& name) {
         exitFullscreen();
     }
     tiles_.removeOne(tile);
+    refreshEscapeShortcut();
     tile->hide();
     tile->deleteLater();
     relayout();
@@ -222,6 +262,11 @@ StreamTile* ScreenStage::find(const QString& name) const {
     return nullptr;
 }
 
+ScreenDrawing* ScreenStage::drawing(const QString& name) const {
+    StreamTile* tile = find(name);
+    return tile ? tile->drawing() : nullptr;
+}
+
 void ScreenStage::toggleFocus(const QString& name) {
     focused_ = focused_ == name ? QString() : name;
     relayout();
@@ -235,24 +280,37 @@ void ScreenStage::toggleFullscreen(const QString& name) {
         return;
     }
     // A child window, so it closes along with the app.
-    fullscreen_ = new StreamView(this);
-    fullscreen_->setWindowFlag(Qt::Window);
-    fullscreen_->setAttribute(Qt::WA_DeleteOnClose);
-    fullscreen_->setWindowTitle(name + "'s screen");
+    auto* window = new QWidget(this, Qt::Window);
+    window->setAttribute(Qt::WA_DeleteOnClose);
+    window->setWindowTitle(name + "'s screen");
+    auto* layout = new QVBoxLayout(window);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(new DrawingControls(tile->drawing(), tile->own(), window));
+    fullscreen_ = new StreamView(window);
+    fullscreen_->setDrawing(tile->drawing());
+    layout->addWidget(fullscreen_, 1);
     fullscreen_->setImage(tile->image());
     fullscreenName_ = name;
     connect(fullscreen_, &StreamView::doubleClicked, this, &ScreenStage::exitFullscreen);
-    auto* escape = new QShortcut(Qt::Key_Escape, fullscreen_);
-    connect(escape, &QShortcut::activated, this, &ScreenStage::exitFullscreen);
-    fullscreen_->showFullScreen();
-    fullscreen_->activateWindow();
+    connect(fullscreen_, &QObject::destroyed, this, [this, view = fullscreen_.data()] {
+        if (fullscreen_.isNull() || fullscreen_ == view) {
+            fullscreen_.clear();
+            fullscreenName_.clear();
+        }
+        refreshEscapeShortcut();
+    });
+    refreshEscapeShortcut();
+    window->showFullScreen();
+    window->activateWindow();
 }
 
 void ScreenStage::exitFullscreen() {
     if (fullscreen_) {
-        fullscreen_->close();
+        fullscreen_->window()->close();
+        fullscreen_.clear();
     }
     fullscreenName_.clear();
+    refreshEscapeShortcut();
 }
 
 void ScreenStage::relayout() {

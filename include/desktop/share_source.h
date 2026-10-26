@@ -2,9 +2,9 @@
 
 #include <QList>
 #include <QPointer>
+#include <QRect>
 #include <QScreen>
 #include <QString>
-
 #include <functional>
 
 #if !defined(Q_OS_MACOS)
@@ -23,6 +23,7 @@ struct ShareSource {
 #else
     QPointer<QScreen> screen;
     QCapturableWindow window;
+    quintptr nativeId = 0; // HWND or X11 window, when its title identifies it uniquely
 #endif
 };
 
@@ -30,3 +31,8 @@ struct ShareSource {
 // windows. `done` runs on the UI thread: straight away, or on macOS, where
 // listing is asynchronous, after this returns.
 void listShareSources(std::function<void(QList<ShareSource>)> done);
+
+// In Qt desktop coordinates. Empty for a hidden/closed window or a compositor
+// that does not expose its position, such as Wayland.
+QRect shareSourceGeometry(const ShareSource& source);
+bool shareSourceSupportsOverlay(const ShareSource& source);
