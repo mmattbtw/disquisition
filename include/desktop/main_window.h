@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
 #include <QSet>
@@ -25,6 +26,9 @@ class ChatMedia;
 class GifPicker;
 class GifSearch;
 class MediaFetcher;
+class MentionCompleter;
+class NotificationCenter;
+struct NotificationSettings;
 class QLabel;
 class QComboBox;
 class QLineEdit;
@@ -79,6 +83,9 @@ private:
     void handlePeerMessage(QTcpSocket* socket, const chat::Message& message);
     void sendFrame(QTcpSocket* socket, const chat::Message& message);
     void sendVoiceState();
+    void receiveChat(const chat::Message& message);
+    QStringList memberNames() const;
+    void showNotificationSettings(const NotificationSettings& settings);
     void appendChat(const QString& sender, const QString& body,
                     const QString& messageColor = "mint", bool system = false,
                     qint64 timestamp = -1);
@@ -142,7 +149,10 @@ private:
     GifSearch* gifSearch_ = nullptr;
     GifPicker* gifPicker_ = nullptr;
     QLabel* connectionLabel_ = nullptr;
+    QLabel* notificationsLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
+    NotificationCenter* notifications_ = nullptr;
+    MentionCompleter* mentionCompleter_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
     ScreenStage* stage_ = nullptr;
 
@@ -172,6 +182,7 @@ private:
     bool resumeDeafened_ = false;
     bool resumeMutedBeforeDeafen_ = false;
     bool awaitingLogin_ = false;
+    QElapsedTimer signedIn_;
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
     QString messageColor_;

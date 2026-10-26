@@ -106,7 +106,8 @@ if(BUILD_DESKTOP_APP)
   if(APPLE)
     enable_language(OBJCXX)
   endif()
-  find_package(Qt6 6.6 COMPONENTS Widgets Network Multimedia QUIET)
+  # Linux desktop notifications go over D-Bus when Qt has it.
+  find_package(Qt6 6.6 COMPONENTS Widgets Network Multimedia OPTIONAL_COMPONENTS DBus QUIET)
   # Screen sharing encodes and decodes H.264 with FFmpeg.
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
@@ -124,6 +125,17 @@ if(BUILD_DESKTOP_APP)
       src/desktop/remote_media.cpp)
     set_target_properties(desktop_media PROPERTIES AUTOMOC ON)
     target_link_libraries(desktop_media PUBLIC chat_protocol Qt6::Gui Qt6::Network)
+
+    # Kept apart from the widgets so it can be tested without a display.
+    add_library(desktop_notifications STATIC
+      include/desktop/mentions.h
+      include/desktop/notification_rules.h
+      include/desktop/unread_badge.h
+      src/desktop/mentions.cpp
+      src/desktop/notification_rules.cpp
+      src/desktop/unread_badge.cpp)
+    target_include_directories(desktop_notifications PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_notifications PUBLIC Qt6::Gui)
 
     add_library(desktop_screen STATIC
       include/desktop/screen_drawing.h
@@ -151,8 +163,11 @@ if(BUILD_DESKTOP_APP)
     add_executable(disquisition-desktop MACOSX_BUNDLE
       include/desktop/audio_permission.h
       include/desktop/chat_media.h
+      include/desktop/desktop_notifier.h
       include/desktop/gif_picker.h
       include/desktop/main_window.h
+      include/desktop/mention_completer.h
+      include/desktop/notification_center.h
       include/desktop/relay_audio.h
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
@@ -160,9 +175,12 @@ if(BUILD_DESKTOP_APP)
       include/desktop/voice_engine.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
+      src/desktop/desktop_notifier.cpp
       src/desktop/gif_picker.cpp
       src/desktop/main.cpp
       src/desktop/main_window.cpp
+      src/desktop/mention_completer.cpp
+      src/desktop/notification_center.cpp
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
@@ -172,7 +190,7 @@ if(BUILD_DESKTOP_APP)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages desktop_media desktop_screen
+      chat_protocol chat_recent_messages desktop_media desktop_notifications desktop_screen
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -184,6 +202,24 @@ if(BUILD_DESKTOP_APP)
         resources/fonts/Inter-Bold.ttf
         resources/fonts/CalSans-Regular.ttf
         resources/fonts/JetBrainsMono-Regular.ttf)
+    if(NOT APPLE)
+      # The window and tray icon. The macOS bundle has its own.
+      qt_add_resources(disquisition-desktop app_icon
+        PREFIX /
+        BASE resources/macos
+        FILES resources/macos/disquisition.png)
+    endif()
+    if(WIN32)
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/windows_notifications.h src/desktop/windows_notifications.cpp)
+      target_link_libraries(disquisition-desktop PRIVATE runtimeobject)
+    endif()
+    if(UNIX AND NOT APPLE AND TARGET Qt6::DBus)
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/freedesktop_notifications.h src/desktop/freedesktop_notifications.cpp)
+      target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_DBUS_NOTIFICATIONS)
+      target_link_libraries(disquisition-desktop PRIVATE Qt6::DBus)
+    endif()
     set(DISQUISITION_GIPHY_API_KEY "" CACHE STRING "Default GIPHY API key for the GIF picker")
     set(DISQUISITION_KLIPY_API_KEY "" CACHE STRING "Default KLIPY API key for the GIF picker")
     target_compile_definitions(disquisition-desktop PRIVATE
@@ -202,6 +238,10 @@ if(BUILD_DESKTOP_APP)
       set_source_files_properties(
         src/desktop/mac_screen_capture.mm src/desktop/mac_drawing_panel.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+      target_sources(disquisition-desktop PRIVATE
+        include/desktop/mac_notifications.h src/desktop/mac_notifications.mm)
+      set_source_files_properties(src/desktop/mac_notifications.mm
+        PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
       find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
@@ -209,9 +249,11 @@ if(BUILD_DESKTOP_APP)
       find_library(SCREENCAPTUREKIT_FRAMEWORK ScreenCaptureKit REQUIRED)
       find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
       find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
+      find_library(USERNOTIFICATIONS_FRAMEWORK UserNotifications REQUIRED)
       target_link_libraries(disquisition-desktop PRIVATE
-        ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK}
-        ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
+        ${APPKIT_FRAMEWORK} ${AVFOUNDATION_FRAMEWORK} ${COREAUDIO_FRAMEWORK}
+        ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK}
+        ${COREVIDEO_FRAMEWORK} ${USERNOTIFICATIONS_FRAMEWORK})
       target_link_libraries(desktop_screen PRIVATE
         ${APPKIT_FRAMEWORK} ${COREGRAPHICS_FRAMEWORK} ${SCREENCAPTUREKIT_FRAMEWORK} ${COREMEDIA_FRAMEWORK} ${COREVIDEO_FRAMEWORK})
       set_target_properties(disquisition-desktop PROPERTIES
@@ -328,6 +370,12 @@ if(BUILD_TESTING AND TARGET desktop_media)
   target_link_libraries(desktop_media_test PRIVATE desktop_media)
   add_test(NAME desktop_media_test COMMAND desktop_media_test)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_notifications)
+  add_executable(desktop_notifications_test test/desktop_notifications_test.cpp)
+  target_link_libraries(desktop_notifications_test PRIVATE desktop_notifications)
+  add_test(NAME desktop_notifications_test COMMAND desktop_notifications_test)
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen)
