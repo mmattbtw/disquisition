@@ -21,7 +21,7 @@ jobs:
           - os: ubuntu-latest
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libncurses-dev libsqlite3-dev
+              sudo apt-get install -y libsqlite3-dev
           - os: macos-latest
             deps: ""
     runs-on: ${{ matrix.os }}
@@ -58,7 +58,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libncurses-dev libsqlite3-dev
+          sudo apt-get install -y libsqlite3-dev
 
       - name: Configure
         run: >
