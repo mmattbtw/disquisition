@@ -78,6 +78,10 @@ if(BUILD_TESTING)
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/app_identity_test.cmake")
   add_test(NAME macos_dmg_retry_test
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_dmg_retry_test.sh")
+  if(UNIX)
+    add_test(NAME hdiutil_retry_test
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/test/hdiutil_retry_test.sh")
+  endif()
   add_test(NAME macos_codesign_test
     COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_codesign_test.cmake")
   add_executable(community_model_test test/community_model_test.cpp)
