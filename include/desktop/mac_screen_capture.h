@@ -27,3 +27,4 @@ private:
 // Lists displays and other applications' windows. `done` runs on a
 // ScreenCaptureKit thread, with an empty list if listing fails.
 void listMacShareSources(std::function<void(QList<ShareSource>)> done);
+QRect macShareSourceGeometry(const ShareSource& source);

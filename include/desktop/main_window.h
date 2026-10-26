@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
 #include <QMap>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QThreadPool>
@@ -15,8 +17,10 @@
 #include "common/protocol.h"
 #include "common/recent_messages.h"
 #include "desktop/image_transfer.h"
+#include "desktop/push_to_talk.h"
 #include "desktop/relay_audio.h"
 #include "desktop/screen_capture.h"
+#include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
 #include "desktop/voice_engine.h"
 
@@ -26,6 +30,9 @@ class GifSearch;
 class MediaFetcher;
 class PenguinOverlay;
 class QAction;
+class MentionCompleter;
+class NotificationCenter;
+struct NotificationSettings;
 class QLabel;
 class QComboBox;
 class QLineEdit;
@@ -60,7 +67,6 @@ private:
         bool muted = false;
         bool deafened = false;
         bool sharingScreen = false;
-        qint64 lastAudioMs = 0;
     };
 
     void buildUi();
@@ -82,6 +88,9 @@ private:
     void sendVoiceState();
     void publishSprite(bool sendReset = false);
     void receiveSprite(const chat::Message& message);
+    void receiveChat(const chat::Message& message);
+    QStringList memberNames() const;
+    void showNotificationSettings(const NotificationSettings& settings);
     void appendChat(const QString& sender, const QString& body,
                     const QString& messageColor = "mint", bool system = false,
                     qint64 timestamp = -1);
@@ -99,11 +108,14 @@ private:
     void openSavedMessages();
     void recordChat(const chat::RecentMessage& message);
     void refreshMembers();
+    void showMemberMenu(const QPoint& position);
     void refreshAudioDevices();
     void startJoining();
     void joinVoice();
     void leaveVoice();
     void restoreVoiceState();
+    void applyMicState();
+    void updatePushToTalk();
     void showPreferences();
     void startTransport(bool relay);
     void handleTransportClosed();
@@ -118,6 +130,9 @@ private:
     void stopWatchingStream(const QString& name);
     void endRemoteStream(const QString& name);
     void endRemoteStreams();
+    void startDrawingSession(const QString& sharer, bool owner);
+    void receivePeerData(const chat::Message& message, const QString& linkedPeer = {});
+    void drawingPeerChanged(const QString& peer, bool connected);
 
     QLineEdit* name_ = nullptr;
     QComboBox* inputDevice_ = nullptr;
@@ -141,7 +156,10 @@ private:
     GifSearch* gifSearch_ = nullptr;
     GifPicker* gifPicker_ = nullptr;
     QLabel* connectionLabel_ = nullptr;
+    QLabel* notificationsLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
+    NotificationCenter* notifications_ = nullptr;
+    MentionCompleter* mentionCompleter_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
     ScreenStage* stage_ = nullptr;
     PenguinOverlay* penguins_ = nullptr;
@@ -160,12 +178,12 @@ private:
     QHash<QTcpSocket*, QByteArray> peerBuffers_;
     QHash<QString, Peer> peers_;
     QString myName_;
-    QString serverHost_ = "relay.mmatt.net";
+    QString serverHost_ = "server.disquisition.app";
     quint16 serverPort_ = 9000;
     QString advertiseHost_;
     bool advertiseLocal_ = false;
     quint16 preferredVoicePort_ = 5060;
-    QString relayHost_ = "relay.mmatt.net";
+    QString relayHost_ = "relay.disquisition.app";
     quint16 relayPort_ = 3333;
     bool leakMyIp_ = false;
     bool usingRelay_ = false;
@@ -178,6 +196,7 @@ private:
     bool resumeDeafened_ = false;
     bool resumeMutedBeforeDeafen_ = false;
     bool awaitingLogin_ = false;
+    QElapsedTimer signedIn_;
     quint16 activeVoicePort_ = 0;
     bool voiceWanted_ = false;
     QString messageColor_;
@@ -189,9 +208,14 @@ private:
     QString klipyCustomerId_;
     bool showLinkedMedia_ = true;
     bool localSpeaking_ = false;
+    bool serverSpeaking_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
+    bool pushToTalkEnabled_ = false;
+    std::optional<quint32> pushToTalkKey_;
+    QString pushToTalkKeyName_;
+    PushToTalk pushToTalk_;
     VoiceEngine voice_;
     RelayAudio relayAudio_;
     // Screen frames travel through the server, which forwards each share
@@ -199,12 +223,15 @@ private:
     // its tile on the stage.
     ScreenCapture screenCapture_;
     bool sharingScreen_ = false;
+    std::unique_ptr<PresenterOverlay> presenterOverlay_;
+    std::optional<ShareSource> sharedSource_;
+    std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawingSessions_;
+    QSet<QString> drawingBans_;
     std::unique_ptr<ScreenStreamDecoder> ownStreamDecoder_;
     bool screenFramesSeen_ = false;
     quint64 screenShareGeneration_ = 0;
     ScreenFrameAssembler screenAssembler_;
     std::map<QString, ScreenStreamDecoder> watchedStreams_;
-    QTimer speakingExpiry_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
     QTimer loginTimer_;

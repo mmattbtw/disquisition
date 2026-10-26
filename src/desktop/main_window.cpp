@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHostAddress>
+#include <QIcon>
 #include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
@@ -25,10 +26,13 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QMediaDevices>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QNetworkInterface>
+#include <QPainter>
+#include <QPixmap>
 #include <QPointer>
 #include <QDir>
 #include <QPushButton>
@@ -40,7 +44,9 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStyle>
+#include <QTextBlock>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUdpSocket>
 #include <QUrl>
@@ -59,6 +65,9 @@
 #include "desktop/gif_search.h"
 #include "desktop/penguin_overlay.h"
 #include "desktop/penguin_sprites.h"
+#include "desktop/mention_completer.h"
+#include "desktop/mentions.h"
+#include "desktop/notification_center.h"
 #include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
 
@@ -86,6 +95,33 @@ QString safeHtml(const QString& value) {
 
 // A drop of more files than this sends only the first ones.
 constexpr int kMaxDroppedImages = 10;
+
+// Screen shares announced this soon after signing in were already running.
+constexpr qint64 kSignInSettleMs = 3000;
+
+const QColor kMentionedBackground(0x45, 0x3d, 0x2c);
+
+QString withMentions(const QString& body, const QList<Mention>& mentions) {
+    QString html;
+    qsizetype written = 0;
+    for (const Mention& mention : mentions) {
+        // Members whose names differ only in case can share one mention.
+        if (mention.start < written) continue;
+        html += safeHtml(body.mid(written, mention.start - written)) +
+                "<span style='background-color:#3e4372;color:#c9cdfb'>" +
+                safeHtml(body.mid(mention.start, mention.length)) + "</span>";
+        written = mention.start + mention.length;
+    }
+    return html + safeHtml(body.mid(written));
+}
+
+// A lone GIF link would show as a long URL.
+QString messagePreview(const QString& body) {
+    const QList<MediaLink> media = findMediaLinks(body);
+    return media.size() == 1 && body.trimmed() == media.first().text
+               ? QStringLiteral("sent a GIF")
+               : body;
+}
 
 QString voiceReachableHost(QString host) {
     const QHostAddress address(host);
@@ -129,6 +165,32 @@ QString localAdvertiseHost(const QHostAddress& routeAddress) {
     return {};
 }
 
+QIcon memberBubble(const QColor& color, bool inVoice, bool talking, qreal scale) {
+    QPixmap pixmap(QSize(16, 16) * scale);
+    pixmap.setDevicePixelRatio(scale);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QPointF center(8, 8);
+    if (talking) {
+        QColor glow = color;
+        glow.setAlphaF(0.35);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(glow);
+        painter.drawEllipse(center, 7.5, 7.5);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else if (inVoice) {
+        painter.setPen(QPen(color, 1.5));
+        painter.drawEllipse(center, 4.5, 4.5);
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawEllipse(center, 2, 2);
+    }
+    return QIcon(pixmap);
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
@@ -161,6 +223,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     penguins_->setEnabled(showPenguins_);
     penguins_->setWandering(penguinsWander_);
     penguins_->setIdleTimeoutMinutes(penguinsIdleMinutes_);
+    pushToTalkEnabled_ = settings.value("voice/pushToTalk", false).toBool();
+    if (settings.contains("voice/pushToTalkKey"))
+        pushToTalkKey_ = settings.value("voice/pushToTalkKey").toUInt();
+    pushToTalkKeyName_ = settings.value("voice/pushToTalkKeyName").toString();
     // KLIPY asks for a stable, anonymous identifier per user.
     klipyCustomerId_ = settings.value("gifs/klipyCustomerId").toString();
     if (klipyCustomerId_.isEmpty()) {
@@ -168,9 +234,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         settings.setValue("gifs/klipyCustomerId", klipyCustomerId_);
     }
     imagePool_.setMaxThreadCount(1);
+    notifications_ = new NotificationCenter(this);
     buildUi();
-    setWindowTitle("disquisition");
+    setWindowTitle(QApplication::applicationDisplayName());
     resize(980, 680);
+    showNotificationSettings(notifications_->settings());
+    connect(notifications_, &NotificationCenter::settingsChanged, this,
+            &MainWindow::showNotificationSettings);
+    connect(notifications_, &NotificationCenter::badgeChanged, this,
+            [this](const UnreadBadge& badge) { setWindowTitle(badgedTitle("disquisition", badge)); });
 
     reconnectTimer_.setSingleShot(true);
     reconnectTimer_.setInterval(3000);
@@ -275,6 +347,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(&screenCapture_, &ScreenCapture::frameReady, this, &MainWindow::sendScreenFrame);
     connect(stage_, &ScreenStage::watchRequested, this, &MainWindow::watchStream);
     connect(stage_, &ScreenStage::stopWatchingRequested, this, &MainWindow::stopWatchingStream);
+    members_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(members_, &QListWidget::customContextMenuRequested, this, &MainWindow::showMemberMenu);
     connect(members_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         watchStream(item->data(Qt::UserRole).toString());
     });
@@ -291,8 +365,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(composer_, &QLineEdit::returnPressed, this, &MainWindow::sendMessage);
     connect(muteButton_, &QPushButton::clicked, this, [this] {
         muted_ = !muted_;
-        voice_.setMuted(muted_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         muteButton_->setChecked(muted_);
         muteButton_->setText(muted_ ? "Unmute" : "Mute");
         sendVoiceState();
@@ -307,7 +380,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         }
         voice_.setDeafened(deafened_);
         relayAudio_.setDeafened(deafened_);
-        relayAudio_.setMuted(muted_);
+        applyMicState();
         deafenButton_->setChecked(deafened_);
         deafenButton_->setText(deafened_ ? "Undeafen" : "Deafen");
         if (deafened_) {
@@ -320,6 +393,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             muteButton_->setEnabled(true);
         }
         sendVoiceState();
+    });
+    connect(&pushToTalk_, &PushToTalk::heldChanged, this, [this] {
+        applyMicState();
+        refreshMembers();
     });
     connect(name_, &QLineEdit::textChanged, this, [this](const QString& value) {
         if (!value.trimmed().isEmpty() && name_->property("invalid").toBool()) {
@@ -341,25 +418,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
         sendFrame(&server_, chat::Message {chat::MsgType::VoiceAudio,
                    {std::string(pcm.constData(), static_cast<std::size_t>(pcm.size()))}});
     });
+    // This capture also runs during SIP voice, so it judges talking in both modes.
     connect(&relayAudio_, &RelayAudio::speakingChanged, this, [this](bool speaking) {
-        if (usingRelay_ && localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
+        if (localSpeaking_ == speaking) return;
+        localSpeaking_ = speaking;
+        if (voiceWanted_ && serverSpeaking_ &&
+            server_.state() == QAbstractSocket::ConnectedState) {
+            sendFrame(&server_, chat::Message {chat::MsgType::Speaking, {speaking ? "1" : "0"}});
         }
+        refreshMembers();
     });
-    speakingExpiry_.setInterval(200);
-    connect(&speakingExpiry_, &QTimer::timeout, this, [this] {
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        bool changed = false;
-        for (Peer& peer : peers_) {
-            if (peer.lastAudioMs && peer.speaking && now - peer.lastAudioMs > 250) {
-                peer.speaking = false;
-                changed = true;
-            }
-        }
-        if (changed) refreshMembers();
-    });
-    speakingExpiry_.start();
     connect(&voice_, &VoiceEngine::ready, this, [this] {
         if (!voiceWanted_ || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
             return;
@@ -378,22 +446,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             leaveVoice();
         }
     });
-    connect(&voice_, &VoiceEngine::localSpeakingChanged, this, [this](bool speaking) {
-        if (usingRelay_) return;
-        if (localSpeaking_ != speaking) {
-            localSpeaking_ = speaking;
-            refreshMembers();
-        }
-    });
     connect(&voice_, &VoiceEngine::peerVoiceChanged, this,
-            [this](const QString& name, bool connected, bool speaking) {
+            [this](const QString& name, bool connected) {
         if (!peers_.contains(name)) {
             return;
         }
         Peer& peer = peers_[name];
-        if (peer.voiceConnected != connected || peer.speaking != speaking) {
+        if (peer.voiceConnected != connected) {
             peer.voiceConnected = connected;
-            peer.speaking = speaking;
             refreshMembers();
         }
             });
@@ -418,7 +478,7 @@ void MainWindow::buildUi() {
     page->setContentsMargins(10, 10, 10, 10);
     page->setSpacing(6);
 
-    auto* title = new QLabel(" disquisition", root);
+    auto* title = new QLabel(" " + QApplication::applicationDisplayName(), root);
     title->setObjectName("title");
     page->addWidget(title);
 
@@ -439,7 +499,7 @@ void MainWindow::buildUi() {
     setup->addWidget(settingsButton_);
     page->addLayout(setup);
 
-    auto* appMenu = menuBar()->addMenu("disquisition");
+    auto* appMenu = menuBar()->addMenu(QApplication::applicationDisplayName());
     auto* preferencesAction = appMenu->addAction("Preferences…");
     preferencesAction->setMenuRole(QAction::PreferencesRole);
     preferencesAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
@@ -455,6 +515,8 @@ void MainWindow::buildUi() {
         penguins_->setEnabled(enabled);
         QSettings().setValue("penguins/enabled", enabled);
     });
+    appMenu->addSeparator();
+    appMenu->addAction(notifications_->muteAction());
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -482,9 +544,14 @@ void MainWindow::buildUi() {
 
     auto* state = new QHBoxLayout;
     connectionLabel_ = new QLabel("* disconnected", root);
+    notificationsLabel_ = new QLabel("notifications muted", root);
+    notificationsLabel_->setObjectName("notificationsMuted");
+    notificationsLabel_->setToolTip("/dnd or the app menu turns them back on");
     voiceLabel_ = new QLabel("voice: off", root);
     state->addWidget(connectionLabel_);
     state->addStretch();
+    state->addWidget(notificationsLabel_);
+    state->addSpacing(12);
     state->addWidget(voiceLabel_);
     page->addLayout(state);
 
@@ -520,6 +587,7 @@ void MainWindow::buildUi() {
     composer_->setPlaceholderText("> type a message");
     composer_->setEnabled(false);
     composer_->installEventFilter(this);
+    mentionCompleter_ = new MentionCompleter(composer_);
     gifButton_ = new QPushButton("GIF", root);
     gifButton_->setToolTip("search GIFs (/gif)");
     gifButton_->setEnabled(false);
@@ -578,7 +646,11 @@ void MainWindow::buildUi() {
         QFrame#gifPicker QListWidget::item:hover, QFrame#gifPicker QListWidget::item:selected { background: #9dccca; }
         QLabel#gifStatus, QLabel#gifAttribution { color: #8a9099; font-size: 12px; }
         QLabel#dropOverlay { background: rgba(32, 38, 44, 225); color: #9dccca; border: 2px dashed #9dccca; font-size: 16px; font-weight: 700; }
+        QLabel#notificationsMuted { color: #d9a441; }
+        QListView#mentionSuggestions { border: 1px solid #777f89; selection-background-color: #9dccca; selection-color: #20262c; }
     )");
+    // The popup is a window of its own, so it does not inherit the style sheet.
+    mentionCompleter_->popup()->setStyleSheet(styleSheet());
 }
 
 void MainWindow::startJoining() {
@@ -617,7 +689,9 @@ void MainWindow::joinVoice() {
         }
         if (usingRelay_) {
             restoreVoiceState();
+            applyMicState();
             voiceWanted_ = true;
+            updatePushToTalk();
             activeVoicePort_ = 65535; // Protocol marker: audio is carried by the relay, not SIP.
             sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"65535"}});
             voiceButton_->setText("Leave Voice");
@@ -658,7 +732,8 @@ void MainWindow::joinVoice() {
         }
         restoreVoiceState();
         if (deafened_) voice_.setDeafened(true);
-        else if (muted_) voice_.setMuted(true);
+        applyMicState();
+        updatePushToTalk();
         voiceButton_->setText("Leave Voice");
         muteButton_->setEnabled(!deafened_);
         deafenButton_->setEnabled(true);
@@ -674,7 +749,6 @@ void MainWindow::restoreVoiceState() {
     muted_ = resumeMuted_;
     deafened_ = resumeDeafened_;
     mutedBeforeDeafen_ = resumeMutedBeforeDeafen_;
-    relayAudio_.setMuted(muted_);
     relayAudio_.setDeafened(deafened_);
     muteButton_->setChecked(muted_);
     muteButton_->setText(muted_ ? "Unmute" : "Mute");
@@ -684,6 +758,20 @@ void MainWindow::restoreVoiceState() {
     resumeVoice_ = false;
 }
 
+void MainWindow::applyMicState() {
+    const bool silent = muted_ || (pushToTalkEnabled_ && !pushToTalk_.held());
+    voice_.setMuted(silent);
+    relayAudio_.setMuted(silent);
+}
+
+void MainWindow::updatePushToTalk() {
+    if (voiceWanted_ && pushToTalkEnabled_ && pushToTalkKey_) {
+        pushToTalk_.start(*pushToTalkKey_);
+    } else {
+        pushToTalk_.stop();
+    }
+}
+
 void MainWindow::leaveVoice() {
     const bool wasInVoice = voiceWanted_;
     voiceWanted_ = false;
@@ -691,6 +779,7 @@ void MainWindow::leaveVoice() {
         sendFrame(&server_, chat::Message {chat::MsgType::VoicePort, {"0"}});
     }
     activeVoicePort_ = 0;
+    updatePushToTalk();
     voice_.stop();
     relayAudio_.stop();
     muted_ = false;
@@ -762,6 +851,9 @@ void MainWindow::startScreenShare() {
     const quint64 generation = ++screenShareGeneration_;
     sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
     stage_->addStream(myName_, true);
+    sharedSource_ = source;
+    startDrawingSession(myName_, true);
+    presenterOverlay_ = std::make_unique<PresenterOverlay>(*source, stage_->drawing(myName_), this);
     shareButton_->setText("Stop Sharing");
     refreshMembers();
     const bool sharingWindow = source->kind == ShareSource::Kind::Window;
@@ -784,6 +876,10 @@ void MainWindow::stopScreenShare() {
         return;
     }
     sharingScreen_ = false;
+    drawingBans_.clear();
+    presenterOverlay_.reset();
+    sharedSource_.reset();
+    drawingSessions_.erase(myName_);
     ++screenShareGeneration_;
     screenCapture_.stop();
     ownStreamDecoder_.reset();
@@ -836,6 +932,9 @@ void MainWindow::handleScreenShare(const chat::Message& message) {
     if (sharing) {
         stage_->addStream(name, false);
         appendChat("Screen", name + " started sharing their screen", {}, true);
+        if (signedIn_.isValid() && signedIn_.hasExpired(kSignInSettleMs)) {
+            notifications_->activityOccurred(name, "started sharing their screen");
+        }
     } else {
         endRemoteStream(name);
         appendChat("Screen", name + " stopped sharing their screen", {}, true);
@@ -880,11 +979,16 @@ void MainWindow::watchStream(const QString& name) {
     watchedStreams_.try_emplace(name);
     sendFrame(&server_, chat::Message {chat::MsgType::ScreenWatch, {s(name), "1"}});
     stage_->setWatching(name, true);
+    startDrawingSession(name, false);
 }
 
 void MainWindow::stopWatchingStream(const QString& name) {
     if (watchedStreams_.erase(name) == 0) {
         return;
+    }
+    if (const auto session = drawingSessions_.find(name); session != drawingSessions_.end()) {
+        session->second->stop();
+        drawingSessions_.erase(session);
     }
     screenAssembler_.remove(name);
     if (server_.state() == QAbstractSocket::ConnectedState) {
@@ -896,6 +1000,7 @@ void MainWindow::stopWatchingStream(const QString& name) {
 // Drops a remote share from the stage. The server has already stopped
 // sending it, so there is nobody to tell.
 void MainWindow::endRemoteStream(const QString& name) {
+    drawingSessions_.erase(name);
     stage_->removeStream(name);
     watchedStreams_.erase(name);
     screenAssembler_.remove(name);
@@ -908,6 +1013,60 @@ void MainWindow::endRemoteStreams() {
             endRemoteStream(peer.name);
         }
     }
+}
+
+void MainWindow::startDrawingSession(const QString& sharer, bool owner) {
+    ScreenDrawing* drawing = stage_->drawing(sharer);
+    if (!drawing)
+        return;
+    drawing->setChatColor(chatColor(messageColor_));
+    auto session = std::make_unique<ScreenDrawingSession>(myName_, sharer, drawing, owner);
+    if (owner) {
+        for (const auto& peer : drawingBans_)
+            session->setBanned(peer, true);
+    }
+    connect(session.get(), &ScreenDrawingSession::sendToPeer, this,
+            [this](const QString& target, const chat::Message& payload) {
+                const chat::PeerData data{s(myName_), s(target), "screen-drawing",
+                                          chat::encode(payload)};
+                const chat::Message message = chat::peerDataMessage(data);
+                if (usingRelay_) {
+                    if (server_.state() == QAbstractSocket::ConnectedState)
+                        sendFrame(&server_, message);
+                }
+                else {
+                    const auto peer = peers_.constFind(target);
+                    if (peer != peers_.cend() && peer->socket &&
+                        peer->socket->state() == QAbstractSocket::ConnectedState)
+                        sendFrame(peer->socket, message);
+                }
+            });
+    auto* active = session.get();
+    drawingSessions_[sharer] = std::move(session);
+    if (!owner)
+        active->start();
+}
+
+void MainWindow::receivePeerData(const chat::Message& message, const QString& linkedPeer) {
+    chat::PeerData data;
+    if (!chat::parsePeerData(message, data) || data.target != s(myName_) ||
+        data.channel != "screen-drawing")
+        return;
+    const QString sender = linkedPeer.isEmpty() ? q(data.sender) : linkedPeer;
+    if (!peers_.contains(sender))
+        return;
+    chat::Message payload;
+    if (chat::decode(data.data, payload) != chat::DecodeStatus::Ok || !data.data.empty() ||
+        payload.fields.empty())
+        return;
+    const auto session = drawingSessions_.find(q(payload.fields[0]));
+    if (session != drawingSessions_.end())
+        session->second->receive(sender, payload);
+}
+
+void MainWindow::drawingPeerChanged(const QString& peer, bool connected) {
+    for (const auto& [name, session] : drawingSessions_)
+        session->peerChanged(peer, connected);
 }
 
 void MainWindow::showPreferences() {
@@ -973,6 +1132,42 @@ void MainWindow::showPreferences() {
     QSettings spriteSettings;
     auto* spriteEditor = new PenguinSpriteEditor(PenguinSprites::fromSettings(spriteSettings),
                                                  &dialog);
+    auto* pushToTalk = new QCheckBox("Hold a key to talk", &dialog);
+    pushToTalk->setChecked(pushToTalkEnabled_);
+#if defined(Q_OS_MACOS)
+    pushToTalk->setToolTip("To use it while another app is focused, or to hold "
+                           "Caps Lock, allow Input Monitoring in System Settings.");
+#endif
+    auto* pushToTalkKey = new PushToTalkKeyButton(&dialog);
+    pushToTalkKey->setKey(pushToTalkKey_, pushToTalkKeyName_);
+    pushToTalkKey->setEnabled(pushToTalkEnabled_);
+    connect(pushToTalk, &QCheckBox::toggled, pushToTalkKey, &QWidget::setEnabled);
+    auto* pushToTalkRow = new QWidget(&dialog);
+    auto* pushToTalkLayout = new QHBoxLayout(pushToTalkRow);
+    pushToTalkLayout->setContentsMargins(0, 0, 0, 0);
+    pushToTalkLayout->addWidget(pushToTalk, 1);
+    pushToTalkLayout->addWidget(pushToTalkKey);
+    const NotificationSettings shownNotifications = notifications_->settings();
+    auto* muteNotifications = new QCheckBox("Mute all notifications", &dialog);
+    muteNotifications->setChecked(shownNotifications.muted);
+    muteNotifications->setToolTip("No desktop notifications or taskbar alerts. "
+                                  "Unread badges still count what you miss.");
+    auto* notifyLevel = new QComboBox(&dialog);
+    notifyLevel->addItem("all messages", static_cast<int>(NotifyLevel::AllMessages));
+    notifyLevel->addItem("only @mentions", static_cast<int>(NotifyLevel::MentionsOnly));
+    notifyLevel->setCurrentIndex(
+        notifyLevel->findData(static_cast<int>(shownNotifications.level)));
+    auto* suppressEveryone = new QCheckBox("Suppress @everyone and @here", &dialog);
+    suppressEveryone->setChecked(shownNotifications.suppressEveryone);
+    suppressEveryone->setToolTip("They notify and count as unread like any other message.");
+    auto* notifyActivity =
+        new QCheckBox("Notify when someone joins or starts sharing their screen", &dialog);
+    notifyActivity->setChecked(shownNotifications.activity);
+    // Suppressing @everyone stays enabled: it still decides what the badge counts.
+    notifyLevel->setEnabled(!shownNotifications.muted);
+    notifyActivity->setEnabled(!shownNotifications.muted);
+    connect(muteNotifications, &QCheckBox::toggled, notifyLevel, &QWidget::setDisabled);
+    connect(muteNotifications, &QCheckBox::toggled, notifyActivity, &QWidget::setDisabled);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
     connect(saveMessages, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     connect(chooseMessageFile, &QPushButton::clicked, &dialog, [&, messageFile] {
@@ -986,6 +1181,7 @@ void MainWindow::showPreferences() {
     form->addRow("public host", advertisedHost);
     form->addRow("", advertiseLocal);
     form->addRow("voice SIP port", sipPort);
+    form->addRow("push to talk", pushToTalkRow);
     form->addRow("relay address", relayHost);
     form->addRow("relay port", relayPort);
     form->addRow("", leakIp);
@@ -1000,6 +1196,10 @@ void MainWindow::showPreferences() {
     form->setRowVisible(showPenguins, penguinsUnlocked_);
     form->setRowVisible(penguinsWander, penguinsUnlocked_);
     form->setRowVisible(penguinsIdle, penguinsUnlocked_);
+    form->addRow("", muteNotifications);
+    form->addRow("notify me about", notifyLevel);
+    form->addRow("", suppressEveryone);
+    form->addRow("", notifyActivity);
     form->setRowVisible(spriteEditor, penguinsUnlocked_);
     auto* fields = new QWidget(&dialog);
     fields->setLayout(form);
@@ -1025,6 +1225,10 @@ void MainWindow::showPreferences() {
         }
         const QString path = messageFile->text().trimmed();
         const QString count = maximum->text().trimmed();
+        if (pushToTalk->isChecked() && !pushToTalkKey->key()) {
+            QMessageBox::warning(&dialog, "Push to talk", "Choose a push-to-talk key.");
+            return;
+        }
         if (saveMessages->isChecked() && path.isEmpty()) {
             QMessageBox::warning(&dialog, "Message saving", "Choose a SQLite file.");
             return;
@@ -1059,7 +1263,7 @@ void MainWindow::showPreferences() {
     }
     serverHost_ = host->text().trimmed();
     if (serverHost_.isEmpty()) {
-        serverHost_ = "relay.mmatt.net";
+        serverHost_ = "server.disquisition.app";
     }
     serverPort_ = static_cast<quint16>(port->value());
     advertiseHost_ = advertisedHost->text().trimmed();
@@ -1078,6 +1282,22 @@ void MainWindow::showPreferences() {
     penguinsIdleMinutes_ = penguinsIdle->value();
     penguins_->setWandering(penguinsWander_);
     penguins_->setIdleTimeoutMinutes(penguinsIdleMinutes_);
+    const bool pushToTalkChanged = pushToTalk->isChecked() != pushToTalkEnabled_ ||
+                                   pushToTalkKey->key() != pushToTalkKey_;
+    pushToTalkEnabled_ = pushToTalk->isChecked();
+    pushToTalkKey_ = pushToTalkKey->key();
+    pushToTalkKeyName_ = pushToTalkKey->keyName();
+    if (pushToTalkChanged) {
+        updatePushToTalk();
+        applyMicState();
+        refreshMembers();
+    }
+    NotificationSettings chosenNotifications;
+    chosenNotifications.muted = muteNotifications->isChecked();
+    chosenNotifications.level = static_cast<NotifyLevel>(notifyLevel->currentData().toInt());
+    chosenNotifications.suppressEveryone = suppressEveryone->isChecked();
+    chosenNotifications.activity = notifyActivity->isChecked();
+    notifications_->setSettings(chosenNotifications);
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1094,6 +1314,11 @@ void MainWindow::showPreferences() {
     settings.setValue("server/advertisedHost", advertiseHost_);
     settings.setValue("server/advertiseLocal", advertiseLocal_);
     settings.setValue("voice/sipPort", preferredVoicePort_);
+    settings.setValue("voice/pushToTalk", pushToTalkEnabled_);
+    if (pushToTalkKey_) {
+        settings.setValue("voice/pushToTalkKey", *pushToTalkKey_);
+        settings.setValue("voice/pushToTalkKeyName", pushToTalkKeyName_);
+    }
     settings.setValue("relay/host", relayHost_);
     settings.setValue("relay/port", relayPort_);
     settings.setValue("relay/leakMyIp", leakMyIp_);
@@ -1365,6 +1590,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         myName_ = q(message.fields[0]);
         spriteTransfers_.clear();
         penguins_->clearCustomSprites();
+        serverSpeaking_ = message.fields.size() >= 3 &&
+                          chat::hasFeature(message.fields[2], chat::kSpeakingFeature);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
                                                : serverHost_ + ":" + QString::number(serverPort_)) +
@@ -1377,12 +1604,20 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         composer_->setEnabled(true);
         sendButton_->setEnabled(true);
         gifButton_->setEnabled(true);
+        signedIn_.start();
         // A relay signs in again after losing the server, which forgets every
         // screen share. The server re-announces the others; announce ours.
         endRemoteStreams();
         if (sharingScreen_) {
+            presenterOverlay_.reset();
+            drawingSessions_.erase(previousName);
             stage_->removeStream(previousName);
             stage_->addStream(myName_, true);
+            startDrawingSession(myName_, true);
+            if (sharedSource_)
+                presenterOverlay_ = std::make_unique<PresenterOverlay>(*sharedSource_,
+                                                                       stage_->drawing(myName_),
+                                                                       this);
             sendFrame(&server_, chat::Message {chat::MsgType::ScreenShare, {"1"}});
         }
         openSavedMessages();
@@ -1395,7 +1630,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         }
     } else if ((message.type == chat::MsgType::Peer ||
                 message.type == chat::MsgType::PeerJoined) && message.fields.size() >= 4) {
+        // Peer lists who was already here; PeerJoined announces a newcomer.
+        const QString name = q(message.fields[0]);
+        const bool joined = message.type == chat::MsgType::PeerJoined && !peers_.contains(name);
         addPeer(message);
+        if (joined) {
+            appendChat("Room", name + " joined", {}, true);
+            notifications_->activityOccurred(name, "joined the room");
+        }
     } else if (message.type == chat::MsgType::PeerLeft && !message.fields.empty()) {
         removePeer(q(message.fields[0]));
     } else if (message.type == chat::MsgType::VoicePort && message.fields.size() == 2) {
@@ -1423,21 +1665,14 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
             (usingRelay_ || peers_[sender].voicePort == 65535)) {
             const std::string& bytes = message.fields[1];
             relayAudio_.receive(sender, QByteArray(bytes.data(), static_cast<qsizetype>(bytes.size())));
-            if (bytes.size() == 640) {
-                double sum = 0;
-                for (std::size_t i = 0; i < bytes.size(); i += 2) {
-                    const auto lo = static_cast<unsigned char>(bytes[i]);
-                    const auto hi = static_cast<unsigned char>(bytes[i + 1]);
-                    const auto sample = static_cast<qint16>(lo | (hi << 8));
-                    sum += static_cast<double>(sample) * sample;
-                }
-                Peer& peer = peers_[sender];
-                const bool speaking = sum / 320 > 450.0 * 450.0;
-                peer.lastAudioMs = QDateTime::currentMSecsSinceEpoch();
-                if (peer.speaking != speaking) {
-                    peer.speaking = speaking;
-                    refreshMembers();
-                }
+        }
+    } else if (message.type == chat::MsgType::Speaking && message.fields.size() == 2) {
+        const QString sender = q(message.fields[0]);
+        if (peers_.contains(sender) && peers_[sender].voicePort != 0) {
+            const bool speaking = message.fields[1] == "1";
+            if (peers_[sender].speaking != speaking) {
+                peers_[sender].speaking = speaking;
+                refreshMembers();
             }
         }
     } else if (message.type == chat::MsgType::VoiceState && message.fields.size() == 3) {
@@ -1453,22 +1688,29 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         handleScreenShare(message);
     } else if (message.type == chat::MsgType::ScreenFrame && message.fields.size() == 6) {
         receiveScreenFrame(message);
-    } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
-        appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
-        penguins_->showMessage(q(message.fields[0]), q(message.fields[2]));
-        penguins_->setColor(q(message.fields[0]), chatColor(q(message.fields[3])));
-        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
-                    message.fields[2], message.fields[3]});
-    } else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
+    }
+    else if (message.type == chat::MsgType::PeerData && usingRelay_) {
+        receivePeerData(message);
+    }
+    else if (message.type == chat::MsgType::PeerLink && usingRelay_ && message.fields.size() == 2 &&
+             (message.fields[1] == "0" || message.fields[1] == "1")) {
+        drawingPeerChanged(q(message.fields[0]), message.fields[1] == "1");
+    }
+    else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
+        receiveChat(message);
+    }
+    else if (message.type == chat::MsgType::History && message.fields.size() >= 3) {
         appendChat(q(message.fields[1]), q(message.fields[2]),
                    message.fields.size() >= 4 ? q(message.fields[3]) : "pink");
         recordChat({q(message.fields[0]).toLongLong(), message.fields[1], message.fields[2],
                     message.fields.size() >= 4 ? message.fields[3] : "pink"});
-    } else if (message.type == chat::MsgType::PeerImage) {
+    }
+    else if (message.type == chat::MsgType::PeerImage) {
         // A relay names the sender of each chunk it forwards.
         chat::ImageChunk chunk;
         if (chat::parsePeerImage(message, chunk)) receiveImageChunk(chunk);
-    } else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
+    }
+    else if (message.type == chat::MsgType::Error && !message.fields.empty()) {
         appendChat("Server", q(message.fields[0]), {}, true);
     }
 }
@@ -1503,6 +1745,7 @@ void MainWindow::addPeer(const chat::Message& message) {
 void MainWindow::removePeer(const QString& name) {
     spriteTransfers_.remove(name);
     const Peer peer = peers_.take(name);
+    drawingPeerChanged(name, false);
     if (peer.socket) {
         peer.socket->disconnectFromHost();
     }
@@ -1543,6 +1786,7 @@ void MainWindow::attachPeerSocket(QTcpSocket* socket) {
         for (Peer& peer : peers_) {
             if (peer.socket == socket) {
                 peer.socket = nullptr;
+                drawingPeerChanged(peer.name, false);
                 peer.muted = false;
                 peer.deafened = false;
             }
@@ -1574,14 +1818,26 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
             sendFrame(socket, chat::Message {chat::MsgType::VoiceState,
                                              {s(myName_), muted_ ? "1" : "0",
                                               deafened_ ? "1" : "0"}});
+            drawingPeerChanged(name, true);
         }
-    } else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
-        appendChat(q(message.fields[0]), q(message.fields[2]), q(message.fields[3]));
-        penguins_->showMessage(q(message.fields[0]), q(message.fields[2]));
-        penguins_->setColor(q(message.fields[0]), chatColor(q(message.fields[3])));
-        recordChat({q(message.fields[1]).toLongLong(), message.fields[0],
-                    message.fields[2], message.fields[3]});
-    } else if (message.type == chat::MsgType::PeerImage) {
+    }
+    else if (message.type == chat::MsgType::HelloOk && message.fields.size() == 1) {
+        const QString name = q(message.fields[0]);
+        if (peers_.contains(name) && peers_[name].socket == socket)
+            drawingPeerChanged(name, true);
+    }
+    else if (message.type == chat::MsgType::PeerData) {
+        for (const Peer& peer : std::as_const(peers_)) {
+            if (peer.socket == socket) {
+                receivePeerData(message, peer.name);
+                return;
+            }
+        }
+    }
+    else if (message.type == chat::MsgType::PeerChat && message.fields.size() >= 4) {
+        receiveChat(message);
+    }
+    else if (message.type == chat::MsgType::PeerImage) {
         // Trust the name the link was established with, not the frame.
         chat::ImageChunk chunk;
         if (!chat::parsePeerImage(message, chunk)) return;
@@ -1592,7 +1848,8 @@ void MainWindow::handlePeerMessage(QTcpSocket* socket, const chat::Message& mess
                 return;
             }
         }
-    } else if (message.type == chat::MsgType::VoiceState && message.fields.size() >= 3) {
+    }
+    else if (message.type == chat::MsgType::VoiceState && message.fields.size() >= 3) {
         const QString name = q(message.fields[0]);
         if (peers_.contains(name) && peers_[name].socket == socket &&
             (message.fields[1] == "0" || message.fields[1] == "1") &&
@@ -1637,6 +1894,30 @@ void MainWindow::sendChat(const QString& body) {
     recordChat({timestampSeconds, s(myName_), s(body), s(messageColor_)});
 }
 
+void MainWindow::receiveChat(const chat::Message& message) {
+    const QString sender = q(message.fields[0]);
+    const QString body = q(message.fields[2]);
+    appendChat(sender, body, q(message.fields[3]));
+    penguins_->showMessage(sender, body);
+    penguins_->setColor(sender, chatColor(q(message.fields[3])));
+    recordChat({q(message.fields[1]).toLongLong(), message.fields[0], message.fields[2],
+                message.fields[3]});
+    if (sender != myName_) {
+        notifications_->messageReceived(sender, messagePreview(body),
+                                        mentionOf(findMentions(body, memberNames()), myName_));
+    }
+}
+
+QStringList MainWindow::memberNames() const {
+    QStringList names = peers_.keys();
+    if (!myName_.isEmpty()) names.append(myName_);
+    return names;
+}
+
+void MainWindow::showNotificationSettings(const NotificationSettings& settings) {
+    notificationsLabel_->setVisible(settings.muted);
+}
+
 void MainWindow::runCommand(const QString& command) {
     const QStringList parts = command.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
     const QString name = parts.value(0).toLower();
@@ -1659,6 +1940,10 @@ void MainWindow::runCommand(const QString& command) {
         } else {
             messageColor_ = requested;
             penguins_->setColor(myName_, chatColor(messageColor_));
+            for (const auto& [sharer, session] : drawingSessions_) {
+                if (auto* drawing = stage_->drawing(sharer))
+                    drawing->setChatColor(chatColor(messageColor_));
+            }
             appendChat("Color", "you chose " + requested, requested);
         }
     } else if (name == "/users") {
@@ -1737,6 +2022,10 @@ void MainWindow::runCommand(const QString& command) {
             deafenButton_->click();
         }
         appendChat("Voice", "incoming audio restored", {}, true);
+    } else if (name == "/dnd") {
+        QAction* mute = notifications_->muteAction();
+        mute->toggle();
+        appendChat("Notifications", mute->isChecked() ? "muted" : "on", {}, true);
     } else if (name == "/leave") {
         disconnectAll();
     } else if (name == "/quit" || name == "/exit") {
@@ -1753,9 +2042,11 @@ void MainWindow::runCommand(const QString& command) {
         appendChat("Help", "/gif [search]   pick a GIF to send", {}, true);
         appendChat("Help", "/clear          clear the local message pane", {}, true);
         appendChat("Help", "/save           configure continuous local message saving", {}, true);
+        appendChat("Help", "/dnd            mute or unmute notifications", {}, true);
         appendChat("Help", "/leave          leave this room", {}, true);
         appendChat("Help", "/quit, /exit    close this app window", {}, true);
         appendChat("Help", "drag images into the window to send them to the room", {}, true);
+        appendChat("Help", "@name mentions someone; @everyone and @here mention the room", {}, true);
     } else {
         appendChat("Command", "unknown command: " + name + " (try /help)", {}, true);
     }
@@ -1773,9 +2064,20 @@ void MainWindow::appendChat(const QString& sender, const QString& body,
         system || !showLinkedMedia_ ? QList<MediaLink>() : findMediaLinks(body);
     // As in Discord, a message that is only a GIF link shows just the GIF.
     const bool onlyMedia = media.size() == 1 && body.trimmed() == media.first().text;
+    const QList<Mention> mentions = system ? QList<Mention>() : findMentions(body, memberNames());
     transcript_->append("<div style='margin:1px 0;color:" + color + "'>" + prefix +
                         safeHtml(sender) + (system ? " " : ": ") +
-                        (onlyMedia ? QString() : safeHtml(body)) + "</div>");
+                        (onlyMedia ? QString() : withMentions(body, mentions)) + "</div>");
+    // Appended HTML loses its block background, and each new block copies
+    // the one before it, so every line sets its own.
+    QTextCursor line(transcript_->document()->lastBlock());
+    QTextBlockFormat format = line.blockFormat();
+    if (sender != myName_ && mentionOf(mentions, myName_) != Mentioned::No) {
+        format.setBackground(kMentionedBackground);
+    } else {
+        format.clearBackground();
+    }
+    line.setBlockFormat(format);
     for (const MediaLink& link : media) {
         media_->appendRemote(link.url);
     }
@@ -1943,7 +2245,33 @@ void MainWindow::receiveImageChunk(const chat::ImageChunk& chunk) {
         penguins_->noteActivity(sender);
         penguins_->setColor(sender, chatColor(q(chunk.color)));
         appendImage(sender, *image, q(chunk.color), chunk.timestamp);
+        notifications_->messageReceived(sender, "sent an image", Mentioned::No);
     }
+}
+
+void MainWindow::showMemberMenu(const QPoint& position) {
+    const auto* item = members_->itemAt(position);
+    const QString peer = item ? item->data(Qt::UserRole).toString() : QString();
+    if (!sharingScreen_ || peer.isEmpty() || peer == myName_ || !peers_.contains(peer))
+        return;
+    const bool banned = drawingBans_.contains(peer);
+    const quint64 generation = screenShareGeneration_;
+    QMenu menu(this);
+    QAction* toggle = menu.addAction(banned ? "Unban from drawing on my stream" :
+                                             "Ban from drawing on my stream");
+    if (menu.exec(members_->viewport()->mapToGlobal(position)) != toggle)
+        return;
+    // Sidebar rows and sessions may change while the menu's event loop runs.
+    const auto session = drawingSessions_.find(myName_);
+    if (!sharingScreen_ || screenShareGeneration_ != generation ||
+        !peers_.contains(peer) || session == drawingSessions_.end())
+        return;
+    if (banned)
+        drawingBans_.remove(peer);
+    else
+        drawingBans_.insert(peer);
+    session->second->setBanned(peer, !banned);
+    refreshMembers();
 }
 
 void MainWindow::refreshMembers() {
@@ -1955,34 +2283,41 @@ void MainWindow::refreshMembers() {
     penguins_->setMembers(penguinNames);
     penguins_->setColor(myName_, chatColor(messageColor_));
     members_->clear();
+    const qreal scale = members_->devicePixelRatioF();
     if (!myName_.isEmpty()) {
-        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" :
-                                  localSpeaking_ ? "  talking" :
-                                  voiceWanted_ ? "  mic" : "  text";
-        auto* self = new QListWidgetItem((localSpeaking_ && !muted_ ? "● " : "○ ") + myName_ +
-                                         selfState + (sharingScreen_ ? "  LIVE" : ""), members_);
-        self->setForeground(QColor(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
-                                   localSpeaking_ ? "#6ee7a2" : "#9dccca"));
+        const bool talking = localSpeaking_ && !muted_ &&
+                             (!pushToTalkEnabled_ || pushToTalk_.held());
+        const QString selfState = deafened_ ? "  deafened" : muted_ ? "  muted" : "";
+        const QColor color(deafened_ ? "#e05252" : muted_ ? "#d9a441" :
+                           talking ? "#6ee7a2" : "#9dccca");
+        auto* self = new QListWidgetItem(memberBubble(color, voiceWanted_, talking, scale),
+                                         myName_ + selfState + (sharingScreen_ ? "  LIVE" : ""),
+                                         members_);
+        self->setForeground(color);
     }
     QStringList names = peers_.keys();
     names.sort(Qt::CaseInsensitive);
+    mentionCompleter_->setMembers(names);
     for (const QString& name : names) {
         const Peer& peer = peers_[name];
         const bool inVoice = peer.voicePort != 0;
-        const QString marker = peer.speaking && !peer.muted && inVoice ? "● " :
-                               inVoice ? "○ " : "· ";
-        const QString state = !inVoice ? "  text" : peer.deafened ? "  deafened" : peer.muted ? "  muted" :
-                              peer.speaking ? "  talking" :
-                              peer.voiceConnected ? "  voice" : "  in voice";
-        auto* item = new QListWidgetItem(marker + name + state +
-                                         (peer.sharingScreen ? "  LIVE" : ""), members_);
+        const QString state = !inVoice ? "" : peer.deafened ? "  deafened" : peer.muted ? "  muted" : "";
+        const QColor color(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
+                           peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" : "#9dccca");
+        const bool talking = inVoice && peer.speaking && !peer.muted;
+        auto* item = new QListWidgetItem(memberBubble(color, inVoice, talking, scale),
+                                         name + state + (peer.sharingScreen ? "  LIVE" : "") +
+                                         (sharingScreen_ && drawingBans_.contains(name) ? "  drawing banned" : ""),
+                                         members_);
         item->setData(Qt::UserRole, name);
-        if (peer.sharingScreen) {
-            item->setToolTip("double-click to watch " + name + "'s screen");
-        }
-        item->setForeground(QColor(!inVoice ? "#a7a9aa" : peer.deafened ? "#e05252" :
-                                  peer.muted ? "#d9a441" : peer.speaking ? "#6ee7a2" :
-                                  "#9dccca"));
+        QStringList tips;
+        if (peer.sharingScreen)
+            tips.append("double-click to watch " + name + "'s screen");
+        if (sharingScreen_)
+            tips.append(drawingBans_.contains(name) ? "banned from drawing on your stream; right-click to unban" :
+                                                   "right-click to ban drawing on your stream");
+        item->setToolTip(tips.join('\n'));
+        item->setForeground(color);
     }
 }
 

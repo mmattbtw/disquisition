@@ -37,7 +37,7 @@ constexpr const char* kUsage = R"(usage: client [options]
   -h, --help           show this message
 )";
 
-constexpr const char* kPublicServer = "relay.mmatt.net";
+constexpr const char* kPublicServer = "server.disquisition.app";
 constexpr std::uint16_t kDefaultServerPort = 9000;
 constexpr std::uint16_t kDefaultRelayPort = 3333;
 
@@ -61,7 +61,7 @@ bool promptForOptions(ClientOptions& options) {
     options.port = kDefaultServerPort;
 
     std::string answer;
-    if (!readLine("server host [relay.mmatt.net]: ", answer)) {
+    if (!readLine("server host [server.disquisition.app]: ", answer)) {
         return false;
     }
     if (!answer.empty()) {

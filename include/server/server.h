@@ -61,6 +61,7 @@ private:
     void handleVoicePort(Client& client, const Message& message);
     void handleVoiceAudio(Client& client, const Message& message);
     void handleVoiceState(Client& client, const Message& message);
+    void handleSpeaking(Client& client, const Message& message);
     void handleScreenShare(Client& client, const Message& message);
     void handleScreenWatch(Client& client, const Message& message);
     void handleScreenFrame(Client& client, const Message& message);

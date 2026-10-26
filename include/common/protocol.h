@@ -25,7 +25,7 @@ enum class MsgType : std::uint8_t {
     VoiceAudio = 20,   // client: [16 kHz mono signed-16 PCM]; server: [sender, PCM]
 
     // Server -> client
-    LoginOk = 3,     // [assigned name, welcome text]
+    LoginOk = 3,     // [assigned name, welcome text, features (may be absent)]
     Error = 4,       // [reason]
     History = 6,     // [timestamp, sender, body, color]
     System = 7,      // [text]
@@ -37,9 +37,9 @@ enum class MsgType : std::uint8_t {
 
     // Peer <-> peer. A relay hosts several users on one port, so Hello names
     // both the caller and the user being called, and PeerChat names its sender.
-    Hello = 15,    // [sender, target]
-    HelloOk = 17,  // [target]
-    PeerChat = 16, // [sender, timestamp, body, color]
+    Hello = 15,      // [sender, target]
+    HelloOk = 17,    // [target]
+    PeerChat = 16,   // [sender, timestamp, body, color]
     VoiceState = 18, // [sender, muted 0|1, deafened 0|1]
     RelayProbe = 21, // client to relay: [] health check without signing in
     RelayReady = 22, // relay to client: [] server connection is available
@@ -57,10 +57,30 @@ enum class MsgType : std::uint8_t {
     // [sender, timestamp, color, transfer id, chunk index, chunk count, bytes]
     PeerImage = 26,
 
+    // Drawing messages are client-owned and travel inside PeerData, never to
+    // the discovery server. State resets the drawing before any history replay.
+    // Owner -> viewer: [sharer, enabled 0|1, epoch, optional may-draw 0|1].
+    ScreenDrawState = 27,
+    // Viewer -> owner: [sharer, epoch, segment id, x1, y1, x2, y2, color];
+    // owner -> viewers inserts author at index 2. Author + id deduplicates previews.
+    // Coordinates are normalized to 0..10000, color is an index in the pen palette.
+    // New clients append [stroke id, RGB or -1] to group gestures and carry chat colors.
+    ScreenDraw = 28,
+    ScreenDrawWatch = 29, // viewer -> owner: [sharer, 1 subscribe | 0 unsubscribe]
+    // Generic targeted peer channel: [sender, target, channel, binary payload].
+    // The relay stamps sender using the established peer/client identity.
+    PeerData = 30,
+    PeerLink = 31, // relay -> client: [peer, connected 0|1], for resuming peer channels
+    ScreenDrawErase = 32, // peer data: [sharer, epoch, author, stroke ids...]
+    // Transient peer data: [sharer, epoch, optional owner-stamped author,
+    // sequence, x, y, RGB, visible 0|1]. Never included in drawing history.
+    ScreenLaser = 33,
+    Speaking = 34, // client: [1 talking | 0 quiet]; server: [name, 1|0]
+
     // Personal desktop sprite, via the server. Client: [index, count, bytes];
     // server: [assigned sender, index, count, bytes]. Empty fields reset to
     // Club Penguin; the server's reset contains only the assigned sender.
-    PenguinSprite = 27,
+    PenguinSprite = 35,
 };
 
 struct Message {
@@ -69,6 +89,7 @@ struct Message {
 };
 
 constexpr std::uint32_t kMaxFrameSize = 16 * 1024;
+constexpr std::size_t kMaxPeerDataBytes = kMaxFrameSize - 256;
 constexpr std::size_t kMaxNameLength = 20;
 constexpr std::size_t kMaxBodyLength = 2000;
 // Image chunks leave room for the header fields inside kMaxFrameSize.
@@ -101,6 +122,12 @@ std::vector<Message> spriteMessages(const std::string& data, const std::string& 
 constexpr std::array<const char*, 7> kColorNames = {"pink",  "mint", "butter", "periwinkle",
                                                     "lilac", "aqua", "peach"};
 constexpr std::size_t kColorCount = kColorNames.size();
+
+// LoginOk's third field lists, space separated, the messages a server takes
+// beyond the original protocol. Older servers disconnect anyone who sends a
+// message they do not know, so clients check this list first.
+constexpr const char* kSpeakingFeature = "speaking";
+bool hasFeature(const std::string& features, const std::string& feature);
 
 std::string encode(const Message& message);
 
@@ -155,6 +182,53 @@ struct ImageChunk {
 // count, count within kMaxImageChunks, and 1 to kImageChunkSize bytes.
 bool parsePeerImage(const Message& message, ImageChunk& out);
 Message peerImageMessage(const ImageChunk& chunk);
+
+struct PeerData {
+    std::string sender;
+    std::string target;
+    std::string channel;
+    std::string data;
+};
+bool parsePeerData(const Message& message, PeerData& out);
+Message peerDataMessage(const PeerData& data);
+
+constexpr int kDrawCoordinateMax = 10000;
+constexpr int kPenColorCount = 6;
+constexpr std::size_t kMaxDrawSegments = 4096;
+struct ScreenDraw {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::uint32_t id = 0;
+    int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    int color = 0;
+    std::uint32_t stroke = 0; // one continuous gesture; 0 uses the legacy segment id
+    int rgb = -1; // 24-bit RGB; -1 uses the legacy palette
+};
+bool parseScreenDraw(const Message& message, bool fromOwner, ScreenDraw& out);
+Message screenDrawMessage(const ScreenDraw& draw, bool fromOwner);
+
+constexpr std::size_t kMaxEraseStrokes = 128;
+struct ScreenErase {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::vector<std::uint32_t> strokes;
+};
+bool parseScreenErase(const Message& message, ScreenErase& out);
+Message screenEraseMessage(const ScreenErase& erase);
+
+struct ScreenLaser {
+    std::string sharer;
+    std::string author;
+    std::int64_t epoch = 0;
+    std::uint32_t id = 0;
+    int x = 0, y = 0;
+    int rgb = 0;
+    bool visible = true;
+};
+bool parseScreenLaser(const Message& message, bool fromOwner, ScreenLaser& out);
+Message screenLaserMessage(const ScreenLaser& laser, bool fromOwner);
 
 struct PeerAddress {
     std::string name;
