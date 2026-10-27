@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QAction>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QDeadlineTimer>
@@ -30,6 +31,7 @@
 #include "desktop/main_window.h"
 #include "desktop/notification_center.h"
 #include "desktop/push_to_talk.h"
+#include "desktop/penguin_sprites.h"
 #include "desktop/screen_stage.h"
 static bool until(const std::function<bool()>& test) {
     QDeadlineTimer deadline(6000);
@@ -371,6 +373,89 @@ int main(int argc, char** argv) {
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(composer->text() == "/color 250");
     composer->clear();
+    // Unlock and configure the overlay, then exchange personal sprites over community links.
+    auto* penguinsAction = panel->findChild<QAction*>("desktopPenguins");
+    CHECK(penguinsAction && !penguinsAction->isVisible());
+    composer->setText("/waddleon");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(penguinsAction->isVisible() && penguinsAction->isChecked());
+    CHECK(QSettings().value("penguins/unlocked").toBool());
+    QImage personal(152, 152, QImage::Format_ARGB32);
+    personal.fill(Qt::green);
+    QSettings spriteSettings;
+    PenguinSprites{true, personal, personal}.save(spriteSettings);
+    spriteSettings.setValue("penguins/wander", false);
+    QByteArray receivedSprite;
+    ImageAssembler spriteReceiver;
+    QObject::connect(&remote, &community::Node::packetReceived,
+        [&](const QString&, const QString&, const QString& peer, const QString& type, const QJsonObject& packet) {
+            if (type != "sprite" || packet.value("count").toInt() == 0) return;
+            const auto bytes = QByteArray::fromBase64(packet.value("bytes").toString().toLatin1());
+            const auto result = spriteReceiver.add(peer, quint32(packet.value("transfer").toDouble()),
+                packet.value("index").toInt(), packet.value("count").toInt(), bytes, 0);
+            if (result) receivedSprite = *result;
+        });
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog && dialog->findChild<QCheckBox*>("communityShowPenguins")->isChecked());
+        CHECK(dialog->grab().save("community-penguin-settings.png"));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    panel->showSettings();
+    CHECK(until([&] { return PenguinSprites::fromWireData(receivedSprite).complete(); }));
+    CHECK(PenguinSprites::fromWireData(receivedSprite).standing.pixelColor(20, 20) == QColor(Qt::green));
+    const auto overlayPixels = [](const QColor& color) {
+        int count = 0;
+        for (auto* widget : QApplication::topLevelWidgets()) {
+            if (widget->objectName() != "penguinOverlay" || !widget->isVisible()) continue;
+            const auto image = widget->grab().toImage();
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) count += image.pixelColor(x, y) == color;
+        }
+        return count;
+    };
+    CHECK(overlayPixels(Qt::green) > 1000);
+    personal.fill(Qt::red);
+    const auto spriteChunks = splitImage(PenguinSprites{true, personal, personal}.wireData());
+    for (int i = 0; i < spriteChunks.size(); ++i)
+        CHECK(remote.sendPacket(cid, {}, "sprite", {{"transfer", 42}, {"index", i},
+            {"count", spriteChunks.size()}, {"bytes", QString::fromLatin1(spriteChunks[i].toBase64())}}) == 1);
+    CHECK(until([&] { return overlayPixels(Qt::red) > 1000; }));
+    {
+        QTemporaryDir lateData;
+        community::Node late(lateData.path());
+        QByteArray lateSprite;
+        ImageAssembler lateReceiver;
+        QObject::connect(&late, &community::Node::packetReceived,
+            [&](const QString&, const QString&, const QString& peer, const QString& type, const QJsonObject& packet) {
+                if (type != "sprite" || packet.value("count").toInt() == 0) return;
+                const auto result = lateReceiver.add(peer, quint32(packet.value("transfer").toDouble()),
+                    packet.value("index").toInt(), packet.value("count").toInt(),
+                    QByteArray::fromBase64(packet.value("bytes").toString().toLatin1()), 0);
+                if (result && peer == node->peerId()) lateSprite = *result;
+            });
+        CHECK(late.start("Bob", "127.0.0.1")); // Display names can coincide, identities cannot.
+        late.joinCommunity(node->invite(cid));
+        CHECK(until([&] { return node->online(cid).size() == 3 && late.online(cid).size() == 3 &&
+                                      remote.online(cid).size() == 3 && !lateSprite.isEmpty(); }));
+        CHECK(PenguinSprites::fromWireData(lateSprite).standing.pixelColor(20, 20) == QColor(Qt::green));
+        personal.fill(Qt::blue);
+        const auto blueChunks = splitImage(PenguinSprites{true, personal, personal}.wireData());
+        for (int i = 0; i < blueChunks.size(); ++i)
+            CHECK(late.sendPacket(cid, {}, "sprite", {{"transfer", 43}, {"index", i},
+                {"count", blueChunks.size()}, {"bytes", QString::fromLatin1(blueChunks[i].toBase64())}}) == 2);
+        CHECK(until([&] { return overlayPixels(Qt::blue) > 1000; }));
+        // Characters can overlap. Removing the newcomer must reveal the original sprite.
+        late.stop();
+        CHECK(until([&] { return node->online(cid).size() == 2 && overlayPixels(Qt::blue) == 0; }));
+        CHECK(overlayPixels(Qt::red) > 1000);
+    }
+    CHECK(remote.sendPacket(cid, {}, "sprite", {{"count", 0}}) == 1);
+    CHECK(until([&] { return overlayPixels(Qt::red) == 0; }));
+    // Hiding the overlay is local and persists without clearing personal sprites.
+    penguinsAction->setChecked(false);
+    CHECK(overlayPixels(Qt::green) == 0);
+    CHECK(!QSettings().value("penguins/enabled", true).toBool());
     // Watch a remote community share and exchange ink through the actual panel wiring.
     node->setVoice(cid, voiceChannel);
     remote.setVoice(cid, voiceChannel, false, false, true);

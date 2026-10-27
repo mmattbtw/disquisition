@@ -227,6 +227,38 @@ void largeScreenFrameDelivers(Node& a, Node& b, const QString& cid, const QStrin
     QObject::disconnect(receive);
 }
 
+void spritesUseAuthenticatedCommunityLinks(Node& a, Node& b, const QString& cid) {
+    QList<QJsonObject> received;
+    const auto connection = QObject::connect(&b, &Node::packetReceived,
+        [&](const QString& community, const QString&, const QString& peer,
+            const QString& kind, const QJsonObject& data) {
+            if (community == cid && kind == "sprite") {
+                CHECK(peer == a.peerId());
+                received.append(data);
+            }
+        });
+    const QString text; // Sprite updates belong to the community, independently of channels.
+    // Malformed, oversized, and incorrectly targeted chunks must never reach the UI.
+    a.sendPacket(cid, text, "sprite", {{"count", 23}, {"index", 0}, {"transfer", 1}, {"bytes", "YQ=="}});
+    a.sendPacket(cid, text, "sprite", {{"count", 1}, {"index", -1}, {"transfer", 1}, {"bytes", "YQ=="}});
+    a.sendPacket(cid, text, "sprite", {{"count", 1}, {"index", 0}, {"transfer", 1},
+        {"bytes", QString::fromLatin1(QByteArray(12 * 1024 + 1, 'x').toBase64())}});
+    a.sendPacket(cid, text, "sprite", {{"count", 1}, {"index", 0}, {"transfer", -1}, {"bytes", "YQ=="}});
+    CHECK(a.sendPacket(cid, text, "sprite", {{"count", 0}, {"target", freshId()}}) == 0);
+    const auto bytes = QByteArray(12 * 1024, 'x');
+    CHECK(a.sendPacket(cid, text, "sprite", {{"count", 2}, {"index", 0}, {"transfer", 123},
+        {"target", b.peerId()}, {"bytes", QString::fromLatin1(bytes.toBase64())}}) >= 1);
+    CHECK(a.sendPacket(cid, text, "sprite", {{"count", 2}, {"index", 1}, {"transfer", 123},
+        {"target", b.peerId()}, {"bytes", "YQ=="}}) >= 1);
+    CHECK(a.sendPacket(cid, text, "sprite", {{"count", 0}, {"target", b.peerId()}}) >= 1);
+    CHECK(until([&] { return received.size() >= 3; }));
+    CHECK(received.size() == 3);
+    CHECK(QByteArray::fromBase64(received[0].value("bytes").toString().toLatin1()) == bytes);
+    CHECK(received[1].value("index").toInt() == 1);
+    CHECK(received[2].value("count").toInt() == 0);
+    QObject::disconnect(connection);
+}
+
 void directAdmissionIsolationAndConnectionReuse() {
     QTemporaryDir ad, bd, cd, dd;
     Node a(ad.path()), b(bd.path()), c(cd.path()), denied(dd.path());
@@ -240,6 +272,7 @@ void directAdmissionIsolationAndConnectionReuse() {
     const auto link = a.invite(cid);
     b.joinCommunity(link);
     CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    spritesUseAuthenticatedCommunityLinks(a, b, cid);
     CHECK(a.connectionCount() == 1 && b.connectionCount() == 1);
     const auto second = a.createCommunity("two");
     b.joinCommunity(a.invite(second));
@@ -369,6 +402,7 @@ void relayHostMigrationAndReconnection() {
     const auto link = a.invite(cid);
     b.joinCommunity(link);
     CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    spritesUseAuthenticatedCommunityLinks(a, b, cid);
     bool chatReceived = false;
     QObject::connect(&b, &Node::packetReceived,
                      [&](const QString& community, const QString&, const QString&,

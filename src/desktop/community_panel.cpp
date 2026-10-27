@@ -48,6 +48,9 @@
 #include "community/qr.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
+#include "desktop/chat_color.h"
+#include "desktop/penguin_overlay.h"
+#include "desktop/penguin_sprites.h"
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
 #include "desktop/mention_completer.h"
@@ -58,36 +61,6 @@
 
 using community::freshId;
 namespace {
-QColor xtermColor(int index) {
-    static const int basic[][3] = {
-        {0, 0, 0},       {205, 49, 49},   {13, 188, 121}, {229, 229, 16},
-        {36, 114, 200},  {188, 63, 188},  {17, 168, 205}, {229, 229, 229},
-        {102, 102, 102}, {241, 76, 76},   {35, 209, 139}, {245, 245, 67},
-        {59, 142, 234},  {214, 112, 214}, {41, 184, 219}, {255, 255, 255}};
-    if (index < 16) {
-        return QColor(basic[index][0], basic[index][1], basic[index][2]);
-    }
-    if (index < 232) {
-        const int value = index - 16;
-        const int levels[] = {0, 95, 135, 175, 215, 255};
-        return QColor(levels[value / 36], levels[(value / 6) % 6], levels[value % 6]);
-    }
-    const int gray = 8 + (index - 232) * 10;
-    return QColor(gray, gray, gray);
-}
-
-QColor chatColor(const QString& value) {
-    static const QHash<QString, int> named {
-        {"pink", 211}, {"mint", 121}, {"butter", 229}, {"periwinkle", 111},
-        {"lilac", 183}, {"aqua", 159}, {"peach", 216}};
-    if (named.contains(value)) {
-        return xtermColor(named.value(value));
-    }
-    bool valid = false;
-    const int index = value.toInt(&valid);
-    return valid && index >= 0 && index <= 255 ? xtermColor(index) : xtermColor(121);
-}
-
 const QStringList kChatColors{"pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 bool validChatColor(const QString& value) {
     if (kChatColors.contains(value)) return true;
@@ -227,6 +200,22 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         failure_ = QString::fromUtf8(error.what());
     }
     messageColor_ = kChatColors[QRandomGenerator::global()->bounded(kChatColors.size())];
+    QSettings penguinSettings;
+    penguins_ = new PenguinOverlay(this);
+    penguins_->setEnabled(penguinSettings.value("penguins/unlocked", false).toBool() &&
+                          penguinSettings.value("penguins/enabled", false).toBool());
+    penguins_->setWandering(penguinSettings.value("penguins/wander", true).toBool());
+    penguins_->setIdleTimeoutMinutes(penguinSettings.value("penguins/idleMinutes", 10).toInt());
+    penguinsAction_ = new QAction("Desktop penguins", this);
+    penguinsAction_->setObjectName("desktopPenguins");
+    penguinsAction_->setCheckable(true);
+    penguinsAction_->setVisible(penguinSettings.value("penguins/unlocked", false).toBool());
+    penguinsAction_->setChecked(penguinsAction_->isVisible() &&
+                               penguinSettings.value("penguins/enabled", false).toBool());
+    connect(penguinsAction_, &QAction::toggled, this, [this](bool enabled) {
+        penguins_->setEnabled(enabled);
+        QSettings().setValue("penguins/enabled", enabled);
+    });
     notifications_ = new NotificationCenter(window());
     buildUi();
     connect(&pushToTalk_, &PushToTalk::heldChanged, this, &CommunityPanel::voiceState);
@@ -637,6 +626,30 @@ void CommunityPanel::settings() {
         return form;
     };
     auto* userForm = page("User", "Your profile is shared with members of your communities.");
+    auto* showPenguins = new QCheckBox("Show desktop penguins for this community", &dialog);
+    showPenguins->setObjectName("communityShowPenguins");
+    showPenguins->setChecked(penguinsAction_->isChecked());
+    showPenguins->setToolTip("Penguins appear above other apps and let clicks pass through.");
+    auto* wander = new QCheckBox("Let penguins wander", &dialog);
+    wander->setChecked(saved.value("penguins/wander", true).toBool());
+    auto* idle = new QSpinBox(&dialog);
+    idle->setRange(0, 1440);
+    idle->setSuffix(" min");
+    idle->setSpecialValueText("Never");
+    idle->setValue(qBound(0, saved.value("penguins/idleMinutes", 10).toInt(), 1440));
+    auto* spriteEditor = new PenguinSpriteEditor(PenguinSprites::fromSettings(saved), &dialog);
+    spriteEditor->setObjectName("communitySpriteEditor");
+    userForm->addRow(showPenguins);
+    userForm->addRow(wander);
+    userForm->addRow("Hide inactive penguins after", idle);
+    userForm->addRow("Custom sprite", spriteEditor);
+    const bool unlocked = saved.value("penguins/unlocked", false).toBool();
+    for (QWidget* widget : QList<QWidget*>{showPenguins, wander, idle, spriteEditor})
+        userForm->setRowVisible(widget, unlocked);
+    wander->setEnabled(showPenguins->isChecked());
+    idle->setEnabled(showPenguins->isChecked());
+    connect(showPenguins, &QCheckBox::toggled, wander, &QWidget::setEnabled);
+    connect(showPenguins, &QCheckBox::toggled, idle, &QWidget::setEnabled);
     auto* audioForm = page("Audio", "Choose your microphone, output device, and how you talk.");
     auto* notificationForm = page("Notifications",
                                   "Choose which messages and activity get your attention.");
@@ -845,6 +858,9 @@ void CommunityPanel::settings() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
+            const auto sprites = spriteEditor->sprites();
+            if (unlocked && sprites.enabled && !sprites.complete())
+                throw std::runtime_error("Upload both a standing and walking image, or turn custom sprites off.");
             const community::Profile profile{displayName->text().trimmed(), bio->toPlainText(),
                                              avatar};
             community::Profile::fromJson(profile.toJson());
@@ -887,6 +903,17 @@ void CommunityPanel::settings() {
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());
             saved.setValue("messages/maximum", maximum->text().trimmed());
+            if (unlocked) {
+                sprites.save(saved);
+                penguinsAction_->setChecked(showPenguins->isChecked());
+                saved.setValue("penguins/wander", wander->isChecked());
+                saved.setValue("penguins/idleMinutes", idle->value());
+                penguins_->setWandering(wander->isChecked());
+                penguins_->setIdleTimeoutMinutes(idle->value());
+                if (online_)
+                    for (const auto& community : node_->communities()) publishSprite(community.id);
+                refreshPenguins();
+            }
             history_ = std::move(replacement);
             historyLoaded_.clear();
             loadHistory(cid_, channel_);
@@ -1343,6 +1370,7 @@ QString CommunityPanel::memberName(const QString& cid, const QString& peer) cons
 }
 
 void CommunityPanel::refresh() {
+    refreshPenguins();
     const bool usable = node_ != nullptr;
     if (usable &&
         !node_->communities().value(selectedVoiceCid_).channels.contains(selectedVoiceChannel_)) {
@@ -1814,6 +1842,15 @@ void CommunityPanel::sendChat() {
         return;
     }
     const auto command = composer_->text().trimmed();
+    if (command == "/waddleon") {
+        QSettings().setValue("penguins/unlocked", true);
+        penguinsAction_->setVisible(true);
+        penguinsAction_->setChecked(true);
+        composer_->clear();
+        refreshPenguins();
+        note("Waddle on! Desktop penguins are now available in User Settings.");
+        return;
+    }
     if (command == "/color" || command.startsWith("/color ")) {
         const auto requested = command.mid(6).trimmed().toLower();
         if (!validChatColor(requested)) {
@@ -1821,6 +1858,7 @@ void CommunityPanel::sendChat() {
             return;
         }
         messageColor_ = requested;
+        penguins_->setColor(node_->peerId(), chatColor(messageColor_));
         for (const auto& [peer, session] : drawings_)
             if (auto* drawing = stage_->drawing(peer)) drawing->setChatColor(chatColor(messageColor_));
         composer_->clear();
@@ -1846,6 +1884,8 @@ void CommunityPanel::sendChat() {
                  node_->peerId().toStdString()},
                 {},
                 count == 0});
+        penguins_->showMessage(node_->peerId(), body);
+        penguins_->setColor(node_->peerId(), chatColor(messageColor_));
         composer_->clear();
     });
 }
@@ -1880,6 +1920,7 @@ void CommunityPanel::sendImage(const PreparedImage& image, const QString& cid,
         note("Wait for the current image uploads to finish.");
         return;
     }
+    if (cid == cid_) penguins_->noteActivity(node_->peerId());
     const auto transfer = QRandomGenerator::global()->generate();
     uploads_.append({cid, channel, transfer, splitImage(image.bytes), 0, messageColor_});
     imageTimer_.start();
@@ -1900,6 +1941,33 @@ void CommunityPanel::sendImage(const PreparedImage& image, const QString& cid,
 void CommunityPanel::receive(const QString& cid, const QString& channel, const QString& peer,
                              const QString& type, const QJsonObject& data) {
     const auto sender = memberName(cid, peer);
+    if (type == "sprite") {
+        const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
+        const auto count = data.value("count").toInt();
+        if (count == 0) {
+            spriteImages_.remove(key(cid, peer));
+            peerSprites_.remove(peer);
+            refreshPenguins();
+            return;
+        }
+        const auto image = spriteImages_.add(key(cid, peer), quint32(data.value("transfer").toDouble()),
+            data.value("index").toInt(), count, bytes, QDateTime::currentMSecsSinceEpoch());
+        if (image && image->size() <= 256 * 1024) {
+            const auto sprites = PenguinSprites::fromWireData(*image);
+            if (sprites.complete()) {
+                peerSprites_[peer] = {sprites.standing, sprites.walking};
+                refreshPenguins();
+            }
+        }
+        return;
+    }
+    if (type == "chat" || type == "image") {
+        peerColors_[peer] = chatColor(packetColor(data));
+        if (cid == cid_) {
+            penguins_->setColor(peer, peerColors_[peer]);
+            if (type == "chat") penguins_->showMessage(peer, data.value("body").toString());
+        }
+    }
     if (type == "chat") {
         const auto body = data.value("body").toString();
         notifications_->messageReceived(sender, body,
@@ -1931,6 +1999,7 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         const auto image = images_.add(key(cid, channel) + '/' + peer, quint32(transfer), index,
                                        count, bytes, QDateTime::currentMSecsSinceEpoch());
         if (image && isDisplayableImage(*image)) {
+            if (cid == cid_) penguins_->noteActivity(peer);
             notifications_->messageReceived(sender, "sent an image", Mentioned::No);
             append(cid, channel,
                    {{QDateTime::currentSecsSinceEpoch(),
@@ -2202,4 +2271,68 @@ void CommunityPanel::stopDrawing(const QString& peer) {
     if (session == drawings_.end()) return;
     session->second->stop();
     drawings_.erase(session);
+}
+
+void CommunityPanel::publishSprite(const QString& cid, const QString& target) {
+    if (!online_ || !node_) return;
+    // Sprites describe a community member and do not depend on its channels.
+    const QString channel;
+    QSettings settings;
+    auto sprites = PenguinSprites::fromSettings(settings);
+    if (!settings.value("penguins/unlocked", false).toBool()) sprites = {};
+    const auto bytes = sprites.wireData();
+    if (bytes.size() > 256 * 1024) return;
+    const auto chunks = splitImage(bytes);
+    const auto transfer = QRandomGenerator::global()->generate();
+    attempt([&] {
+        if (bytes.isEmpty()) {
+            node_->sendPacket(cid, channel, "sprite", {{"target", target}, {"count", 0}});
+            return;
+        }
+        for (int index = 0; index < chunks.size(); ++index)
+            node_->sendPacket(cid, channel, "sprite", {{"target", target}, {"transfer", double(transfer)},
+                {"index", index}, {"count", chunks.size()},
+                {"bytes", QString::fromLatin1(chunks[index].toBase64())}});
+    });
+}
+
+void CommunityPanel::refreshPenguins() {
+    if (!penguins_ || !node_) return;
+    if (!online_) {
+        penguins_->setMembers({});
+        spritePeers_.clear();
+        peerSprites_.clear();
+        peerColors_.clear();
+        spriteImages_.clear();
+        return;
+    }
+    QSet<QString> knownPeers;
+    for (const auto& community : node_->communities()) {
+        const auto online = node_->online(community.id);
+        // Metadata reconciliation can briefly make a live link unready. Keep its
+        // cached appearance while the authenticated identity is still a member.
+        for (const auto& member : community.members) knownPeers.insert(member.id);
+        for (const auto& peer : online - spritePeers_.value(community.id))
+            if (peer != node_->peerId()) publishSprite(community.id, peer);
+        spritePeers_[community.id] = online;
+    }
+    for (auto it = peerSprites_.begin(); it != peerSprites_.end();)
+        if (!knownPeers.contains(it.key())) it = peerSprites_.erase(it); else ++it;
+    for (auto it = peerColors_.begin(); it != peerColors_.end();)
+        if (!knownPeers.contains(it.key())) it = peerColors_.erase(it); else ++it;
+    const auto online = node_->online(cid_);
+    penguins_->setMembers(online.values());
+    QMap<QString, QString> names;
+    for (const auto& peer : online) names[peer] = memberName(cid_, peer);
+    penguins_->setDisplayNames(names);
+    for (const auto& peer : online) {
+        penguins_->setColor(peer, peer == node_->peerId() ? chatColor(messageColor_)
+                                                        : peerColors_.value(peer, chatColor("mint")));
+        const auto sprites = peerSprites_.value(peer);
+        penguins_->setCustomSprites(peer, sprites.first, sprites.second);
+    }
+    QSettings settings;
+    const auto sprites = PenguinSprites::fromSettings(settings);
+    if (settings.value("penguins/unlocked", false).toBool() && sprites.enabled)
+        penguins_->setCustomSprites(node_->peerId(), sprites.standing, sprites.walking);
 }

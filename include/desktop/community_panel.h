@@ -13,6 +13,8 @@
 #include "desktop/screen_drawing_session.h"
 #include "desktop/screen_capture.h"
 
+class QAction;
+class PenguinOverlay;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QLineEdit;
@@ -32,6 +34,7 @@ class CommunityPanel final : public QWidget {
 public:
     explicit CommunityPanel(QWidget* parent = nullptr, const QString& directory = {});
     ~CommunityPanel() override;
+    QAction* penguinsAction() const { return penguinsAction_; }
     void showSettings() { settings(); }
     void reloadSavingSettings() { openHistory(); }
 signals:
@@ -74,6 +77,8 @@ private:
     void leaveVoice();
     void voiceState();
     void updatePushToTalk();
+    void refreshPenguins();
+    void publishSprite(const QString& cid, const QString& target = {});
     void startDrawing(const QString& peer, bool owner);
     void stopDrawing(const QString& peer);
     QStringList memberNames(const QString& cid) const;
@@ -90,6 +95,12 @@ private:
     bool refreshQueued_ = false;
     QString cid_, channel_;
     QString messageColor_;
+    PenguinOverlay* penguins_ = nullptr;
+    QAction* penguinsAction_ = nullptr;
+    QMap<QString, QSet<QString>> spritePeers_;
+    QMap<QString, QPair<QImage, QImage>> peerSprites_;
+    QMap<QString, QColor> peerColors_;
+    ImageAssembler spriteImages_;
     QString renderedProfiles_;
     QString voiceCid_, voiceChannel_;
     QString selectedVoiceCid_, selectedVoiceChannel_;

@@ -19,6 +19,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(preferences, &QAction::triggered, communities, &CommunityPanel::showSettings);
     auto* notifications = findChild<NotificationCenter*>();
     appMenu->addAction(notifications->muteAction());
+    appMenu->addAction(communities->penguinsAction());
     connect(notifications, &NotificationCenter::badgeChanged, this, [this](const UnreadBadge& badge) {
         setWindowTitle(badgedTitle(QString::fromUtf8(disquisition::kAppName), badge));
     });

@@ -959,7 +959,7 @@ void Node::setVoice(const QString& cid, const QString& channel, bool muted, bool
 bool Node::validPacket(const QString& cid, const QString& channel, const QString& type,
                        const QJsonObject& data, const QString& peer) const {
     if (!models_.contains(cid) || !models_[cid].isMember(peerId()) ||
-        !models_[cid].isMember(peer) || !models_[cid].channels.contains(channel))
+        !models_[cid].isMember(peer))
         return false;
     const auto timestamp = data.value("timestamp").toDouble(-1);
     if (timestamp < 1 || timestamp > 9007199254740991.0)
@@ -967,6 +967,19 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
     const auto target = data.value("target").toString();
     if (!target.isEmpty() && target != peerId())
         return false;
+    if (type == "sprite") {
+        if (!channel.isEmpty() || canonical(data).size() > 24 * 1024)
+            return false;
+        const int count = data.value("count").toInt(-1);
+        if (count == 0) return !data.contains("bytes");
+        const int index = data.value("index").toInt(-1);
+        const double transfer = data.value("transfer").toDouble(-1);
+        const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
+        return count > 0 && count <= 22 && index >= 0 && index < count &&
+               transfer >= 0 && transfer <= UINT32_MAX && transfer == quint32(transfer) &&
+               !bytes.isEmpty() && bytes.size() <= qsizetype(chat::kImageChunkSize);
+    }
+    if (!models_[cid].channels.contains(channel)) return false;
     if (type == "chat")
         return models_[cid].channels[channel].type == "text" &&
                !data.value("body").toString().trimmed().isEmpty() &&
@@ -1019,10 +1032,11 @@ bool Node::sendScreenFrame(const QString& cid, const QString& channel, const QSt
 int Node::sendPacketImpl(const QString& cid, const QString& channel, const QString& type,
                          QJsonObject data, bool checkScreenBacklog) {
     if (!running_ || !models_.contains(cid) || !models_[cid].isMember(peerId()) ||
-        !models_[cid].channels.contains(channel))
+        (type != "sprite" && !models_[cid].channels.contains(channel)))
         throw std::runtime_error("unknown channel");
-    const auto channelType = models_[cid].channels[channel].type;
-    if ((type == "chat" || type == "image") ? channelType != "text" : channelType != "voice")
+    const auto channelType = models_[cid].channels.value(channel).type;
+    if (type == "sprite" ? !channel.isEmpty() :
+        ((type == "chat" || type == "image") ? channelType != "text" : channelType != "voice"))
         throw std::runtime_error("message does not belong in this channel");
     if (type == "chat" && (data.value("body").toString().trimmed().isEmpty() ||
                            data.value("body").toString().toUtf8().size() > 2000))
