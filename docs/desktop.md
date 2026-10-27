@@ -21,6 +21,8 @@ clear the relay field to use direct connections and advertise a LAN address.
 
 Select **Create** for a new community, or **Join** to paste an invite or open its
 QR image. **Invite** lets owners and admins copy an invite link or save a QR code.
+While an invite is being resolved, the sidebar shows a **Joining community**
+progress indicator; it disappears when the host admits you or rejects the invite.
 The relay forwards encrypted peer traffic. Community metadata lives on member
 devices, and community connections do not need the discovery server.
 
@@ -122,7 +124,8 @@ appear in chat. The setting is saved on this device.
 
 Select a voice channel, then choose **Join voice** beneath its name. The current
 text channel stays open. Participants and their mute, deafen, and sharing status
-appear beneath the voice channel rather than in the member list.
+appear beneath the voice channel rather than in the member list. A participant's
+row lights up green while their microphone is active.
 
 **Mute**, **Deafen**, **Share screen**, and **Leave voice** appear only after joining
 voice. You can join one voice channel at a time across all communities. Select
@@ -135,7 +138,11 @@ microphone access for disquisition in System Settings > Privacy & Security.
 Choose **Share screen** while in voice to select a screen or window. Other peers
 in that voice channel choose which streams to watch. macOS also requires Screen
 Recording permission. Use **Stop sharing** to end the stream or **Leave voice**
-to stop the call and share together.
+to stop the call and share together. On macOS, full-screen shares include
+disquisition's own windows and the app is also listed as a window source;
+drawing and annotation overlays stay out of the capture.
+
+Profile and community metadata updates keep the current call connected.
 
 Stream invitations and fullscreen titles use display names. Watching requests a
 fresh keyframe, including when the shared screen is static. If the first frame
@@ -143,8 +150,8 @@ or subscription is missed, the viewer retries automatically.
 
 ## Leave or delete a community
 
-Any member other than the owner can open the **Community** menu beside the
-channel heading and choose **Leave community**. This removes your membership;
+Any member other than the owner can right-click the community in the sidebar
+and choose **Leave community**. This removes your membership;
 you need a new invite to rejoin. The owner can open **Manage > Community** and
 choose **Delete community** to permanently delete it for all members.
 Both actions ask for confirmation and work even while peers are synchronizing.

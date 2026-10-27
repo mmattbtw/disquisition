@@ -544,8 +544,72 @@ int main(int argc, char** argv) {
     remote.setVoice(cid, voiceChannel, false, false, true);
     auto* stage = panel->findChild<ScreenStage*>();
     CHECK(stage);
+    auto* voiceStatus = panel->findChild<QLabel*>("communityVoiceStatus");
     CHECK(until([&] { return stage->drawing(remote.peerId()) != nullptr &&
                             remote.presence(cid, node->peerId()).voiceChannel == voiceChannel; }));
+    // Profile/metadata updates must not interrupt the call.
+    CHECK(voiceStatus->text().contains("Lounge"));
+    auto localProfile = node->profile();
+    localProfile.bio += " In voice.";
+    node->setProfile(localProfile);
+    CHECK(until([&] {
+        return remote.communities()[cid].members[node->peerId()].bio == localProfile.bio &&
+               !node->synchronizing(cid) && !remote.synchronizing(cid);
+    }));
+    CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
+    CHECK(voiceStatus->text().contains("Lounge"));
+    auto remoteProfile = remote.profile();
+    remoteProfile.bio += " In voice.";
+    remote.setProfile(remoteProfile);
+    CHECK(until([&] {
+        return node->communities()[cid].members[remote.peerId()].bio == remoteProfile.bio &&
+               !node->synchronizing(cid) && !remote.synchronizing(cid);
+    }));
+    CHECK(remote.presence(cid, remote.peerId()).voiceChannel == voiceChannel);
+    CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
+    CHECK(voiceStatus->text().contains("Lounge"));
+    // Talking peers light up their row while audio keeps arriving.
+    const auto speakingRow = [&]() -> QWidget* {
+        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole + 2).toString() == remote.peerId())
+                return tree->itemWidget(*it, 0);
+        return nullptr;
+    };
+    CHECK(until([&] { return speakingRow() != nullptr; }));
+    QByteArray loud(640, 0);
+    for (int index = 0; index < loud.size(); index += 2) {
+        loud[index] = char(0xe8);
+        loud[index + 1] = 0x03;
+    }
+    CHECK(remote.sendPacket(cid, voiceChannel, "audio",
+                            {{"bytes", QString::fromLatin1(loud.toBase64())}}) == 1);
+    CHECK(until([&] {
+        auto* row = speakingRow();
+        return row && row->styleSheet().contains("background-color");
+    }));
+    CHECK(tree->grab().save("community-voice-speaking.png"));
+    for (int index = 0; index < 12; ++index)
+        CHECK(remote.sendPacket(cid, voiceChannel, "audio",
+                                {{"bytes", QString::fromLatin1(QByteArray(640, 0).toBase64())}}) == 1);
+    CHECK(until([&] {
+        auto* row = speakingRow();
+        return row && row->styleSheet().isEmpty();
+    }));
+    // Muting a peer clears the highlight without waiting for more packets.
+    CHECK(remote.sendPacket(cid, voiceChannel, "audio",
+                            {{"bytes", QString::fromLatin1(loud.toBase64())}}) == 1);
+    CHECK(until([&] {
+        auto* row = speakingRow();
+        return row && row->styleSheet().contains("background-color");
+    }));
+    remote.setVoice(cid, voiceChannel, true, false, true);
+    CHECK(until([&] { return node->presence(cid, remote.peerId()).muted; }));
+    CHECK(until([&] {
+        auto* row = speakingRow();
+        return row && row->styleSheet().isEmpty();
+    }));
+    remote.setVoice(cid, voiceChannel, false, false, true);
+    CHECK(until([&] { return !node->presence(cid, remote.peerId()).muted; }));
     CHECK(until([&] {
         for (auto* profile : tree->findChildren<QPushButton*>("voiceMemberProfile"))
             if (profile->property("peer").toString() == remote.peerId()) {
@@ -784,9 +848,27 @@ int main(int argc, char** argv) {
     online->click();
     CHECK(until([&] { return node->online(cid).size() == 2 && !node->synchronizing(cid); }));
     const auto visit = remote.createCommunity("Bobby's club");
-    node->joinCommunity(remote.invite(visit));
+    const auto visitInvite = remote.invite(visit);
+    std::vector<std::unique_ptr<QSignalBlocker>> joinBlockers;
+    for (auto* socket : remote.findChildren<QSslSocket*>())
+        joinBlockers.push_back(std::make_unique<QSignalBlocker>(socket));
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        dialog->findChild<QPlainTextEdit*>("communityInviteInput")->setPlainText(visitInvite);
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    });
+    panel->findChild<QPushButton*>("communityJoin")->click();
+    auto* joining = panel->findChild<QWidget*>("communityJoining");
+    CHECK(joining && !joining->isHidden());
+    CHECK(window.grab().save("community-joining.png"));
+    joinBlockers.clear();
+    for (auto* socket : remote.findChildren<QSslSocket*>())
+        if (socket->bytesAvailable())
+            QMetaObject::invokeMethod(socket, "readyRead", Qt::DirectConnection);
     CHECK(until([&] { return node->communities().value(visit).isMember(node->peerId()) &&
                              !node->synchronizing(visit) && tree->topLevelItemCount() == 2; }));
+    CHECK(until([&] { return joining->isHidden(); }));
     auto* leaveAction = panel->findChild<QAction*>("communityLeave");
     CHECK(leaveAction->isVisible() && leaveAction->isEnabled());
     CHECK(!manage->isEnabled() && !node->communities()[visit].canAdmin(node->peerId()));

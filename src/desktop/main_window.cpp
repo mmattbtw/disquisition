@@ -55,6 +55,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QLabel#profileBio { color: #c5c8c6; }
         QLabel#settingsHeading { font-size: 19px; font-weight: 700; margin-bottom: 12px; }
         QWidget#communityVoiceControls { background: #242f32; }
+        QLabel#communityJoiningLabel { color: #9dccca; }
+        QProgressBar#communityJoiningProgress { background: #333842; border: 0; border-radius: 2px; }
+        QProgressBar#communityJoiningProgress::chunk { background: #9dccca; border-radius: 2px; }
         QPushButton#communityJoinVoice { color: #9dccca; border-color: #596f70; padding: 4px 8px; }
         QSplitter::handle { width: 1px; background: #545b66; }
         QSplitter::handle:vertical { height: 1px; }

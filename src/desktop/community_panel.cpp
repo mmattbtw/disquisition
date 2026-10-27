@@ -28,6 +28,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -44,7 +45,9 @@
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
+#include <cmath>
 
 #include "community/qr.h"
 #include "desktop/audio_permission.h"
@@ -82,6 +85,13 @@ QString key(const QString& cid, const QString& channel) {
 }
 QString text(const std::string& value) {
     return QString::fromStdString(value);
+}
+constexpr double kVoiceActivityLevel = 180; // RMS, about -45 dBFS.
+constexpr int kVoiceActivityHoldFrames = 10;
+void paintSpeaking(QWidget* row, bool speaking) {
+    row->setStyleSheet(speaking ? QStringLiteral("background-color: rgba(94, 190, 126, 70);"
+                                                 "border-radius: 6px;")
+                                : QString());
 }
 QPushButton* button(const QString& title, const char* name, QWidget* parent) {
     auto* result = new QPushButton(title, parent);
@@ -239,11 +249,15 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
             });
         });
         connect(node_.get(), &community::Node::joined, this, [this](const QString& cid) {
+            joiningCommunities_.remove(cid);
+            updateJoining();
             selectCommunity(cid);
             note("Community connected. Messages are delivered live.");
         });
         connect(node_.get(), &community::Node::joinRejected, this,
-                [this](const QString&, const QString&) {
+                [this](const QString& cid, const QString&) {
+                    joiningCommunities_.remove(cid);
+                    updateJoining();
                     noteError("Invite rejected. Check the code with the community owner.");
                 });
         connect(node_.get(), &community::Node::errorOccurred, this, &CommunityPanel::noteError);
@@ -283,6 +297,21 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     }
     qApp->installEventFilter(this);
     imageTimer_.setInterval(2);
+    speakingTimer_.setInterval(500);
+    connect(&speakingTimer_, &QTimer::timeout, this, [this] {
+        if (!node_ || voiceCid_.isEmpty())
+            return;
+        const auto cutoff = QDateTime::currentMSecsSinceEpoch() - 1000;
+        QStringList expired;
+        for (const auto& peer : speaking_)
+            if (peer != node_->peerId() && lastAudioAt_.value(peer) < cutoff)
+                expired.append(peer);
+        for (const auto& peer : expired) {
+            setSpeaking(peer, false);
+            quietAudioFrames_.remove(peer);
+        }
+    });
+    speakingTimer_.start();
     connect(&imageTimer_, &QTimer::timeout, this, [this] {
         if (!online_ || uploads_.isEmpty()) {
             imageTimer_.stop();
@@ -309,6 +338,10 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                 node_->sendPacket(voiceCid_, voiceChannel_, "audio",
                                   {{"bytes", QString::fromLatin1(pcm.toBase64())}});
             });
+    });
+    connect(&audio_, &RelayAudio::speakingChanged, this, [this](bool speaking) {
+        if (node_ && !voiceCid_.isEmpty())
+            setSpeaking(node_->peerId(), speaking);
     });
     capture_.setBacklogProbe([this] { return node_ ? node_->mediaBacklog() : qint64(0); });
     connect(&capture_, &ScreenCapture::frameReady, this,
@@ -377,6 +410,24 @@ void CommunityPanel::noteError(const QString& message) {
     status_->setToolTip(message);
     status_->setVisible(!message.isEmpty());
 }
+void CommunityPanel::updateJoining() {
+    if (joining_)
+        joining_->setVisible(!joiningCommunities_.isEmpty());
+}
+void CommunityPanel::setSpeaking(const QString& peer, bool speaking) {
+    if (speaking == speaking_.contains(peer))
+        return;
+    if (speaking)
+        speaking_.insert(peer);
+    else
+        speaking_.remove(peer);
+    for (QTreeWidgetItemIterator item(tree_); *item; ++item) {
+        if ((*item)->data(0, Qt::UserRole + 2).toString() != peer)
+            continue;
+        if (auto* row = tree_->itemWidget(*item, 0))
+            paintSpeaking(row, speaking);
+    }
+}
 
 void CommunityPanel::buildUi() {
     auto* layout = new QVBoxLayout(this);
@@ -415,6 +466,23 @@ void CommunityPanel::buildUi() {
     tree_->setMinimumWidth(245);
     tree_->setIndentation(16);
     tree_->setIconSize(QSize(20, 20));
+    joining_ = new QWidget(sidebar);
+    joining_->setObjectName("communityJoining");
+    auto* joiningLayout = new QVBoxLayout(joining_);
+    joiningLayout->setContentsMargins(0, 4, 0, 4);
+    joiningLayout->setSpacing(4);
+    auto* joiningLabel = new QLabel("Joining community…", joining_);
+    joiningLabel->setObjectName("communityJoiningLabel");
+    joiningLabel->setStyleSheet("color:#9dccca;");
+    joiningLayout->addWidget(joiningLabel);
+    auto* joiningProgress = new QProgressBar(joining_);
+    joiningProgress->setObjectName("communityJoiningProgress");
+    joiningProgress->setRange(0, 0);
+    joiningProgress->setTextVisible(false);
+    joiningProgress->setFixedHeight(4);
+    joiningLayout->addWidget(joiningProgress);
+    joining_->hide();
+    side->addWidget(joining_);
     side->addWidget(tree_, 1);
     connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceMoveRequested, this,
             [this](const QString& cid, const QString& peer, const QString& channel) {
@@ -616,6 +684,8 @@ void CommunityPanel::connectNode() {
         online_ = false;
         uploads_.clear();
         images_.clear();
+        joiningCommunities_.clear();
+        updateJoining();
         note("Disconnected. Saved communities remain available.");
     }
     else {
@@ -627,6 +697,8 @@ void CommunityPanel::connectNode() {
                          settings.value("community/relay", "relay.disquisition.app").toString());
         if (online_) {
             settings.setValue("community/name", name_->text().trimmed());
+            joiningCommunities_ = node_->pendingCommunities();
+            updateJoining();
             openHistory();
             const QUrl endpoint(node_->endpoint());
             note(endpoint.scheme() == "relay"
@@ -1074,7 +1146,17 @@ void CommunityPanel::acceptInvite(const QString& link) {
         return;
     }
     attempt([&] {
-        node_->joinCommunity(link);
+        const auto invite = community::Invite::fromLink(link);
+        joiningCommunities_.insert(invite.community);
+        updateJoining();
+        try {
+            node_->joinCommunity(link);
+        }
+        catch (...) {
+            joiningCommunities_.remove(invite.community);
+            updateJoining();
+            throw;
+        }
         note("Looking for a community host. Retrying automatically if nobody is reachable.");
     });
 }
@@ -1468,8 +1550,21 @@ void CommunityPanel::refresh() {
         }
     }
     if (!voiceCid_.isEmpty() && currentVoiceCid.isEmpty()) {
-        leaveVoice();
-        return;
+        // A metadata sync may briefly hide presence. Keep the call alive while
+        // the retained membership and voice channel still exist.
+        const auto model = node_->communities().value(voiceCid_);
+        if (online_ && model.isMember(node_->peerId()) &&
+            model.channels.value(voiceChannel_).type == "voice") {
+            currentVoiceCid = voiceCid_;
+            currentVoiceChannel = voiceChannel_;
+            if (node_->presence(currentVoiceCid, node_->peerId()).voiceChannel.isEmpty())
+                node_->setVoice(currentVoiceCid, currentVoiceChannel, mute_->isChecked(),
+                                deafen_->isChecked(), capture_.running());
+        }
+        else {
+            leaveVoice();
+            return;
+        }
     }
     voiceCid_ = currentVoiceCid;
     voiceChannel_ = currentVoiceChannel;
@@ -1623,6 +1718,7 @@ void CommunityPanel::refresh() {
                 participant->setSizeHint(0,
                                          QSize(160, std::max(48, row->sizeHint().height() + 12)));
                 tree_->setItemWidget(participant, 0, row);
+                paintSpeaking(row, speaking_.contains(peer.id));
                 static_cast<CommunityTree*>(tree_)->configureVoiceParticipant(
                     participant, row, model.id, channel.id, peer.id,
                     online_ && model.canAdmin(node_->peerId()));
@@ -1745,12 +1841,19 @@ void CommunityPanel::refresh() {
             const auto state = node_->presence(voiceCid_, peer);
             if (peer != node_->peerId() && state.voiceChannel == voiceChannel_) {
                 active.insert(peer);
+                if (state.muted) {
+                    setSpeaking(peer, false);
+                    quietAudioFrames_.remove(peer);
+                }
                 if (state.sharing)
                     streaming.insert(peer);
             }
         }
         for (const auto& peer : audioPeers_ - active) {
             audio_.remove(peer);
+            setSpeaking(peer, false);
+            quietAudioFrames_.remove(peer);
+            lastAudioAt_.remove(peer);
             watchers_.remove(peer);
             for (const auto& [_, session] : drawings_)
                 session->peerChanged(peer, false);
@@ -2088,7 +2191,23 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
                 false});
     }
     else if (type == "audio" && cid == voiceCid_ && channel == voiceChannel_) {
-        audio_.receive(peer, QByteArray::fromBase64(data.value("bytes").toString().toLatin1()));
+        const auto pcm = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
+        audio_.receive(peer, pcm);
+        if (pcm.size() == 640) {
+            lastAudioAt_[peer] = QDateTime::currentMSecsSinceEpoch();
+            const auto* samples = reinterpret_cast<const unsigned char*>(pcm.constData());
+            double sum = 0;
+            for (int index = 0; index < pcm.size(); index += 2) {
+                const auto sample =
+                    static_cast<qint16>(samples[index] | (samples[index + 1] << 8));
+                sum += static_cast<double>(sample) * sample;
+            }
+            const bool loud = std::sqrt(sum / 320) > kVoiceActivityLevel;
+            const int quiet =
+                loud ? 0 : std::min(quietAudioFrames_.value(peer) + 1, kVoiceActivityHoldFrames);
+            quietAudioFrames_[peer] = quiet;
+            setSpeaking(peer, quiet < kVoiceActivityHoldFrames);
+        }
     }
     else if (type == "image") {
         const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
@@ -2212,6 +2331,9 @@ void CommunityPanel::leaveVoice() {
         attempt([&] { node_->setVoice(previous, {}); });
     audio_.stop();
     audioPeers_.clear();
+    speaking_.clear();
+    quietAudioFrames_.clear();
+    lastAudioAt_.clear();
     watchers_.clear();
     for (const auto& peer : streams_)
         stage_->removeStream(peer);

@@ -83,10 +83,7 @@ struct Node::Link {
     QSet<QString> allowed;
     QSet<QString> ready;
     QMap<QString, qint64> synchronizing;
-    void beginSynchronization(const QString& cid) {
-        if (!synchronizing.contains(cid))
-            synchronizing.insert(cid, now());
-    }
+    void beginSynchronization(const QString& cid) { synchronizing.insert(cid, now()); }
     QMap<QString, QJsonObject> admissions;
     struct Snapshot {
         QString owner;
@@ -634,8 +631,11 @@ void Node::sendState(Link* link, const QString& cid) {
                 {"community", cid},
                 {"owner", models_[cid].owner},
                 {"count", operations.size()}});
-    for (const auto& operation : operations)
+    for (const auto& operation : operations) {
+        link->beginSynchronization(cid);
         send(link, {{"type", "state-operation"}, {"community", cid}, {"operation", operation}});
+    }
+    link->beginSynchronization(cid);
     send(link, {{"type", "state-end"}, {"community", cid}});
 }
 
@@ -788,6 +788,7 @@ void Node::handle(Link* link, const QJsonObject& message) {
         if (buffered > 2 * kMaxMetadataBytes)
             throw std::runtime_error("too many metadata transfers in progress");
         snapshot.operations.append(message.value("operation"));
+        link->beginSynchronization(cid);
         return;
     }
     if (type == "state-end") {
@@ -898,9 +899,16 @@ bool Node::synchronizing(const QString& cid) const {
     if (now() < recoveringUntil_)
         return true;
     for (auto* link : links_) {
-        if (link->hello && models_.contains(cid) && models_[cid].isMember(link->peer) &&
-            (!link->ready.contains(cid) || link->synchronizing.contains(cid)))
+        if (!link->hello || !models_.contains(cid) || !models_[cid].isMember(link->peer))
+            continue;
+        const auto started = link->synchronizing.constFind(cid);
+        if (!link->ready.contains(cid) || started != link->synchronizing.cend()) {
+            // A stalled transfer still leaves the link and its voice connection
+            // alive, but it must not suspend every other admission.
+            if (started != link->synchronizing.cend() && now() - *started > 20000)
+                continue;
             return true;
+        }
     }
     return false;
 }
@@ -1249,11 +1257,6 @@ void Node::tick() {
             if (!links_.contains(link))
                 continue;
             bool stalled = false;
-            // A peer answering pings but withholding metadata or its ack must
-            // not keep every admission waiting forever. Close and retry it.
-            for (const auto started : link->synchronizing)
-                if (now() - started > 20000)
-                    stalled = true;
             for (const auto& snapshot : link->snapshots)
                 if (now() - snapshot.started > 20000)
                     stalled = true;

@@ -39,6 +39,12 @@ public:
     const QMap<QString, Model>& communities() const { return models_; }
     QString createCommunity(const QString& name);
     void joinCommunity(const QString& link);
+    QSet<QString> pendingCommunities() const {
+        QSet<QString> result;
+        for (auto it = pending_.cbegin(); it != pending_.cend(); ++it)
+            result.insert(it.key());
+        return result;
+    }
     QString invite(const QString& community);
     void edit(const QString& community, const QString& kind, const QJsonObject& data);
     int sendPacket(const QString& community, const QString& channel, const QString& type,

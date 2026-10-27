@@ -375,13 +375,20 @@ void stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever() {
         return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
                !a.synchronizing(cid) && !b.synchronizing(cid);
     }));
+    const auto voice = channel(a.communities()[cid], "voice");
+    a.setVoice(cid, voice);
+    b.setVoice(cid, voice);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).voiceChannel == voice; }));
     for (auto* socket : b.findChildren<QSslSocket*>())
         socket->blockSignals(true);
     a.edit(cid, "rename", {{"name", "unacknowledged update"}});
     CHECK(a.synchronizing(cid));
     c.joinCommunity(invitation);
     CHECK(until([&] { return a.communities()[cid].isMember(c.peerId()); }, 24000));
-    CHECK(!a.online(cid).contains(b.peerId()));
+    // The stalled transfer no longer blocks admission, but it must not take
+    // the peer link or its voice presence down with it.
+    CHECK(a.online(cid).contains(b.peerId()));
+    CHECK(a.presence(cid, b.peerId()).voiceChannel == voice);
 }
 
 void stalledUnauthenticatedMemberDoesNotBlockAdmissions() {

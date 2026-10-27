@@ -94,6 +94,8 @@ private:
     void attempt(const std::function<void()>& action);
     void note(const QString& text);
     void noteError(const QString& text);
+    void updateJoining();
+    void setSpeaking(const QString& peer, bool speaking);
 
     std::unique_ptr<community::Node> node_;
     QString failure_;
@@ -120,8 +122,13 @@ private:
     QSet<QString> streams_;
     QSet<QString> watching_;
     QSet<QString> watchers_;
+    QSet<QString> joiningCommunities_;
+    QSet<QString> speaking_;
+    QMap<QString, int> quietAudioFrames_;
+    QMap<QString, qint64> lastAudioAt_;
     QMap<QString, qint64> lastScreenFrames_;
     QTimer streamRetry_;
+    QTimer speakingTimer_;
     std::unique_ptr<chat::RecentMessages> history_;
     QLineEdit* name_ = nullptr;
     QPushButton* connect_ = nullptr;
@@ -132,6 +139,7 @@ private:
     QLabel* topic_ = nullptr;
     QLabel* status_ = nullptr;
     QAction* leaveAction_ = nullptr;
+    QWidget* joining_ = nullptr;
     QLabel* voiceStatus_ = nullptr;
     QWidget* voiceControls_ = nullptr;
     QPushButton* create_ = nullptr;
