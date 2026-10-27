@@ -62,7 +62,7 @@ public:
     bool acceptsIntent(const QString& host, const QJsonObject& intent) const;
     QString issueInvite(const Identity& author);
     bool validCode(const QString& code) const;
-    bool isMember(const QString& peer) const { return members.contains(peer); }
+    bool isMember(const QString& peer) const { return !deleted && members.contains(peer); }
     bool canAdmin(const QString& peer) const;
     QString revision() const;
     QString host(const QSet<QString>& online) const;
@@ -71,6 +71,7 @@ public:
 
     QString id;
     QString owner;
+    bool deleted = false; // Owner-signed tombstone; survives stale snapshot merges.
     QString name;
     QByteArray icon;
     QMap<QString, Member> members;

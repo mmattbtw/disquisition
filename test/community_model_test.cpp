@@ -265,6 +265,100 @@ void removingHostPreservesItsPreviouslyAcceptedAdmissions() {
     CHECK(group.model.isMember(group.carol.id()));
     CHECK(Model::fromJson(group.model.toJson()).isMember(group.carol.id()));
 }
+void leavingOnlyRemovesTheAuthorAndAllowsFreshAdmission() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.admit(group.bob,
+        joinIntent(group.carol, group.invite, "carol", "tcp://127.0.0.1:9003"));
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    const auto stale = group.model.toJson();
+    QJsonObject oldIntent;
+    for (const auto& operation : stale.value("operations").toArray()) {
+        const auto data = operation.toObject().value("data").toObject();
+        if (data.value("intent").toObject().value("peer").toString() == group.bob.id())
+            oldIntent = data.value("intent").toObject();
+    }
+    group.model.change(group.bob, "leave", {{"peer", group.alice.id()}});
+    CHECK(!group.model.isMember(group.bob.id()));
+    CHECK(!group.model.canAdmin(group.bob.id()));
+    CHECK(group.model.isMember(group.alice.id()) && group.model.canAdmin(group.alice.id()));
+    CHECK(group.model.isMember(group.carol.id()));
+    CHECK(!group.model.banned.contains(group.bob.id()));
+    group.model.merge(stale);
+    CHECK(!group.model.isMember(group.bob.id()));
+    rejects([&] { group.model.change(group.bob, "rename", {{"name", "no"}}); });
+    rejects([&] { group.model.change(group.alice, "leave", {}); });
+    const auto leaving = Model::fromJson(group.model.toJson());
+    CHECK(!leaving.isMember(group.bob.id()) && leaving.isMember(group.carol.id()));
+    CHECK(!oldIntent.isEmpty());
+    CHECK(!group.model.acceptsIntent(group.alice.id(), oldIntent));
+    rejects([&] { group.model.admit(group.alice, oldIntent); });
+    group.join(group.bob, "returning bob");
+    CHECK(group.model.isMember(group.bob.id()));
+    CHECK(!group.model.canAdmin(group.bob.id()));
+    CHECK(Model::fromJson(group.model.toJson()).isMember(group.bob.id()));
+}
+
+void leavingBlocksConcurrentHostAdmissionsAndEdits() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    auto stale = group.model;
+    group.model.change(group.bob, "leave", {});
+    stale.change(group.bob, "rename", {{"name", "stale admin"}});
+    stale.admit(group.bob,
+        joinIntent(group.carol, group.invite, "carol", "tcp://127.0.0.1:9003"));
+    group.model.merge(stale.toJson());
+    stale.merge(group.model.toJson());
+    CHECK(!group.model.isMember(group.bob.id()) && !group.model.isMember(group.carol.id()));
+    CHECK(group.model.name == "friends" && stale.name == "friends");
+    CHECK(group.model.revision() == stale.revision());
+}
+
+void onlyOwnerCanDeleteAndTombstonesSurviveMergesAndPersistence() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    rejects([&] { group.model.change(group.bob, "delete", {}); });
+    const auto stale = group.model.toJson();
+    auto forged = group.model;
+    const auto deletion = forged.change(group.alice, "delete", {});
+    auto forgedSnapshot = forged.toJson();
+    auto operations = forgedSnapshot.value("operations").toArray();
+    for (qsizetype index = 0; index < operations.size(); ++index) {
+        if (operations[index].toObject() == deletion) {
+            auto impersonation = deletion;
+            impersonation["author"] = group.bob.id();
+            operations[index] = signedObject(impersonation, group.bob,
+                "disquisition/community-operation/v1\n");
+        }
+    }
+    forgedSnapshot["operations"] = operations;
+    CHECK(!Model::fromJson(forgedSnapshot).deleted);
+    group.model.change(group.alice, "delete", {});
+    CHECK(group.model.deleted);
+    CHECK(!group.model.isMember(group.alice.id()) && !group.model.canAdmin(group.alice.id()));
+    CHECK(!group.model.validCode(group.code));
+    CHECK(group.model.host(QSet<QString>{group.alice.id(), group.bob.id()}).isEmpty());
+    rejects([&] { group.model.change(group.alice, "rename", {{"name", "resurrect"}}); });
+    rejects([&] { group.model.admit(group.alice,
+        joinIntent(group.carol, group.invite, "carol", "tcp://127.0.0.1:9003")); });
+    auto returning = Model::fromJson(stale);
+    returning.merge(group.model.toJson());
+    CHECK(returning.deleted);
+    group.model.merge(stale);
+    CHECK(group.model.deleted);
+    QTemporaryDir directory;
+    {
+        Store store(directory.path());
+        store.save(group.model);
+    }
+    {
+        Store store(directory.path());
+        CHECK(store.load().value(group.model.id).deleted);
+    }
+}
+
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
@@ -279,5 +373,8 @@ int main(int argc, char** argv) {
     demotionBlocksConcurrentAndFutureAdminEdits();
     persistsMetadataWithoutChatHistory();
     removingHostPreservesItsPreviouslyAcceptedAdmissions();
+    leavingOnlyRemovesTheAuthorAndAllowsFreshAdmission();
+    leavingBlocksConcurrentHostAdmissionsAndEdits();
+    onlyOwnerCanDeleteAndTombstonesSurviveMergesAndPersistence();
     std::puts("community_model_test: ok");
 }

@@ -239,6 +239,7 @@ bool Model::ancestor(const QString& older, const QString& newer) const {
 }
 
 void Model::rebuild() {
+    deleted = false;
     members.clear();
     channels.clear();
     priority.clear();
@@ -317,9 +318,17 @@ void Model::rebuild() {
     };
     QMap<QString, QStringList> revocations;
     QMap<QString, QStringList> removals;
+    QMap<QString, QStringList> departures;
+    QMap<QString, QString> admissions;
+    QSet<QString> acceptedIntents;
     for (const auto& key : ordered) {
         const auto operation = operations_.value(key);
         const auto data = operation.value("data").toObject();
+        const auto author = operation.value("author").toString();
+        if (operation.value("kind") == "leave" && author != owner)
+            departures[author].append(key);
+        if (operation.value("kind") == "delete" && author == owner)
+            deleted = true;
         if (!authorized(key))
             continue;
         if (operation.value("kind") == "revoke" && isPeerId(data.value("hash").toString())) {
@@ -336,6 +345,14 @@ void Model::rebuild() {
         for (const auto& removal : removals.value(peer))
             if (!ancestor(operation, removal))
                 return false;
+        for (const auto& departure : departures.value(peer)) {
+            if (ancestor(operation, departure))
+                continue; // Actions accepted before leaving remain valid history.
+            const auto admission = admissions.value(peer);
+            if (admission.isEmpty() || !ancestor(departure, admission) ||
+                !ancestor(admission, operation))
+                return false;
+        }
         return true;
     };
     for (const auto& key : ordered) {
@@ -349,6 +366,7 @@ void Model::rebuild() {
                         validEndpoint(data.value("endpoint").toString()),
                     "invalid community origin data");
             name = data.value("name").toString();
+            admissions[owner] = key;
             members.insert(owner, {owner,
                                    data.value("memberName").toString(),
                                    data.value("endpoint").toString(),
@@ -370,7 +388,19 @@ void Model::rebuild() {
         if (kind == "admit") {
             const auto intent = data.value("intent").toObject();
             const auto peer = intent.value("peer").toString();
-            if (!members.contains(author) || !couldAct(author, key) || !couldAct(peer, key) ||
+            bool peerCouldAct = true;
+            for (const auto& removal : removals.value(peer))
+                if (!ancestor(key, removal))
+                    peerCouldAct = false;
+            bool concurrentDeparture = false;
+            for (const auto& departure : departures.value(peer))
+                if (!ancestor(departure, key) && !ancestor(key, departure))
+                    concurrentDeparture = true;
+            // An older admission still belongs to history, but cannot restore a
+            // membership after a concurrent or later leave.
+            const auto intentId = digest(canonical(intent));
+            if (!members.contains(author) || !couldAct(author, key) || !peerCouldAct ||
+                concurrentDeparture || acceptedIntents.contains(intentId) ||
                 !validIntent(intent, id) || members.contains(peer) || members.size() >= kMaxMembers)
                 continue;
             const auto hash = intent.value("invite").toString();
@@ -384,12 +414,21 @@ void Model::rebuild() {
                     revoked = true;
             if (revoked)
                 continue;
+            acceptedIntents.insert(intentId);
+            admissions[peer] = key;
             members.insert(peer, {peer,
                                   intent.value("name").toString(),
                                   intent.value("endpoint").toString(),
                                   false,
                                   {},
                                   {}});
+            continue;
+        }
+        if (kind == "leave") {
+            if (author != owner) {
+                members.remove(author);
+                adminGrants_.remove(author);
+            }
             continue;
         }
         if (kind == "profile") {
@@ -452,6 +491,15 @@ void Model::rebuild() {
             priority = next;
         }
     }
+    for (auto it = departures.cbegin(); it != departures.cend(); ++it) {
+        for (const auto& departure : it.value()) {
+            if (!ancestor(departure, admissions.value(it.key()))) {
+                members.remove(it.key());
+                adminGrants_.remove(it.key());
+                break;
+            }
+        }
+    }
     for (const auto& peer : banned) {
         members.remove(peer);
         adminGrants_.remove(peer);
@@ -459,7 +507,7 @@ void Model::rebuild() {
 }
 
 bool Model::canAdmin(const QString& peer) const {
-    return members.contains(peer) && (peer == owner || members.value(peer).admin);
+    return !deleted && members.contains(peer) && (peer == owner || members.value(peer).admin);
 }
 
 QJsonObject Model::append(const Identity& author, const QString& kind, QJsonObject data) {
@@ -491,7 +539,10 @@ QJsonObject Model::append(const Identity& author, const QString& kind, QJsonObje
 QJsonObject Model::change(const Identity& author, const QString& kind, QJsonObject data) {
     const QSet<QString> administrative{"rename", "icon",     "channel", "delete-channel", "invite",
                                        "revoke", "priority", "kick",    "admin"};
-    require((kind == "profile" && isMember(author.id())) ||
+    require(!deleted, "this community has been deleted");
+    require((kind == "leave" && isMember(author.id()) && author.id() != owner) ||
+                (kind == "delete" && author.id() == owner) ||
+                (kind == "profile" && isMember(author.id())) ||
                 (administrative.contains(kind) && canAdmin(author.id())),
             "only the owner or an admin can make this change");
     require(kind != "admin" || author.id() == owner, "only the owner can assign admins");
@@ -529,7 +580,7 @@ QString Model::issueInvite(const Identity& author) {
 
 bool Model::validCode(const QString& code) const {
     const auto hash = digest(code.toUtf8());
-    return code.size() == 32 && invites_.contains(hash) && !revokedInvites.contains(hash);
+    return !deleted && code.size() == 32 && invites_.contains(hash) && !revokedInvites.contains(hash);
 }
 
 QJsonObject joinIntent(const Identity& peer, const Invite& invite, const QString& name,
@@ -551,6 +602,13 @@ QJsonObject joinIntent(const Identity& peer, const Invite& invite, const QString
 bool Model::acceptsIntent(const QString& host, const QJsonObject& intent) const {
     const auto peer = intent.value("peer").toString();
     const auto hash = intent.value("invite").toString();
+    if (!isMember(peer)) {
+        for (const auto& operation : operations_) {
+            if (operation.value("kind") == "admit" &&
+                operation.value("data").toObject().value("intent").toObject() == intent)
+                return false; // A host cannot replay an old join after a signed leave.
+        }
+    }
     return isMember(host) && validIntent(intent, id) && invites_.contains(hash) &&
            !revokedInvites.contains(hash) && inviteProof(intent, invites_.value(hash)) &&
            (intent.value("host").toString().isEmpty() || intent.value("host").toString() == host) &&
@@ -568,6 +626,8 @@ QString Model::revision() const {
 }
 
 QString Model::host(const QSet<QString>& online) const {
+    if (deleted)
+        return {};
     for (const auto& peer : priority)
         if (members.contains(peer) && online.contains(peer))
             return peer;

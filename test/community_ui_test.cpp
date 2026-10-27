@@ -12,6 +12,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkProxy>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -28,6 +31,8 @@
 #include "check.h"
 #include "community/store.h"
 #include "desktop/community_panel.h"
+#include "desktop/community_tree.h"
+#include "desktop/gif_picker.h"
 #include "desktop/main_window.h"
 #include "desktop/notification_center.h"
 #include "desktop/push_to_talk.h"
@@ -331,13 +336,15 @@ int main(int argc, char** argv) {
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Hi @Alice"}}) == 1);
     CHECK(until([&] { return badge.mentions == 1; }));
     CHECK(badge.unread);
-    CHECK(transcript->toHtml().contains("#a8e6df"));
+    CHECK(transcript->document()->find("@Alice").charFormat().background().color() == QColor("#3e4372"));
+    CHECK(transcript->toHtml().contains("#453d2c"));
+    CHECK(window.grab().save("community-mentions.png"));
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Legacy color"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Legacy color"); }));
-    CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#87ffaf"));
+    CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#c5c8c6"));
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Invalid color"}, {"color", "<b>bad</b>"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Invalid color"); }));
-    CHECK(transcript->document()->find("Invalid color").charFormat().foreground().color() == QColor("#87ffaf"));
+    CHECK(transcript->document()->find("Invalid color").charFormat().foreground().color() == QColor("#c5c8c6"));
     const auto sender = transcript->document()->find("Bob");
     CHECK(!sender.isNull() && sender.charFormat().isAnchor());
     CHECK(sender.charFormat().anchorHref() == "profile://" + cid + '/' + remote.peerId());
@@ -347,6 +354,18 @@ int main(int argc, char** argv) {
     composer->setText("/dnd");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(!center->settings().muted && composer->text().isEmpty());
+    composer->setText("/help");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(composer->text().isEmpty() && transcript->toPlainText().contains("/users"));
+    composer->setText("/color");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(transcript->toPlainText().contains("pink, mint, butter, periwinkle, lilac, aqua, peach"));
+    composer->setText("/users");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(transcript->toPlainText().contains("Alice, Bob"));
+    composer->setText("/not-a-command");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(transcript->toPlainText().contains("Unknown command: /not-a-command"));
     QString sentColor;
     QObject::connect(&remote, &community::Node::packetReceived,
         [&](const QString&, const QString&, const QString&, const QString& type, const QJsonObject& data) {
@@ -358,7 +377,10 @@ int main(int argc, char** argv) {
     composer->setText("A pink community message");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(until([&] { return sentColor == "pink"; }));
-    CHECK(transcript->document()->find("A pink community message").charFormat().foreground().color() == QColor("#ff87af"));
+    const auto pinkMessage = transcript->document()->find("A pink community message");
+    CHECK(pinkMessage.charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(transcript->document()->find("Alice", pinkMessage.position(), QTextDocument::FindBackward)
+              .charFormat().foreground().color() == QColor("#ff87af"));
     {
         chat::RecentMessages history((directory.path() + "/history.db").toStdString());
         const auto saved = history.recent(cid.toStdString(), textChannel.toStdString());
@@ -367,7 +389,19 @@ int main(int argc, char** argv) {
     }
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "A peach reply"}, {"color", "peach"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("A peach reply"); }));
-    CHECK(transcript->document()->find("A peach reply").charFormat().foreground().color() == QColor("#ffaf87"));
+    const auto peachMessage = transcript->document()->find("A peach reply");
+    CHECK(peachMessage.charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(transcript->document()->find("Bob", peachMessage.position(), QTextDocument::FindBackward)
+              .charFormat().foreground().color() == QColor("#ffaf87"));
+    panel->findChild<QNetworkAccessManager*>()->setProxy(
+        QNetworkProxy(QNetworkProxy::HttpProxy, "127.0.0.1", 1));
+    QSettings().setValue("gifs/showLinkedMedia", true);
+    const auto gifUrl = QUrl("https://static.klipy.com/test/communities.gif");
+    panel->findChild<GifPicker*>()->chosen(gifUrl);
+    CHECK(!transcript->toPlainText().contains(gifUrl.toString()));
+    QSettings().setValue("gifs/showLinkedMedia", false);
+    panel->findChild<GifPicker*>()->chosen(gifUrl);
+    CHECK(transcript->toPlainText().contains(gifUrl.toString()));
     // Invalid commands leave the previous color intact and do not send chat.
     composer->setText("/color 250");
     panel->findChild<QPushButton*>("communitySend")->click();
@@ -549,6 +583,26 @@ int main(int argc, char** argv) {
     for (const auto* label : tile->findChildren<QLabel*>())
         CHECK(!label->text().contains(remote.peerId()));
     fullscreen->close();
+    const auto quiet = community::freshId();
+    CHECK(until([&] { return !node->synchronizing(cid); }));
+    node->edit(cid, "channel", {{"id", quiet}, {"name", "Quiet"}, {"type", "voice"}, {"topic", ""}});
+    CHECK(until([&] { return !node->synchronizing(cid); }));
+    node->edit(cid, "admin", {{"peer", remote.peerId()}, {"enabled", true}});
+    CHECK(until([&] { return remote.communities()[cid].canAdmin(remote.peerId()) &&
+                             !node->synchronizing(cid) && !remote.synchronizing(cid); }));
+    QTreeWidgetItem* destination = nullptr;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        if (tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == cid)
+            for (int j = 0; j < tree->topLevelItem(i)->childCount(); ++j)
+                if (tree->topLevelItem(i)->child(j)->data(0, Qt::UserRole + 1).toString() == quiet)
+                    destination = tree->topLevelItem(i)->child(j);
+    CHECK(destination);
+    CHECK(static_cast<CommunityTree*>(tree)->requestVoiceMove(cid, voiceChannel, remote.peerId(), destination));
+    CHECK(until([&] { return remote.presence(cid, remote.peerId()).voiceChannel == quiet; }));
+    remote.moveVoice(cid, node->peerId(), quiet);
+    CHECK(until([&] { return node->presence(cid, node->peerId()).voiceChannel == quiet &&
+                             panel->findChild<QLabel*>("communityVoiceStatus")->text().contains("Quiet"); }));
+    CHECK(!stage->drawing(remote.peerId()));
     panel->findChild<QPushButton*>("communityVoice")->click();
     CHECK(!stage->drawing(remote.peerId()));
     window.show();
@@ -570,6 +624,47 @@ int main(int argc, char** argv) {
         [&] { return remote.communities()[cid].members[node->peerId()].name == "Alice Example"; }));
     CHECK(transcript->toPlainText().contains("Alice Example"));
     online->click();
-    CHECK(composer->isEnabled() == false);
+    CHECK(composer->isEnabled()); // Local commands and owner controls still work offline.
+    CHECK(manage->isEnabled() && node->communities()[cid].canAdmin(node->peerId()));
+    composer->setText("/help");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(transcript->toPlainText().contains("/help") || transcript->toPlainText().contains("/users"));
+    const auto confirm = [](QMessageBox::StandardButton answer) {
+        QTimer::singleShot(0, [answer] {
+            auto* dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            CHECK(dialog);
+            dialog->button(answer)->click();
+        });
+    };
+    QString study;
+    for (const auto& model : node->communities()) if (model.name == "Study group") study = model.id;
+    CHECK(!study.isEmpty());
+    for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        if (tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == study) {
+            tree->setCurrentItem(tree->topLevelItem(i)); break;
+        }
+    auto* deleteAction = panel->findChild<QAction*>("communityDelete");
+    CHECK(deleteAction->isVisible() && deleteAction->isEnabled());
+    confirm(QMessageBox::Cancel);
+    deleteAction->trigger();
+    CHECK(!node->communities()[study].deleted);
+    confirm(QMessageBox::Yes);
+    deleteAction->trigger();
+    CHECK(node->communities()[study].deleted);
+    CHECK(tree->topLevelItemCount() == 1);
+    online->click();
+    CHECK(until([&] { return node->online(cid).size() == 2 && !node->synchronizing(cid); }));
+    const auto visit = remote.createCommunity("Bobby's club");
+    node->joinCommunity(remote.invite(visit));
+    CHECK(until([&] { return node->communities().value(visit).isMember(node->peerId()) &&
+                             !node->synchronizing(visit) && tree->topLevelItemCount() == 2; }));
+    auto* leaveAction = panel->findChild<QAction*>("communityLeave");
+    CHECK(leaveAction->isVisible() && !deleteAction->isVisible());
+    confirm(QMessageBox::Yes);
+    leaveAction->trigger();
+    CHECK(until([&] { return !node->communities().value(visit).isMember(node->peerId()) &&
+                             !remote.communities().value(visit).isMember(node->peerId()); }));
+    CHECK(tree->topLevelItemCount() == 1);
+    online->click();
     std::puts("community_ui_test: ok");
 }

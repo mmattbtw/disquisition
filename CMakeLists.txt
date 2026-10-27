@@ -244,7 +244,8 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_picker.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     target_sources(disquisition-desktop PRIVATE
-      include/desktop/community_panel.h src/desktop/community_panel.cpp)
+      include/desktop/community_panel.h src/desktop/community_panel.cpp
+      include/desktop/community_tree.h src/desktop/community_tree.cpp)
     target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -366,6 +367,14 @@ if(BUILD_TESTING AND TARGET desktop_media)
 endif()
 
 if(BUILD_TESTING AND TARGET disquisition-desktop)
+  add_executable(community_voice_move_test test/community_voice_move_test.cpp
+    include/desktop/community_tree.h src/desktop/community_tree.cpp)
+  set_target_properties(community_voice_move_test PROPERTIES AUTOMOC ON)
+  target_include_directories(community_voice_move_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  target_link_libraries(community_voice_move_test PRIVATE Qt6::Widgets)
+  add_test(NAME community_voice_move_test COMMAND community_voice_move_test)
+  set_tests_properties(community_voice_move_test PROPERTIES
+    TIMEOUT 15 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   # Exercise the actual widgets and their wiring, including modal dialogs,
   # with isolated identity/settings directories and no audio hardware access.
   get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)

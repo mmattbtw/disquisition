@@ -363,6 +363,108 @@ void directAdmissionIsolationAndConnectionReuse() {
     largeScreenFrameDelivers(a, b, cid, voice);
 }
 
+void metadataUpdatesKeepMembersOnlineAndVoiceConnected() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    diagnostics(a);
+    diagnostics(b);
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("continuous presence");
+    b.joinCommunity(a.invite(cid));
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    const auto voice = channel(a.communities()[cid], "voice");
+    a.setVoice(cid, voice);
+    b.setVoice(cid, voice);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).voiceChannel == voice; }));
+    bool disappeared = false;
+    const auto observe = [&] {
+        disappeared |= a.online(cid).size() != 2 || b.online(cid).size() != 2;
+    };
+    QObject::connect(&a, &Node::changed, observe);
+    QObject::connect(&b, &Node::changed, observe);
+    a.edit(cid, "rename", {{"name", "renamed without interruption"}});
+    observe();
+    CHECK(until([&] {
+        return b.communities()[cid].name == "renamed without interruption" &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    CHECK(!disappeared);
+    CHECK(a.presence(cid, b.peerId()).voiceChannel == voice);
+    CHECK(b.presence(cid, a.peerId()).voiceChannel == voice);
+}
+
+void voiceMovesRequireAdminAndPreserveMuteState() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("voice moves");
+    b.joinCommunity(a.invite(cid));
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    const auto voice = channel(a.communities()[cid], "voice");
+    const auto destination = freshId();
+    a.edit(cid, "channel", {{"id", destination}, {"name", "Moved"}, {"type", "voice"}, {"topic", ""}});
+    CHECK(until([&] { return b.communities()[cid].channels.contains(destination) && !a.synchronizing(cid); }));
+    a.setVoice(cid, voice);
+    b.setVoice(cid, voice, true, true, true);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).voiceChannel == voice; }));
+    bool denied = false;
+    try { b.moveVoice(cid, a.peerId(), destination); }
+    catch (const std::exception&) { denied = true; }
+    CHECK(denied);
+    CHECK(a.presence(cid, a.peerId()).voiceChannel == voice);
+    int moved = 0;
+    QObject::connect(&b, &Node::voiceMoved, [&](const QString& community, const QString& channel) {
+        CHECK(community == cid && channel == destination);
+        ++moved;
+    });
+    a.moveVoice(cid, b.peerId(), destination);
+    CHECK(until([&] { return moved == 1 && a.presence(cid, b.peerId()).voiceChannel == destination; }));
+    CHECK(b.presence(cid, b.peerId()).muted && b.presence(cid, b.peerId()).deafened);
+    CHECK(!b.presence(cid, b.peerId()).sharing);
+}
+
+void leavingAndDeletingPropagateWithoutInterruptingOtherCommunities() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto first = a.createCommunity("departing");
+    b.joinCommunity(a.invite(first));
+    CHECK(until([&] { return a.online(first).size() == 2 && !a.synchronizing(first); }));
+    const auto second = a.createCommunity("remaining");
+    b.joinCommunity(a.invite(second));
+    CHECK(until([&] {
+        return a.online(second).size() == 2 && b.online(second).size() == 2 &&
+               !b.synchronizing(first) && !a.synchronizing(second);
+    }));
+    b.edit(first, "leave", {});
+    CHECK(until([&] { return !a.communities()[first].isMember(b.peerId()); }));
+    CHECK(a.online(second).size() == 2 && b.online(second).size() == 2);
+    a.edit(second, "delete", {});
+    CHECK(until([&] { return b.communities()[second].deleted; }));
+    CHECK(a.online(second).isEmpty() && b.online(second).isEmpty());
+    CHECK(!b.communities()[second].canAdmin(a.peerId()));
+
+    const auto offline = a.createCommunity("deleted while member offline");
+    b.joinCommunity(a.invite(offline));
+    CHECK(until([&] { return b.online(offline).size() == 2 && !a.synchronizing(offline); }));
+    b.stop();
+    CHECK(until([&] { return a.online(offline).size() == 1; }));
+    a.stop();
+    CHECK(!a.synchronizing(offline));
+    CHECK(a.communities()[offline].canAdmin(a.peerId()));
+    CHECK(Invite::fromLink(a.invite(offline)).community == offline);
+    a.edit(offline, "delete", {});
+    CHECK(a.start("alice", "127.0.0.1"));
+    CHECK(b.start("bob", "127.0.0.1"));
+    CHECK(until([&] { return b.communities()[offline].deleted; }));
+}
+
 void relayHostMigrationAndReconnection() {
     TestRelay relay;
     // A stalled or fragmented initial handshake must not block other clients.
@@ -431,7 +533,9 @@ void relayHostMigrationAndReconnection() {
     CHECK(until([&] { return chatReceived; }));
     largeScreenFrameDelivers(a, b, cid, channel(a.communities()[cid], "voice"));
     a.stop();
+    CHECK(a.communities()[cid].canAdmin(a.peerId()));
     CHECK(until([&] { return b.online(cid).size() == 1; }));
+    CHECK(b.communities()[cid].canAdmin(a.peerId()));
     CHECK(b.host(cid) == b.peerId());
     // The original invite names Alice. The relay discovers Bob after she
     // disconnects; Bob validates the existing invite without any admin online.
@@ -459,8 +563,12 @@ void relayHostMigrationAndReconnection() {
     CHECK(until([&] { return c.communities()[cid].name == "admin acting alone"; }));
     CHECK(a.start("alice", {}, 0, endpoint));
     CHECK(until([&] {
-        return a.communities()[cid].name == "admin acting alone" && a.online(cid).size() == 3;
+        return a.communities()[cid].name == "admin acting alone" && a.online(cid).size() == 3 &&
+               !a.synchronizing(cid);
     }));
+    CHECK(a.communities()[cid].canAdmin(a.peerId()));
+    a.edit(cid, "rename", {{"name", "owner still has authority"}});
+    CHECK(until([&] { return b.communities()[cid].name == "owner still has authority"; }));
 }
 
 void returningHostSynchronizesBeforeAcceptingInvites() {
@@ -590,6 +698,9 @@ int main(int argc, char** argv) {
     directAdmissionIsolationAndConnectionReuse();
     directListenerReportsRelayAddressMixupsWithoutTlsErrors();
     relayDiagnosticsAreReportedOnceAcrossRetries();
+    metadataUpdatesKeepMembersOnlineAndVoiceConnected();
+    voiceMovesRequireAdminAndPreserveMuteState();
+    leavingAndDeletingPropagateWithoutInterruptingOtherCommunities();
     relayHostMigrationAndReconnection();
     returningHostSynchronizesBeforeAcceptingInvites();
     preferredHostCoordinatesAdmissions();

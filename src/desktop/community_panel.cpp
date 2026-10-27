@@ -30,6 +30,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -49,6 +50,7 @@
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
 #include "desktop/chat_color.h"
+#include "desktop/community_tree.h"
 #include "desktop/penguin_overlay.h"
 #include "desktop/penguin_sprites.h"
 #include "desktop/gif_picker.h"
@@ -245,6 +247,33 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                                    : "Relay connection lost. Reconnecting automatically…");
                 });
         connect(node_.get(), &community::Node::packetReceived, this, &CommunityPanel::receive);
+        connect(node_.get(), &community::Node::voiceMoved, this,
+                [this](const QString& cid, const QString& channel) {
+                    // The node has already changed presence. End subscriptions and capture
+                    // from the previous channel before refreshing the existing audio session.
+                    // Stop capture before stopSharing so it cannot republish the
+                    // previous voice channel while applying the administrator's move.
+                    capture_.stop();
+                    stopSharing();
+                    const auto watching = watching_;
+                    for (const auto& peer : watching) watch(peer, false);
+                    for (const auto& peer : streams_) {
+                        stopDrawing(peer);
+                        stage_->removeStream(peer);
+                    }
+                    streams_.clear();
+                    watching_.clear();
+                    lastScreenFrames_.clear();
+                    frames_ = ScreenFrameAssembler{};
+                    decoders_.clear();
+                    voiceCid_ = cid;
+                    voiceChannel_ = channel;
+                    selectedVoiceCid_ = cid;
+                    selectedVoiceChannel_ = channel;
+                    refresh();
+                    note("An administrator moved you to " +
+                         node_->communities().value(cid).channels.value(channel).name + '.');
+                });
     }
     qApp->installEventFilter(this);
     imageTimer_.setInterval(2);
@@ -367,13 +396,17 @@ void CommunityPanel::buildUi() {
     actions->addWidget(create_);
     actions->addWidget(join_);
     side->addLayout(actions);
-    tree_ = new QTreeWidget(sidebar);
+    tree_ = new CommunityTree(sidebar);
     tree_->setObjectName("communityTree");
     tree_->setHeaderHidden(true);
     tree_->setMinimumWidth(245);
     tree_->setIndentation(16);
     tree_->setIconSize(QSize(20, 20));
     side->addWidget(tree_, 1);
+    connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceMoveRequested, this,
+            [this](const QString& cid, const QString& peer, const QString& channel) {
+                attempt([&] { node_->moveVoice(cid, peer, channel); });
+            });
     connect(create_, &QPushButton::clicked, this, &CommunityPanel::create);
     connect(join_, &QPushButton::clicked, this, &CommunityPanel::join);
     connect(tree_, &QTreeWidget::currentItemChanged, this,
@@ -390,6 +423,16 @@ void CommunityPanel::buildUi() {
     headingRow->addWidget(heading_, 1);
     headingRow->addWidget(invite_);
     headingRow->addWidget(manage_);
+    auto* communityActions = button("Community", "communityActions", conversation);
+    auto* communityMenu = new QMenu(communityActions);
+    auto* leaveAction = communityMenu->addAction("Leave community…");
+    leaveAction->setObjectName("communityLeave");
+    auto* deleteAction = communityMenu->addAction("Delete community…");
+    deleteAction->setObjectName("communityDelete");
+    connect(leaveAction, &QAction::triggered, this, &CommunityPanel::leaveCommunity);
+    connect(deleteAction, &QAction::triggered, this, &CommunityPanel::deleteCommunity);
+    communityActions->setMenu(communityMenu);
+    headingRow->addWidget(communityActions);
     chat->addLayout(headingRow);
     topic_ = new QLabel("Create a community or join with an invite link or QR image.",
                         conversation);
@@ -455,6 +498,7 @@ void CommunityPanel::buildUi() {
     auto* voiceRow = new QHBoxLayout(voiceControls_);
     voiceRow->setContentsMargins(10, 6, 10, 6);
     voiceStatus_ = new QLabel(voiceControls_);
+    voiceStatus_->setObjectName("communityVoiceStatus");
     voiceStatus_->setTextFormat(Qt::PlainText);
     voice_ = button("Leave voice", "communityVoice", voiceControls_);
     mute_ = button("Mute", "communityMute", voiceControls_);
@@ -1414,8 +1458,15 @@ void CommunityPanel::refresh() {
         note(failure_);
         return;
     }
-    if (cid_.isEmpty() && !node_->communities().isEmpty()) {
-        cid_ = node_->communities().firstKey();
+    if (!node_->communities().value(cid_).isMember(node_->peerId())) {
+        cid_.clear();
+        channel_.clear();
+        selectedVoiceCid_.clear();
+        selectedVoiceChannel_.clear();
+    }
+    if (cid_.isEmpty()) {
+        for (const auto& model : node_->communities())
+            if (model.isMember(node_->peerId())) { cid_ = model.id; break; }
         for (const auto& channel : orderedChannels(node_->communities()[cid_]))
             if (channel.type == "text") {
                 channel_ = channel.id;
@@ -1432,6 +1483,7 @@ void CommunityPanel::refresh() {
     QSignalBlocker block(tree_);
     tree_->clear();
     for (const auto& model : node_->communities()) {
+        if (!model.isMember(node_->peerId())) continue;
         auto* root = new QTreeWidgetItem(tree_, {model.name});
         root->setData(0, Qt::UserRole, model.id);
         root->setExpanded(expanded.value(model.id, true));
@@ -1464,6 +1516,9 @@ void CommunityPanel::refresh() {
                 child->setIcon(0, voiceChannelIcon(devicePixelRatioF()));
             child->setData(0, Qt::UserRole, model.id);
             child->setData(0, Qt::UserRole + 1, channel.id);
+            if (channel.type == "voice")
+                static_cast<CommunityTree*>(tree_)->configureVoiceChannel(
+                    child, model.id, channel.id, online_ && model.canAdmin(node_->peerId()));
             const bool selectedVoice = model.id == selectedVoiceCid_ &&
                                        channel.id == selectedVoiceChannel_;
             const bool activeVoice = model.id == voiceCid_ && channel.id == voiceChannel_;
@@ -1529,6 +1584,9 @@ void CommunityPanel::refresh() {
                 participant->setSizeHint(0,
                                          QSize(160, std::max(48, row->sizeHint().height() + 12)));
                 tree_->setItemWidget(participant, 0, row);
+                static_cast<CommunityTree*>(tree_)->configureVoiceParticipant(
+                    participant, row, model.id, channel.id, peer.id,
+                    online_ && model.canAdmin(node_->peerId()));
             }
             if (selectedVoice && !activeVoice && online_ && model.isMember(node_->peerId())) {
                 auto* action = new QTreeWidgetItem(child);
@@ -1594,11 +1652,18 @@ void CommunityPanel::refresh() {
                                      QString::number(model.members.size()) + " members · host " +
                                      memberName(cid_, node_->host(cid_)))
                         : channel.topic);
-    const bool admin = online_ && model.canAdmin(node_->peerId()) && !node_->synchronizing(cid_);
+    const bool admin = model.canAdmin(node_->peerId()) && !node_->synchronizing(cid_);
     invite_->setEnabled(admin);
     manage_->setEnabled(admin);
-    composer_->setEnabled(online_ && textChannel);
-    send_->setEnabled(online_ && textChannel);
+    findChild<QPushButton*>("communityActions")->setEnabled(member);
+    auto* leaveAction = findChild<QAction*>("communityLeave");
+    auto* deleteAction = findChild<QAction*>("communityDelete");
+    leaveAction->setVisible(member && model.owner != node_->peerId());
+    deleteAction->setVisible(member && model.owner == node_->peerId());
+    leaveAction->setEnabled(!node_->synchronizing(cid_));
+    deleteAction->setEnabled(!node_->synchronizing(cid_));
+    composer_->setEnabled(textChannel);
+    send_->setEnabled(textChannel);
     image_->setEnabled(online_ && textChannel);
     gif_->setEnabled(online_ && textChannel);
     members_->clear();
@@ -1614,8 +1679,9 @@ void CommunityPanel::refresh() {
         item->setSizeHint(QSize(160, 44));
         item->setData(Qt::UserRole, peer.id);
         item->setToolTip("View " + peer.name + "'s profile");
-        if (!present)
-            item->setForeground(QColor("#858c96"));
+        item->setForeground(!present ? QColor("#858c96") :
+            peer.id == node_->peerId() ? chatColor(messageColor_) :
+                                         peerColors_.value(peer.id, chatColor("mint")));
     }
     const bool inVoice = !voiceCid_.isEmpty();
     voice_->setEnabled(inVoice);
@@ -1766,6 +1832,11 @@ void CommunityPanel::append(const QString& cid, const QString& channel, Entry en
 }
 
 void CommunityPanel::showEntry(const Entry& entry) {
+    if (entry.system) {
+        transcript_->append("<p style='color:#b5b65f'><b>" + text(entry.message.sender).toHtmlEscaped() +
+                            "</b> " + text(entry.message.body).toHtmlEscaped().replace('\n', "<br>") + "</p>");
+        return;
+    }
     const auto when = QDateTime::fromSecsSinceEpoch(entry.message.timestamp).toString("HH:mm");
     const auto body = text(entry.message.body);
     const auto cid = text(entry.message.communityId);
@@ -1779,39 +1850,47 @@ void CommunityPanel::showEntry(const Entry& entry) {
                                community::digest(member.name.toUtf8() + member.avatar));
     transcript_->document()->addResource(QTextDocument::ImageResource, imageUrl,
                                          profileAvatar(member, 32, devicePixelRatioF()).toImage());
+    const auto color = chatColor(text(entry.message.color)).name();
     const auto href = "profile://" + cid + '/' + peer;
     const auto link = [&](const QString& content) {
         return hasProfile ? "<a href='" + href.toHtmlEscaped() +
-                                "' style='color:#9dccca;text-decoration:none'>" + content + "</a>"
-                          : content;
+                                "' style='color:" + color + ";text-decoration:none'>" + content + "</a>"
+                          : "<span style='color:" + color + "'>" + content + "</span>";
     };
+    const bool showMedia = QSettings().value("gifs/showLinkedMedia", true).toBool();
+    const auto links = showMedia ? findMediaLinks(body) : QList<MediaLink>{};
+    const bool onlyMedia = links.size() == 1 && body.trimmed() == links.first().text;
+    const auto mentions = findMentions(body, memberNames(cid));
+    const bool mentioned = peer != node_->peerId() &&
+        mentionOf(mentions, memberName(cid, node_->peerId())) != Mentioned::No;
     QString html;
     qsizetype written = 0;
-    for (const auto& mention : findMentions(body, memberNames(text(entry.message.communityId)))) {
+    for (const auto& mention : mentions) {
         if (mention.start < written) continue;
         html += body.mid(written, mention.start - written).toHtmlEscaped() +
-                "<span style='background:#39484b;color:#a8e6df'>" +
+                "<span style='background-color:#3e4372;color:#c9cdfb'>" +
                 body.mid(mention.start, mention.length).toHtmlEscaped() + "</span>";
         written = mention.start + mention.length;
     }
     html += body.mid(written).toHtmlEscaped();
+    if (onlyMedia) html.clear();
     transcript_->append(
         "<table cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
         "<td width='42' valign='top'>" +
         link("<img src='" + imageUrl.toString() + "' width='32' height='32'>") +
-        "</td><td valign='top'><p style='margin:0 0 3px 0'>" +
+        "</td><td valign='top'" + (mentioned ? " bgcolor='#453d2c'" : "") +
+        "><p style='margin:0 0 3px 0'>" +
         link("<b>" + member.name.toHtmlEscaped() + "</b>") +
         " <span style='color:#a6b5bd;font-size:11px'>" + when + "</span></p>" +
-        "<p style='margin:0;color:" + chatColor(text(entry.message.color)).name() + "'>" + html.replace('\n', "<br>") +
+        "<p style='margin:0;color:#c5c8c6'>" + html.replace('\n', "<br>") +
         (entry.undelivered
              ? " <span style='color:#d4ae77'>[not delivered: no peers connected]</span>"
              : "") +
         "</p></td></tr></table>");
     if (!entry.image.isEmpty())
         media_->appendImage(entry.image);
-    if (QSettings().value("gifs/showLinkedMedia", true).toBool())
-        for (const auto& link : findMediaLinks(body))
-            media_->appendRemote(link.url);
+    for (const auto& link : links)
+        media_->appendRemote(link.url);
 }
 
 void CommunityPanel::render() {
@@ -1834,37 +1913,13 @@ void CommunityPanel::render() {
 }
 
 void CommunityPanel::sendChat() {
-    if (!online_ || composer_->text().trimmed().isEmpty())
-        return;
-    if (composer_->text().trimmed() == "/dnd") {
-        notifications_->muteAction()->trigger();
-        composer_->clear();
-        return;
-    }
-    const auto command = composer_->text().trimmed();
-    if (command == "/waddleon") {
-        QSettings().setValue("penguins/unlocked", true);
-        penguinsAction_->setVisible(true);
-        penguinsAction_->setChecked(true);
-        composer_->clear();
-        refreshPenguins();
-        note("Waddle on! Desktop penguins are now available in User Settings.");
+    const auto body = composer_->text().trimmed();
+    if (body.isEmpty()) return;
+    if (body.startsWith('/')) {
+        runCommand(body);
         return;
     }
-    if (command == "/color" || command.startsWith("/color ")) {
-        const auto requested = command.mid(6).trimmed().toLower();
-        if (!validChatColor(requested)) {
-            note("Use /color pink|mint|butter|periwinkle|lilac|aqua|peach or 0-255. Colors 1, 2 and 250 are reserved. Current color: " + messageColor_);
-            return;
-        }
-        messageColor_ = requested;
-        penguins_->setColor(node_->peerId(), chatColor(messageColor_));
-        for (const auto& [peer, session] : drawings_)
-            if (auto* drawing = stage_->drawing(peer)) drawing->setChatColor(chatColor(messageColor_));
-        composer_->clear();
-        note("Chat color: " + messageColor_);
-        return;
-    }
+    if (!online_) { note("Connect before sending messages."); return; }
     attempt([&] {
         const auto body = composer_->text().trimmed();
         const auto id = freshId();
@@ -1965,12 +2020,17 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         peerColors_[peer] = chatColor(packetColor(data));
         if (cid == cid_) {
             penguins_->setColor(peer, peerColors_[peer]);
+            for (int i = 0; i < members_->count(); ++i)
+                if (members_->item(i)->data(Qt::UserRole).toString() == peer)
+                    members_->item(i)->setForeground(peerColors_[peer]);
             if (type == "chat") penguins_->showMessage(peer, data.value("body").toString());
         }
     }
     if (type == "chat") {
         const auto body = data.value("body").toString();
-        notifications_->messageReceived(sender, body,
+        const auto links = findMediaLinks(body);
+        const bool onlyMedia = links.size() == 1 && body.trimmed() == links.first().text;
+        notifications_->messageReceived(sender, onlyMedia ? QStringLiteral("sent a GIF") : body,
             mentionOf(findMentions(body, memberNames(cid)), memberName(cid, node_->peerId())));
         if (cid == cid_ && channel == channel_ && entries_[key(cid, channel)].isEmpty()) {
             media_->clear();
@@ -2335,4 +2395,123 @@ void CommunityPanel::refreshPenguins() {
     const auto sprites = PenguinSprites::fromSettings(settings);
     if (settings.value("penguins/unlocked", false).toBool() && sprites.enabled)
         penguins_->setCustomSprites(node_->peerId(), sprites.standing, sprites.walking);
+}
+
+void CommunityPanel::commandReply(const QString& title, const QString& body) {
+    Entry entry;
+    entry.system = true;
+    entry.message.timestamp = QDateTime::currentSecsSinceEpoch();
+    entry.message.sender = title.toStdString();
+    entry.message.body = body.toStdString();
+    append(cid_, channel_, std::move(entry), false);
+}
+
+void CommunityPanel::runCommand(const QString& command) {
+    const auto parts = command.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    const auto name = parts.value(0).toLower();
+    const auto argument = command.mid(parts.value(0).size()).trimmed();
+    if (name == "/color") {
+        if (argument.isEmpty()) {
+            commandReply("Color", "Current color: " + messageColor_ +
+                "\nColors: pink, mint, butter, periwinkle, lilac, aqua, peach. Use /color <name or 0-255>.");
+        } else if (!validChatColor(argument.toLower())) {
+            commandReply("Color", "Unknown or reserved color: " + argument + ". Try /color for available colors.");
+            return;
+        } else {
+            messageColor_ = argument.toLower();
+            if (node_) penguins_->setColor(node_->peerId(), chatColor(messageColor_));
+            for (const auto& [peer, session] : drawings_)
+                if (auto* drawing = stage_->drawing(peer)) drawing->setChatColor(chatColor(messageColor_));
+            commandReply("Color", "You chose " + messageColor_);
+            refresh();
+        }
+    } else if (name == "/help") {
+        commandReply("Help", "/users  list online members\n/color <name or 0-255>  set your name color\n"
+            "/voice  join the selected voice channel\n/leavevoice  leave voice\n"
+            "/mute, /unmute, /deafen, /undeafen  control voice\n/gif [search]  choose a GIF\n"
+            "/clear  clear this channel on this device\n/save  open User Settings\n"
+            "/dnd  mute or unmute notifications\n/leave  leave this community\n"
+            "/quit, /exit  close the app\n@name, @everyone and @here highlight mentions");
+    } else if (name == "/users") {
+        QStringList names;
+        if (node_ && online_)
+            for (const auto& peer : node_->online(cid_)) names.append(memberName(cid_, peer));
+        names.sort(Qt::CaseInsensitive);
+        commandReply("Users", names.isEmpty() ? "Nobody is online." : names.join(", "));
+    } else if (name == "/clear") {
+        const auto scope = key(cid_, channel_);
+        for (const auto& entry : entries_.value(scope)) cachedImageBytes_ -= entry.image.size();
+        entries_.remove(scope);
+        cachedImages_.removeIf([&](const auto& cached) { return cached.first == scope; });
+        render();
+    } else if (name == "/gif") {
+        if (!online_) commandReply("GIF", "Connect before sending a GIF.");
+        else if (gif_->isHidden()) commandReply("GIF", "GIF search is not available in this build.");
+        else gifPicker_->popup(gif_, argument);
+    } else if (name == "/save" || name == "/settings") {
+        settings();
+    } else if (name == "/voice") {
+        if (selectedVoiceChannel_.isEmpty()) commandReply("Voice", "Select a voice channel first.");
+        else joinVoice();
+    } else if (name == "/leavevoice") {
+        leaveVoice();
+    } else if (name == "/mute" || name == "/unmute" || name == "/deafen" || name == "/undeafen") {
+        if (voiceCid_.isEmpty()) commandReply("Voice", "Join voice first.");
+        else if (name == "/mute") mute_->setChecked(true);
+        else if (name == "/deafen") deafen_->setChecked(true);
+        else if (name == "/undeafen") deafen_->setChecked(false);
+        else if (deafen_->isChecked()) commandReply("Voice", "Undeafen before unmuting.");
+        else mute_->setChecked(false);
+    } else if (name == "/dnd") {
+        notifications_->muteAction()->trigger();
+        commandReply("Notifications", notifications_->settings().muted ? "Muted" : "On");
+    } else if (name == "/waddleon") {
+        QSettings().setValue("penguins/unlocked", true);
+        penguinsAction_->setVisible(true);
+        penguinsAction_->setChecked(true);
+        refreshPenguins();
+        commandReply("Penguins", "Waddle on! Desktop penguins are now available in User Settings.");
+    } else if (name == "/leave") {
+        leaveCommunity();
+    } else if (name == "/quit" || name == "/exit") {
+        window()->close();
+    } else {
+        commandReply("Command", "Unknown command: " + name + ". Try /help.");
+    }
+    composer_->clear();
+}
+
+void CommunityPanel::leaveCommunity() {
+    if (!node_ || !node_->communities().value(cid_).isMember(node_->peerId())) return;
+    const auto model = node_->communities().value(cid_);
+    if (model.owner == node_->peerId()) {
+        commandReply("Community", "You own this community. Use Delete community to remove it for everyone.");
+        return;
+    }
+    if (QMessageBox::question(this, "Leave community", "Leave " + model.name +
+        "? You will need a new invite to rejoin.", QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel) != QMessageBox::Yes) return;
+    attempt([&] {
+        if (voiceCid_ == model.id) leaveVoice();
+        node_->edit(model.id, "leave", {});
+        refresh();
+        render();
+        note("Left " + model.name + '.');
+    });
+}
+
+void CommunityPanel::deleteCommunity() {
+    if (!node_) return;
+    const auto model = node_->communities().value(cid_);
+    if (!model.isMember(node_->peerId()) || model.owner != node_->peerId()) return;
+    if (QMessageBox::question(this, "Delete community", "Delete " + model.name +
+        " for all members? This cannot be undone.", QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel) != QMessageBox::Yes) return;
+    attempt([&] {
+        if (voiceCid_ == model.id) leaveVoice();
+        node_->edit(model.id, "delete", {});
+        refresh();
+        render();
+        note("Deleted " + model.name + '.');
+    });
 }

@@ -82,6 +82,7 @@ struct Node::Link {
     QSet<QString> claimed;
     QSet<QString> allowed;
     QSet<QString> ready;
+    QSet<QString> synchronizing;
     QMap<QString, QJsonObject> admissions;
     struct Snapshot {
         QString owner;
@@ -220,6 +221,10 @@ void Node::save(Model model) {
     store_.save(model); // Never advertise an update we haven't durably saved.
     const auto id = model.id;
     models_.insert(id, std::move(model));
+    if (!models_[id].isMember(peerId())) {
+        mine_.remove(id);
+        presence_.remove(id);
+    }
     registerRelay();
     emit changed();
 }
@@ -278,7 +283,9 @@ QString Node::invite(const QString& cid) {
     // migration. A join proof is bound to that peer's TLS identity and nonce.
     // Start at the issuer, which already has this new invite operation. It
     // redirects only once the preferred host has acknowledged the revision.
-    invite.seeds.append(QJsonObject{{"peer", peerId()}, {"endpoint", endpoint_}});
+    invite.seeds.append(QJsonObject{
+        {"peer", peerId()},
+        {"endpoint", endpoint_.isEmpty() ? models_[cid].members.value(peerId()).endpoint : endpoint_}});
     if (!preferred.isEmpty() && preferred != peerId())
         invite.seeds.append(QJsonObject{{"peer", preferred},
                                         {"endpoint", models_[cid].members[preferred].endpoint}});
@@ -613,11 +620,12 @@ void Node::offer(Link* link) {
 }
 
 void Node::sendState(Link* link, const QString& cid) {
-    if (!writable(link, cid) || !link->allowed.contains(cid))
+    if (!link->hello || !link->allowed.contains(cid))
         return;
     const auto snapshot = models_[cid].toJson();
     const auto operations = snapshot.value("operations").toArray();
-    link->ready.remove(cid);
+    // Established members stay online while exchanging newer metadata.
+    link->synchronizing.insert(cid);
     send(link, {{"type", "state-begin"},
                 {"community", cid},
                 {"owner", models_[cid].owner},
@@ -635,8 +643,12 @@ void Node::broadcastState(const QString& cid) {
             sendState(link, cid);
         }
         else {
+            // Deliver the signed removal/tombstone before withdrawing access.
+            if (link->allowed.contains(cid))
+                sendState(link, cid);
             link->allowed.remove(cid);
             link->ready.remove(cid);
+            link->synchronizing.remove(cid);
             presence_[cid].remove(link->peer);
         }
     }
@@ -718,12 +730,23 @@ void Node::handle(Link* link, const QJsonObject& message) {
         return;
     }
     if (type == "offer") {
-        if (!writable(link, cid))
+        if (!writable(link, cid)) {
+            // A returning member may have missed a departure or deletion.
+            // Send the signed final state to members of the retained history.
+            if (models_.contains(cid) && !models_[cid].isMember(peerId()) &&
+                models_[cid].members.contains(link->peer)) {
+                link->allowed.insert(cid);
+                sendState(link, cid);
+                link->allowed.remove(cid);
+                link->synchronizing.remove(cid);
+            }
             return;
+        }
         link->allowed.insert(cid);
         link->claimed.insert(cid);
         if (message.value("revision").toString() == models_[cid].revision()) {
             link->ready.insert(cid);
+            link->synchronizing.remove(cid);
             send(link,
                  {{"type", "synced"}, {"community", cid}, {"revision", models_[cid].revision()}});
             send(link, presenceObject(cid, mine_.value(cid)));
@@ -743,7 +766,7 @@ void Node::handle(Link* link, const QJsonObject& message) {
         const auto owner = models_.contains(cid) ? models_[cid].owner : pending_[cid].owner;
         if (owner != message.value("owner").toString())
             throw std::runtime_error("community owner mismatch");
-        link->ready.remove(cid);
+        link->synchronizing.insert(cid);
         link->snapshots[cid] = {owner, {}, count, 0};
         return;
     }
@@ -797,6 +820,7 @@ void Node::handle(Link* link, const QJsonObject& message) {
         if (writable(link, cid)) {
             link->allowed.insert(cid);
             link->ready.insert(cid);
+            link->synchronizing.remove(cid);
             send(link,
                  {{"type", "synced"}, {"community", cid}, {"revision", models_[cid].revision()}});
             send(link, presenceObject(cid, mine_.value(cid)));
@@ -804,6 +828,7 @@ void Node::handle(Link* link, const QJsonObject& message) {
         else {
             link->allowed.remove(cid);
             link->ready.remove(cid);
+            link->synchronizing.remove(cid);
         }
         if (hasChanges)
             broadcastState(cid);
@@ -818,12 +843,23 @@ void Node::handle(Link* link, const QJsonObject& message) {
             return;
         link->allowed.insert(cid);
         link->ready.insert(cid);
+        link->synchronizing.remove(cid);
         send(link, presenceObject(cid, mine_.value(cid)));
         emit changed();
         return;
     }
     if (!writable(link, cid) || !link->allowed.contains(cid) || !link->ready.contains(cid))
         return;
+    if (type == "move-voice") {
+        const auto channel = message.value("channel").toString();
+        if (!models_[cid].canAdmin(link->peer) || mine_.value(cid).voiceChannel.isEmpty() ||
+            !models_[cid].channels.contains(channel) || models_[cid].channels[channel].type != "voice")
+            return;
+        const auto previous = mine_.value(cid);
+        setVoice(cid, channel, previous.muted, previous.deafened, false);
+        emit voiceMoved(cid, channel);
+        return;
+    }
     if (type == "presence") {
         const auto channel = message.value("channel").toString();
         if (!channel.isEmpty() && (!models_[cid].channels.contains(channel) ||
@@ -853,11 +889,14 @@ void Node::handle(Link* link, const QJsonObject& message) {
 }
 
 bool Node::synchronizing(const QString& cid) const {
-    if (!running_ || now() < recoveringUntil_)
+    if (!running_)
+        return false;
+    if (now() < recoveringUntil_)
         return true;
     for (auto* link : links_) {
         const auto peer = link->peer.isEmpty() ? link->expected : link->peer;
-        if (models_.contains(cid) && models_[cid].isMember(peer) && !link->ready.contains(cid))
+        if (models_.contains(cid) && models_[cid].isMember(peer) &&
+            (!link->ready.contains(cid) || link->synchronizing.contains(cid)))
             return true;
     }
     return false;
@@ -954,6 +993,22 @@ void Node::setVoice(const QString& cid, const QString& channel, bool muted, bool
         if (writable(link, cid) && link->ready.contains(cid))
             send(link, presenceObject(cid, mine_[cid]));
     emit changed();
+}
+
+void Node::moveVoice(const QString& cid, const QString& peer, const QString& channel) {
+    if (!running_ || !models_.contains(cid) || !models_[cid].canAdmin(peerId()))
+        throw std::runtime_error("only the owner or an admin can move members");
+    if (!models_[cid].channels.contains(channel) || models_[cid].channels[channel].type != "voice")
+        throw std::runtime_error("unknown voice channel");
+    if (!online(cid).contains(peer) || presence(cid, peer).voiceChannel.isEmpty())
+        throw std::runtime_error("member is not connected to voice");
+    if (peer == peerId()) {
+        const auto previous = mine_.value(cid);
+        setVoice(cid, channel, previous.muted, previous.deafened, false);
+        emit voiceMoved(cid, channel);
+    }
+    else
+        send(peers_[peer], {{"type", "move-voice"}, {"community", cid}, {"channel", channel}});
 }
 
 bool Node::validPacket(const QString& cid, const QString& channel, const QString& type,

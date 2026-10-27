@@ -48,6 +48,7 @@ public:
                          quint32 frame, const QList<QByteArray>& chunks, bool keyframe);
     void setVoice(const QString& community, const QString& channel, bool muted = false,
                   bool deafened = false, bool sharing = false);
+    void moveVoice(const QString& community, const QString& peer, const QString& channel);
     QSet<QString> online(const QString& community) const;
     QString host(const QString& community) const;
     Presence presence(const QString& community, const QString& peer) const;
@@ -58,6 +59,7 @@ public:
 
 signals:
     void changed();
+    void voiceMoved(const QString& community, const QString& channel);
     void joined(const QString& community);
     void joinRejected(const QString& community, const QString& reason);
     void packetReceived(const QString& community, const QString& channel, const QString& peer,

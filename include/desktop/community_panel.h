@@ -50,6 +50,7 @@ private:
         chat::RecentMessage message;
         QByteArray image;
         bool undelivered = false;
+        bool system = false;
     };
     void buildUi();
     void refresh();
@@ -64,6 +65,10 @@ private:
     void invite();
     void manage();
     void sendChat();
+    void runCommand(const QString& command);
+    void commandReply(const QString& title, const QString& body);
+    void leaveCommunity();
+    void deleteCommunity();
     void receive(const QString& cid, const QString& channel, const QString& peer,
                  const QString& type, const QJsonObject& data);
     void append(const QString& cid, const QString& channel, Entry entry, bool persist = true);

@@ -110,8 +110,9 @@ compositors may restrict overlays above other applications.
 Each app session starts with a random pastel chat color. Use `/color pink`,
 `/color mint`, `/color butter`, `/color periwinkle`, `/color lilac`, `/color aqua`,
 or `/color peach` to change it. Numeric xterm colors from 0 to 255 also work,
-except reserved colors 1, 2 and 250. New messages carry the chosen color to peers
-and local history, and the drawing tool's **chat color** follows it.
+except reserved colors 1, 2 and 250. Your name uses the chosen color in chat and
+the member list; message text keeps its normal color. Messages carry the color to peers and local history, and the
+drawing tool's **chat color** follows it.
 
 In **User Settings > Message History**, turn **Show linked GIFs and images in
 chat** off to stop loading linked media automatically. Uploaded images still
@@ -140,6 +141,19 @@ Stream invitations and fullscreen titles use display names. Watching requests a
 fresh keyframe, including when the shared screen is static. If the first frame
 or subscription is missed, the viewer retries automatically.
 
+## Leave or delete a community
+
+Open the **Community** menu beside the channel heading. **Leave community**
+removes your membership; you need a new invite to rejoin. The owner instead has
+**Delete community**, which permanently deletes the community for all members.
+Both actions ask for confirmation. Members who were offline learn about the
+change when they reconnect. Saved local message files are kept.
+
+Disconnecting keeps your memberships and owner or admin permissions. Owners and
+admins can manage saved community metadata while offline; updates synchronize
+when they reconnect. Metadata updates keep established peer and voice connections
+active.
+
 ## Manage a community
 
 Owners and admins open **Manage**. Categories run down the left side, with their
@@ -153,6 +167,11 @@ settings on the right:
 
 Changes save with the action button in each category. The owner assigns admins;
 any member can host without gaining administrative privileges.
+
+Owners and admins can drag a participant's name or avatar from one voice channel
+to another within the same community. The participant stays connected to audio
+with their mute and deafen settings. Screen sharing and watched streams from the
+previous channel stop. Members who are not in voice cannot be dragged into a call.
 
 ## Connection problems
 
@@ -290,6 +309,21 @@ member name. `@everyone` and `@here` mention the community. Mentions are highlig
 in chat. Settings offer all messages or mentions only, suppression of group
 mentions, and join/share activity notifications. Use **Mute notifications** in the
 app menu or `/dnd` to toggle notification muting.
+
+## Chat commands
+
+Type `/help` for the command list and `/color` for the available color names and
+your current choice. `/users` lists online community members. `/voice` joins the
+selected voice channel; `/leavevoice` leaves the call. `/mute`, `/unmute`,
+`/deafen`, and `/undeafen` control your audio. `/gif [search]` opens the GIF picker,
+`/save` opens User Settings, `/dnd` toggles notifications, and `/clear` clears the
+current channel's local display without deleting saved messages. `/leave` asks to
+leave the current community. `/quit` and `/exit` close the app.
+
+Commands run locally and are not sent as chat. Mentions highlight `@name`,
+`@everyone`, and `@here`; a message mentioning you also has a highlighted background.
+A standalone GIF link shows the GIF without its URL while linked previews are
+enabled. Turning previews off keeps the URL visible.
 
 ## Push to talk
 
