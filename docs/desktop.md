@@ -47,8 +47,9 @@ predate sender identities retain their original names.
 The settings categories run down the left, with the selected page on the right.
 **Audio** contains devices and push-to-talk, **Notifications** contains message
 and activity alerts, **Connection** contains relay and direct addresses, and
-**Message History** controls local SQLite saving. Leave voice before changing
-audio devices, and disconnect before changing connection details.
+**Message History** controls local SQLite saving. Microphone and output devices
+can be changed during a call; audio reconnects in place without dropping you
+from the call. Disconnect before changing connection details.
 
 ## Desktop penguins
 
@@ -131,7 +132,8 @@ row lights up green while their microphone is active.
 voice. You can join one voice channel at a time across all communities. Select
 another voice channel and choose **Switch to this channel** to move the call.
 
-Choose microphone and output devices in **User Settings** before joining.
+Choose microphone and output devices in **User Settings** before joining, or
+change them during a call to reconnect audio in place.
 Allow microphone access when the operating system asks. On macOS, enable
 microphone access for disquisition in System Settings > Privacy & Security.
 

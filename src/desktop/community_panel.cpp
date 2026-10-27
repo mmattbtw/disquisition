@@ -943,6 +943,8 @@ void CommunityPanel::settings() {
     connect(saving, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     auto* input = new QComboBox(&dialog);
     auto* output = new QComboBox(&dialog);
+    input->setObjectName("communityInputDevice");
+    output->setObjectName("communityOutputDevice");
     input->addItem("System default", "");
     output->addItem("System default", "");
     for (const auto& device : QMediaDevices::audioInputs())
@@ -951,15 +953,15 @@ void CommunityPanel::settings() {
         output->addItem(device.description(), QString::fromUtf8(device.id()));
     input->setCurrentIndex(std::max(0, input->findData(saved.value("community/input", ""))));
     output->setCurrentIndex(std::max(0, output->findData(saved.value("community/output", ""))));
-    input->setEnabled(voiceCid_.isEmpty());
-    output->setEnabled(voiceCid_.isEmpty());
     audioForm->addRow("Microphone", input);
     audioForm->addRow("Audio output", output);
-    if (!voiceCid_.isEmpty()) {
-        auto* help = new QLabel("Leave voice to change your audio devices.", &dialog);
-        help->setWordWrap(true);
-        audioForm->addRow(help);
-    }
+    auto* audioHelp = new QLabel(voiceCid_.isEmpty()
+                                     ? "Audio devices apply the next time you join voice."
+                                     : "Changing audio devices reconnects audio without leaving "
+                                       "the call.",
+                                 &dialog);
+    audioHelp->setWordWrap(true);
+    audioForm->addRow(audioHelp);
     auto* ptt = new QCheckBox("Hold a key to talk", &dialog);
     ptt->setObjectName("communityPushToTalk");
     ptt->setChecked(saved.value("voice/pushToTalk", false).toBool());
@@ -1032,12 +1034,35 @@ void CommunityPanel::settings() {
             notifications_->setSettings({muted->isChecked(), NotifyLevel(level->currentData().toInt()),
                                          suppress->isChecked(), activity->isChecked()});
             updatePushToTalk();
+            const auto inputId = input->currentData().toString();
+            const auto outputId = output->currentData().toString();
+            const auto previousInput = saved.value("community/input").toString();
+            const auto previousOutput = saved.value("community/output").toString();
+            if (!voiceCid_.isEmpty() &&
+                (inputId != previousInput || outputId != previousOutput)) {
+                const bool silent = mute_->isChecked() || deafen_->isChecked() ||
+                                    (ptt->isChecked() && !pushToTalk_.held());
+                const bool deafened = deafen_->isChecked();
+                if (!audio_.start(inputId, outputId)) {
+                    if (!audio_.start(previousInput, previousOutput) && !audio_.start({}, {}))
+                        throw std::runtime_error(
+                            "The selected audio devices are unavailable, and the call could not "
+                            "be restored.");
+                    audio_.setMuted(silent);
+                    audio_.setDeafened(deafened);
+                    throw std::runtime_error(
+                        "The selected audio devices are unavailable. The call is using other "
+                        "devices.");
+                }
+                audio_.setMuted(silent);
+                audio_.setDeafened(deafened);
+            }
             voiceState();
             saved.setValue("community/relay", address);
             saved.setValue("community/host", host->text().trimmed());
             saved.setValue("community/port", port->value());
-            saved.setValue("community/input", input->currentData());
-            saved.setValue("community/output", output->currentData());
+            saved.setValue("community/input", inputId);
+            saved.setValue("community/output", outputId);
             saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());

@@ -4,6 +4,7 @@
 #include <QBuffer>
 #include <QCheckBox>
 #include <QCompleter>
+#include <QComboBox>
 #include <QDeadlineTimer>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -610,6 +611,18 @@ int main(int argc, char** argv) {
     }));
     remote.setVoice(cid, voiceChannel, false, false, true);
     CHECK(until([&] { return !node->presence(cid, remote.peerId()).muted; }));
+    // Audio devices stay editable while the call is connected.
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        auto* input = dialog->findChild<QComboBox*>("communityInputDevice");
+        auto* output = dialog->findChild<QComboBox*>("communityOutputDevice");
+        CHECK(input && output && input->isEnabled() && output->isEnabled());
+        dialog->reject();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
+    CHECK(remote.presence(cid, remote.peerId()).voiceChannel == voiceChannel);
     CHECK(until([&] {
         for (auto* profile : tree->findChildren<QPushButton*>("voiceMemberProfile"))
             if (profile->property("peer").toString() == remote.peerId()) {
