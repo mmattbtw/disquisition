@@ -68,4 +68,14 @@ QJsonArray Store::pending() const {
     const auto path = directory_ + "/pending.json";
     return QFile::exists(path) ? document(read(path, 64 * 1024)).array() : QJsonArray{};
 }
+Profile Store::profile() const {
+    const auto path = directory_ + "/profile.json";
+    return QFile::exists(path)
+               ? Profile::fromJson(document(read(path, 2 * kMaxAvatarBytes)).object())
+               : Profile{};
+}
+void Store::saveProfile(const Profile& profile) const {
+    Profile::fromJson(profile.toJson());
+    write(directory_ + "/profile.json", canonical(profile.toJson()));
+}
 } // namespace community

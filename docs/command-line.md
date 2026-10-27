@@ -37,12 +37,12 @@ options cause startup to fail. `--help` lists supported options.
 
 The relay listens for community registrations and encrypted peer tunnels. It
 needs no upstream server address, advertised host, or database. Desktop clients
-enter the reachable relay hostname and optional port in **Connection & saving**.
+enter the reachable relay hostname and optional port in **User Settings**.
 Stop it with Ctrl+C or SIGTERM on systems that provide that signal.
 
 ## Local message saving
 
-**Connection & saving** controls optional SQLite storage, the database file,
+**User Settings** controls optional SQLite storage, the database file,
 and message retention. Community identities and metadata are always saved,
 independently of chat saving. Messages remain live-only: reconnecting clients
 do not fetch missed messages from the relay or other peers.

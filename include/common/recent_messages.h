@@ -18,6 +18,7 @@ struct RecentMessage {
     std::string communityId = {};
     std::string channelId = {};
     std::string messageId = {};
+    std::string senderId = {};
 };
 
 // Each append is committed before returning. An absent maximum keeps every

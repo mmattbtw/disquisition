@@ -32,6 +32,8 @@ public:
                const QString& relayEndpoint = {});
     void stop();
     QString peerId() const { return store_.identity().id(); }
+    const Profile& profile() const { return profile_; }
+    void setProfile(const Profile& profile);
     QString endpoint() const { return endpoint_; }
     quint16 port() const;
     const QMap<QString, Model>& communities() const { return models_; }
@@ -41,6 +43,9 @@ public:
     void edit(const QString& community, const QString& kind, const QJsonObject& data);
     int sendPacket(const QString& community, const QString& channel, const QString& type,
                    QJsonObject data);
+    // Congestion may skip a frame, but never just its remaining chunks.
+    bool sendScreenFrame(const QString& community, const QString& channel, const QString& peer,
+                         quint32 frame, const QList<QByteArray>& chunks, bool keyframe);
     void setVoice(const QString& community, const QString& channel, bool muted = false,
                   bool deafened = false, bool sharing = false);
     QSet<QString> online(const QString& community) const;
@@ -49,6 +54,7 @@ public:
     qsizetype connectionCount() const;
     qint64 mediaBacklog() const;
     bool synchronizing(const QString& community) const;
+    bool relayConnected() const { return relayRegistered_; }
 
 signals:
     void changed();
@@ -57,6 +63,7 @@ signals:
     void packetReceived(const QString& community, const QString& channel, const QString& peer,
                         const QString& type, const QJsonObject& data);
     void errorOccurred(const QString& message);
+    void relayConnectionChanged(bool connected);
 
 private:
     struct Link;
@@ -84,11 +91,14 @@ private:
     void publishProfile(const QString& community);
     void persistPending();
     void connectionError(const QString& route, const QString& message);
+    int sendPacketImpl(const QString& community, const QString& channel, const QString& type,
+                       QJsonObject data, bool checkScreenBacklog);
     bool writable(Link* link, const QString& community) const;
     bool validPacket(const QString& community, const QString& channel, const QString& type,
                      const QJsonObject& data, const QString& peer) const;
 
     Store store_;
+    Profile profile_;
     QMap<QString, Model> models_;
     QMap<QString, Invite> pending_;
     QMap<QString, Link*> joining_;
@@ -104,6 +114,7 @@ private:
     QPointer<QTcpSocket> relay_;
     QString relayEndpoint_;
     QString relayNonce_;
+    bool relayRegistered_ = false;
     qint64 relayDue_ = 0;
     qint64 relayLastRead_ = 0;
     QString endpoint_;

@@ -71,6 +71,24 @@ public:
         gCheckCleanup = nullptr;
     }
     quint16 port() const { return port_; }
+    void interrupt() {
+        if (relayExecutable.isEmpty()) {
+            close();
+            router.close();
+        }
+        else {
+            relay.kill();
+            CHECK(relay.waitForFinished(8000));
+        }
+    }
+    void resume() {
+        if (relayExecutable.isEmpty()) {
+            router.start();
+            CHECK(listen(QHostAddress::LocalHost, port_));
+        }
+        else
+            CHECK(start(relay, relayExecutable, {"--listen", QString::number(port_)}) == port_);
+    }
 
 protected:
     void incomingConnection(qintptr descriptor) override { router.adopt(descriptor); }
@@ -182,6 +200,33 @@ QString channel(const Model& model, const QString& type) {
     return {};
 }
 
+void largeScreenFrameDelivers(Node& a, Node& b, const QString& cid, const QString& voice) {
+    a.setVoice(cid, voice, false, false, true);
+    b.setVoice(cid, voice);
+    CHECK(until([&] {
+        return b.presence(cid, a.peerId()).sharing &&
+               a.presence(cid, b.peerId()).voiceChannel == voice;
+    }));
+    int videoChunks = 0;
+    QByteArray video;
+    const auto receive = QObject::connect(&b, &Node::packetReceived,
+                                          [&](const QString&, const QString&, const QString&,
+                                              const QString& kind, const QJsonObject& data) {
+                                              if (kind == "screen") {
+                                                  ++videoChunks;
+                                                  video += QByteArray::fromBase64(
+                                                      data.value("bytes").toString().toLatin1());
+                                              }
+                                          });
+    const QByteArray chunk(16 * 1024 - 256, 'v');
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 7, QList<QByteArray>(8, chunk), true));
+    // A subsequent frame is skipped whole while the first remains queued.
+    CHECK(!a.sendScreenFrame(cid, voice, b.peerId(), 8, QList<QByteArray>(8, chunk), false));
+    CHECK(until([&] { return videoChunks == 8; }));
+    CHECK(video == chunk.repeated(8));
+    QObject::disconnect(receive);
+}
+
 void directAdmissionIsolationAndConnectionReuse() {
     QTemporaryDir ad, bd, cd, dd;
     Node a(ad.path()), b(bd.path()), c(cd.path()), denied(dd.path());
@@ -199,6 +244,16 @@ void directAdmissionIsolationAndConnectionReuse() {
     const auto second = a.createCommunity("two");
     b.joinCommunity(a.invite(second));
     CHECK(until([&] { return b.online(second).size() == 2 && a.online(second).size() == 2; }));
+    CHECK(a.connectionCount() == 1 && b.connectionCount() == 1);
+    b.setProfile({"Bobby", "Live music & late-night chats.", QByteArray("avatar")});
+    CHECK(until([&] {
+        const auto first = a.communities()[cid].members[b.peerId()];
+        const auto other = a.communities()[second].members[b.peerId()];
+        return first.name == "Bobby" && first.bio == b.profile().bio &&
+               first.avatar == b.profile().avatar && other.name == first.name &&
+               other.bio == first.bio && other.avatar == first.avatar && !a.synchronizing(cid) &&
+               !a.synchronizing(second);
+    }));
     CHECK(a.connectionCount() == 1 && b.connectionCount() == 1);
     bool contactedBackup = false;
     QObject::connect(&denied, &Node::changed, [&] {
@@ -272,6 +327,7 @@ void directAdmissionIsolationAndConnectionReuse() {
                        {{"bytes", QString::fromLatin1(QByteArray(640, '\0').toBase64())}}) == 1);
     CHECK(until([&] { return bobAudio == 1; }));
     CHECK(carolAudio == 0);
+    largeScreenFrameDelivers(a, b, cid, voice);
 }
 
 void relayHostMigrationAndReconnection() {
@@ -324,6 +380,22 @@ void relayHostMigrationAndReconnection() {
     CHECK(a.sendPacket(cid, channel(a.communities()[cid], "text"), "chat",
                        {{"body", "community through relay"}}) == 1);
     CHECK(until([&] { return chatReceived; }));
+    CHECK(until([&] { return a.relayConnected() && b.relayConnected(); }));
+    relay.interrupt();
+    CHECK(until(
+        [&] { return !a.relayConnected() && !b.relayConnected() && b.online(cid).size() == 1; }));
+    relay.resume();
+    CHECK(until(
+        [&] {
+            return a.relayConnected() && b.relayConnected() && a.online(cid).size() == 2 &&
+                   b.online(cid).size() == 2;
+        },
+        20000));
+    chatReceived = false;
+    CHECK(a.sendPacket(cid, channel(a.communities()[cid], "text"), "chat",
+                       {{"body", "community through relay"}}) == 1);
+    CHECK(until([&] { return chatReceived; }));
+    largeScreenFrameDelivers(a, b, cid, channel(a.communities()[cid], "voice"));
     a.stop();
     CHECK(until([&] { return b.online(cid).size() == 1; }));
     CHECK(b.host(cid) == b.peerId());
@@ -448,6 +520,7 @@ void allOfflineRestoresMetadataAndNeverReplaysMissedChat() {
         diagnostics(a);
         diagnostics(b);
         CHECK(a.communities()[cid].members.size() == 2 && b.communities()[cid].members.size() == 2);
+        b.setProfile({"bob", "Edited while disconnected", QByteArray("offline avatar")});
         int messages = 0;
         QObject::connect(&b, &Node::packetReceived,
                          [&](const QString&, const QString&, const QString&, const QString& kind,
@@ -461,6 +534,9 @@ void allOfflineRestoresMetadataAndNeverReplaysMissedChat() {
         CHECK(b.start("bob", "127.0.0.1"));
         CHECK(a.port() == alicePort && b.port() == bobPort);
         CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+        CHECK(until([&] {
+            return a.communities()[cid].members[b.peerId()].bio == "Edited while disconnected";
+        }));
         CHECK(messages == 0);
         CHECK(a.sendPacket(cid, text, "chat", {{"body", "live after reconnect"}}) == 1);
         CHECK(until([&] { return messages == 1; }));

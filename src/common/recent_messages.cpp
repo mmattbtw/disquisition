@@ -69,7 +69,7 @@ RecentMessages::RecentMessages(const std::string& path, std::optional<std::int64
         }
         execute(db_, "BEGIN IMMEDIATE");
         try {
-            for (const auto* column : {"community_id", "channel_id", "message_id"}) {
+            for (const auto* column : {"community_id", "channel_id", "message_id", "sender_id"}) {
                 if (!columns.contains(column))
                     execute(db_, (std::string("ALTER TABLE saved_messages ADD COLUMN ") + column +
                                   " TEXT NOT NULL DEFAULT ''")
@@ -116,9 +116,10 @@ void RecentMessages::append(const RecentMessage& message) {
     try {
         execute(db_, "BEGIN IMMEDIATE");
         {
-            auto statement = prepare(db_, "INSERT OR IGNORE INTO saved_messages "
-                                          "(timestamp, sender, body, color, community_id, "
-                                          "channel_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            auto statement =
+                prepare(db_, "INSERT OR IGNORE INTO saved_messages "
+                             "(timestamp, sender, body, color, community_id, "
+                             "channel_id, message_id, sender_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
             if (sqlite3_bind_int64(statement.get(), 1, message.timestamp) != SQLITE_OK) {
                 throw std::runtime_error(sqlite3_errmsg(db_));
             }
@@ -128,6 +129,7 @@ void RecentMessages::append(const RecentMessage& message) {
             bindText(db_, statement.get(), 5, message.communityId);
             bindText(db_, statement.get(), 6, message.channelId);
             bindText(db_, statement.get(), 7, message.messageId);
+            bindText(db_, statement.get(), 8, message.senderId);
             if (sqlite3_step(statement.get()) != SQLITE_DONE) {
                 throw std::runtime_error(sqlite3_errmsg(db_));
             }
@@ -149,7 +151,8 @@ std::vector<RecentMessage> RecentMessages::recent(const std::string& communityId
                                                   const std::string& channelId,
                                                   std::size_t limit) const {
     auto statement = prepare(
-        db_, "SELECT timestamp, sender, body, color, community_id, channel_id, message_id FROM "
+        db_, "SELECT timestamp, sender, body, color, community_id, channel_id, message_id, "
+             "sender_id FROM "
              "saved_messages WHERE community_id = ? AND channel_id = ? ORDER BY id DESC LIMIT ?");
     bindText(db_, statement.get(), 1, communityId);
     bindText(db_, statement.get(), 2, channelId);
@@ -166,7 +169,8 @@ std::vector<RecentMessage> RecentMessages::recent(const std::string& communityId
         messages.push_back({sqlite3_column_int64(statement.get(), 0),
                             columnText(statement.get(), 1), columnText(statement.get(), 2),
                             columnText(statement.get(), 3), columnText(statement.get(), 4),
-                            columnText(statement.get(), 5), columnText(statement.get(), 6)});
+                            columnText(statement.get(), 5), columnText(statement.get(), 6),
+                            columnText(statement.get(), 7)});
     }
     std::reverse(messages.begin(), messages.end());
     return messages;

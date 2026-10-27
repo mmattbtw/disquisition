@@ -15,6 +15,7 @@
 #include <functional>
 #include <stdexcept>
 
+#include "common/media_limits.h"
 #include "community/wire.h"
 
 namespace community {
@@ -93,7 +94,7 @@ struct Node::Link {
 };
 
 Node::Node(const QString& directory, QObject* parent) :
-    QObject(parent), store_(directory), models_(store_.load()) {
+    QObject(parent), store_(directory), profile_(store_.profile()), models_(store_.load()) {
     const auto credentials = store_.identity().tlsCredentials();
     certificate_ = credentials.first;
     privateKey_ = credentials.second;
@@ -167,6 +168,8 @@ bool Node::start(const QString& displayName, const QString& advertisedHost, quin
     running_ = true;
     recoveringUntil_ = now() + 2000;
     try {
+        profile_.name = name_;
+        store_.saveProfile(profile_);
         for (const auto& cid : models_.keys())
             publishProfile(cid);
     }
@@ -192,6 +195,9 @@ void Node::stop() {
         relay_->deleteLater();
         relay_ = nullptr;
     }
+    relayNonce_.clear();
+    relayRegistered_ = false;
+    relayDue_ = 0;
     while (!links_.isEmpty()) {
         auto* link = links_.takeLast();
         link->socket->disconnect(this);
@@ -226,6 +232,7 @@ QString Node::createCommunity(const QString& name) {
     auto model = Model::create(store_.identity(), name.trimmed(), name_, endpoint_);
     const auto id = model.id;
     save(std::move(model));
+    publishProfile(id);
     emit joined(id);
     return id;
 }
@@ -298,12 +305,41 @@ void Node::publishProfile(const QString& cid) {
     if (!models_.contains(cid) || !models_[cid].isMember(peerId()))
         return;
     const auto member = models_[cid].members.value(peerId());
-    if (member.name == name_ && member.endpoint == endpoint_)
+    if (member.name == name_ && member.endpoint == endpoint_ && member.bio == profile_.bio &&
+        member.avatar == profile_.avatar)
         return;
     auto model = models_.value(cid);
-    model.change(store_.identity(), "profile", {{"name", name_}, {"endpoint", endpoint_}});
+    auto data = profile_.toJson();
+    data["name"] = name_;
+    data["endpoint"] = endpoint_;
+    model.change(store_.identity(), "profile", data);
     save(std::move(model));
     broadcastState(cid);
+}
+
+void Node::setProfile(const Profile& profile) {
+    const auto next = Profile::fromJson(profile.toJson());
+    QMap<QString, Model> updates;
+    for (const auto& current : models_) {
+        const auto member = current.members.value(peerId());
+        if (!current.isMember(peerId()) ||
+            (member.name == next.name && member.bio == next.bio && member.avatar == next.avatar))
+            continue;
+        auto model = current;
+        auto data = next.toJson();
+        data["endpoint"] = running_ ? endpoint_ : member.endpoint;
+        model.change(store_.identity(), "profile", data);
+        updates.insert(model.id, std::move(model));
+    }
+    store_.saveProfile(next);
+    profile_ = next;
+    name_ = next.name;
+    for (const auto& cid : updates.keys()) {
+        save(updates[cid]);
+        if (running_)
+            broadcastState(cid);
+    }
+    emit changed();
 }
 
 Node::Link* Node::makeLink(bool outgoing, const QString& expected) {
@@ -956,6 +992,32 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
 
 int Node::sendPacket(const QString& cid, const QString& channel, const QString& type,
                      QJsonObject data) {
+    return sendPacketImpl(cid, channel, type, std::move(data), true);
+}
+
+bool Node::sendScreenFrame(const QString& cid, const QString& channel, const QString& peer,
+                           quint32 frameId, const QList<QByteArray>& chunks, bool keyframe) {
+    if (!isPeerId(peer) || chunks.isEmpty() || chunks.size() > chat::kMaxScreenChunks ||
+        std::any_of(chunks.begin(), chunks.end(), [](const auto& chunk) {
+            return chunk.isEmpty() || chunk.size() > qsizetype(chat::kScreenChunkBytes);
+        }))
+        throw std::runtime_error("invalid screen frame");
+    for (int index = 0; index < chunks.size(); ++index) {
+        if (!sendPacketImpl(cid, channel, "screen",
+                            {{"target", peer},
+                             {"frame", double(frameId)},
+                             {"index", index},
+                             {"count", chunks.size()},
+                             {"keyframe", keyframe},
+                             {"bytes", QString::fromLatin1(chunks[index].toBase64())}},
+                            index == 0))
+            return false;
+    }
+    return true;
+}
+
+int Node::sendPacketImpl(const QString& cid, const QString& channel, const QString& type,
+                         QJsonObject data, bool checkScreenBacklog) {
     if (!running_ || !models_.contains(cid) || !models_[cid].isMember(peerId()) ||
         !models_[cid].channels.contains(channel))
         throw std::runtime_error("unknown channel");
@@ -983,7 +1045,8 @@ int Node::sendPacket(const QString& cid, const QString& channel, const QString& 
         if (channelType == "voice" && (mine_.value(cid).voiceChannel != channel ||
                                        presence_[cid].value(link->peer).voiceChannel != channel))
             continue;
-        if ((type == "audio" || type == "screen") && link->socket->bytesToWrite() > 64 * 1024)
+        if ((type == "audio" || (type == "screen" && checkScreenBacklog)) &&
+            link->socket->bytesToWrite() > 64 * 1024)
             continue;
         send(link, packet);
         ++recipients;
@@ -1002,14 +1065,24 @@ void Node::connectRelay() {
     connect(socket, &QTcpSocket::connected, this,
             [socket] { socket->write(kRelayPrefix, sizeof(kRelayPrefix) - 1); });
     connect(socket, &QTcpSocket::readyRead, this, &Node::readRelay);
-    const auto cleanup = [this, socket] {
-        if (relay_ == socket) {
-            relay_ = nullptr;
-            relayNonce_.clear();
-        }
+    const auto cleanup = [this, socket = QPointer<QTcpSocket>(socket)] {
+        if (!socket || relay_ != socket)
+            return;
+        relay_ = nullptr;
+        relayNonce_.clear();
+        relayRegistered_ = false;
+        relayDue_ = now() + 3000;
         socket->deleteLater();
+        emit relayConnectionChanged(false);
     };
     connect(socket, &QTcpSocket::disconnected, this, cleanup);
+    // Aborting before a connection is established need not emit disconnected.
+    // Defer cleanup so errorOccurred can still report the failure first.
+    connect(socket, &QTcpSocket::stateChanged, this,
+            [this, cleanup](QAbstractSocket::SocketState state) {
+                if (state == QAbstractSocket::UnconnectedState)
+                    QTimer::singleShot(0, this, cleanup);
+            });
     connect(socket, &QTcpSocket::errorOccurred, this,
             [this, cleanup, socket](QAbstractSocket::SocketError error) {
                 if (error == QAbstractSocket::RemoteHostClosedError && relayNonce_.isEmpty())
@@ -1052,6 +1125,11 @@ void Node::readRelay() {
             }
             else if (message.value("type") == "registered") {
                 connectionErrors_.remove(relayEndpoint_);
+                if (!relayRegistered_) {
+                    relayRegistered_ = true;
+                    retries_.clear();
+                    emit relayConnectionChanged(true);
+                }
             }
             else if (message.value("type") == "error") {
                 connectionError(relayEndpoint_, message.value("message").toString());
@@ -1090,7 +1168,7 @@ void Node::tick() {
             emit changed();
         }
         connectRelay();
-        if (relay_ && now() - relayLastRead_ > 35000)
+        if (relay_ && now() - relayLastRead_ > (relayRegistered_ ? 35000 : 10000))
             relay_->abort();
         if (relay_ && !relayNonce_.isEmpty() && now() / 10000 != (now() - 500) / 10000)
             relay_->write(frame({{"type", "ping"}}));

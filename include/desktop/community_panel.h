@@ -54,6 +54,7 @@ private:
     void selectCommunity(const QString& cid);
     void connectNode();
     void settings();
+    void showProfile(const QString& cid, const QString& peer, const QPoint& position);
     void create();
     void join();
     void acceptInvite(const QString& link);
@@ -88,6 +89,7 @@ private:
     bool online_ = false;
     bool refreshQueued_ = false;
     QString cid_, channel_;
+    QString renderedProfiles_;
     QString voiceCid_, voiceChannel_;
     QString selectedVoiceCid_, selectedVoiceChannel_;
     QString pendingLink_;
@@ -100,6 +102,8 @@ private:
     QSet<QString> streams_;
     QSet<QString> watching_;
     QSet<QString> watchers_;
+    QMap<QString, qint64> lastScreenFrames_;
+    QTimer streamRetry_;
     std::unique_ptr<chat::RecentMessages> history_;
     QLineEdit* name_ = nullptr;
     QPushButton* connect_ = nullptr;

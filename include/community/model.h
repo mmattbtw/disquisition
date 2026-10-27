@@ -13,12 +13,24 @@ constexpr qsizetype kMaxMetadataBytes = 8 * 1024 * 1024;
 constexpr int kMaxOperations = 8192;
 constexpr int kMaxIconBytes = 128 * 1024;
 constexpr int kMaxMembers = 1024;
+constexpr int kMaxBioLength = 500;
+constexpr int kMaxAvatarBytes = 32 * 1024;
+
+struct Profile {
+    QString name;
+    QString bio;
+    QByteArray avatar;
+    QJsonObject toJson() const;
+    static Profile fromJson(const QJsonObject& object);
+};
 
 struct Member {
     QString id;
     QString name;
     QString endpoint;
     bool admin = false;
+    QString bio;
+    QByteArray avatar;
 };
 struct Channel {
     QString id;

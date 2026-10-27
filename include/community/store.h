@@ -16,6 +16,8 @@ public:
     void save(const Model& model) const;
     void savePending(const QJsonArray& invites) const;
     QJsonArray pending() const;
+    Profile profile() const;
+    void saveProfile(const Profile& profile) const;
     QString directory() const { return directory_; }
 
 private:

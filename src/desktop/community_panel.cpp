@@ -1,8 +1,7 @@
 #include "desktop/community_panel.h"
 
-#include <QApplication>
 #include <QAction>
-#include <QMenu>
+#include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QClipboard>
@@ -22,15 +21,18 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMediaDevices>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRandomGenerator>
-#include <QScrollBar>
+#include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -39,6 +41,7 @@
 #include <QStandardPaths>
 #include <QStyle>
 #include <QTextBrowser>
+#include <QTextDocument>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -47,9 +50,9 @@
 #include "desktop/chat_media.h"
 #include "desktop/gif_picker.h"
 #include "desktop/gif_search.h"
-#include "desktop/remote_media.h"
-#include "desktop/notification_center.h"
 #include "desktop/mention_completer.h"
+#include "desktop/notification_center.h"
+#include "desktop/remote_media.h"
 #include "desktop/screen_stage.h"
 #include "desktop/share_picker.h"
 
@@ -104,6 +107,66 @@ QPixmap voiceIndicator(const QString& kind) {
         painter.drawLine(2, 1, 14, 15);
     return image;
 }
+QIcon voiceChannelIcon(qreal scale) {
+    QPixmap image(QSize(20, 20) * scale);
+    image.setDevicePixelRatio(scale);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#bed9d4"), 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    QPainterPath speaker;
+    speaker.moveTo(3, 8);
+    speaker.lineTo(6, 8);
+    speaker.lineTo(10, 4);
+    speaker.lineTo(10, 16);
+    speaker.lineTo(6, 12);
+    speaker.lineTo(3, 12);
+    speaker.closeSubpath();
+    painter.drawPath(speaker);
+    painter.drawArc(QRectF(9, 6, 6, 8), -60 * 16, 120 * 16);
+    painter.drawArc(QRectF(9, 3, 10, 14), -60 * 16, 120 * 16);
+    painter.end();
+    QIcon icon;
+    for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
+        icon.addPixmap(image, mode);
+    return icon;
+}
+QPixmap profileAvatar(const community::Member& member, int size, qreal scale) {
+    QPixmap result(QSize(size, size) * scale);
+    result.setDevicePixelRatio(scale);
+    result.fill(Qt::transparent);
+    QPainter painter(&result);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    QPainterPath circle;
+    circle.addEllipse(QRectF(0, 0, size, size));
+    painter.setClipPath(circle);
+    QImage decoded;
+    if (member.avatar.size() <= community::kMaxAvatarBytes) {
+        ImageBytes source(member.avatar);
+        const auto dimensions = source.size();
+        if (source.canRead() && dimensions.width() > 0 && dimensions.height() > 0 &&
+            dimensions.width() <= 256 && dimensions.height() <= 256)
+            decoded = source.read();
+    }
+    if (!decoded.isNull()) {
+        const int side = std::min(decoded.width(), decoded.height());
+        painter.drawImage(QRectF(0, 0, size, size), decoded,
+                          QRectF((decoded.width() - side) / 2, (decoded.height() - side) / 2, side,
+                                 side));
+    }
+    else {
+        painter.fillRect(QRect(0, 0, size, size), QColor("#394f52"));
+        painter.setPen(QColor("#d5eeea"));
+        auto font = painter.font();
+        font.setPixelSize(size * 0.44);
+        font.setWeight(QFont::DemiBold);
+        painter.setFont(font);
+        painter.drawText(QRect(0, 0, size, size), Qt::AlignCenter,
+                         member.name.trimmed().left(1).toUpper());
+    }
+    return result;
+}
 } // namespace
 
 CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWidget(parent), pushToTalk_(this) {
@@ -142,6 +205,11 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     note("Invite rejected. Check the code with the community owner.");
                 });
         connect(node_.get(), &community::Node::errorOccurred, this, &CommunityPanel::note);
+        connect(node_.get(), &community::Node::relayConnectionChanged, this,
+                [this](bool connected) {
+                    note(connected ? "Relay connected."
+                                   : "Relay connection lost. Reconnecting automatically…");
+                });
         connect(node_.get(), &community::Node::packetReceived, this, &CommunityPanel::receive);
     }
     qApp->installEventFilter(this);
@@ -185,18 +253,25 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     stage_->showFrame(node_->peerId(), image, encoded.size());
                 const auto watchers = watchers_;
                 for (const auto& peer : watchers)
-                    for (int index = 0; index < chunks.size(); ++index)
-                        attempt([&] {
-                            node_->sendPacket(voiceCid_, voiceChannel_, "screen",
-                                              {{"target", peer},
-                                               {"frame", double(frame)},
-                                               {"index", index},
-                                               {"count", chunks.size()},
-                                               {"keyframe", keyframe},
-                                               {"bytes",
-                                                QString::fromLatin1(chunks[index].toBase64())}});
-                        });
+                    attempt([&] {
+                        node_->sendScreenFrame(voiceCid_, voiceChannel_, peer, frame, chunks,
+                                               keyframe);
+                    });
             });
+    streamRetry_.setInterval(2000);
+    connect(&streamRetry_, &QTimer::timeout, this, [this] {
+        if (!online_ || voiceCid_.isEmpty())
+            return;
+        const auto now = QDateTime::currentMSecsSinceEpoch();
+        for (const auto& peer : watching_)
+            if (node_->online(voiceCid_).contains(peer) &&
+                node_->presence(voiceCid_, peer).sharing &&
+                now - lastScreenFrames_.value(peer) > 5000)
+                attempt([&] {
+                    node_->sendPacket(voiceCid_, voiceChannel_, "watch",
+                                      {{"target", peer}, {"enabled", true}});
+                });
+    });
     connect(&capture_, &ScreenCapture::errorOccurred, this, [this](const QString& error) {
         stopSharing();
         note(error);
@@ -234,9 +309,12 @@ void CommunityPanel::buildUi() {
     name_ = new QLineEdit(this);
     name_->setObjectName("communityName");
     name_->setPlaceholderText("Your name");
-    name_->setText(QSettings().value("community/name").toString());
+    name_->setMaxLength(64);
+    name_->setText(node_ && !node_->profile().name.isEmpty()
+                       ? node_->profile().name
+                       : QSettings().value("community/name").toString());
     connect_ = button("Connect", "communityConnect", this);
-    auto* settingsButton = button("Connection && saving", "communitySettings", this);
+    auto* settingsButton = button("User Settings", "communitySettings", this);
     connection->addWidget(name_, 1);
     connection->addWidget(connect_);
     connection->addWidget(settingsButton);
@@ -259,6 +337,7 @@ void CommunityPanel::buildUi() {
     tree_->setHeaderHidden(true);
     tree_->setMinimumWidth(245);
     tree_->setIndentation(16);
+    tree_->setIconSize(QSize(20, 20));
     side->addWidget(tree_, 1);
     connect(create_, &QPushButton::clicked, this, &CommunityPanel::create);
     connect(join_, &QPushButton::clicked, this, &CommunityPanel::join);
@@ -299,6 +378,15 @@ void CommunityPanel::buildUi() {
     members_->setObjectName("communityMembers");
     members_->setMinimumWidth(190);
     members_->setContextMenuPolicy(Qt::CustomContextMenu);
+    members_->setIconSize(QSize(32, 32));
+    connect(members_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        showProfile(cid_, item->data(Qt::UserRole).toString(),
+                    members_->viewport()->mapToGlobal(members_->visualItemRect(item).topLeft()));
+    });
+    connect(members_, &QListWidget::itemActivated, this, [this](QListWidgetItem* item) {
+        showProfile(cid_, item->data(Qt::UserRole).toString(),
+                    members_->viewport()->mapToGlobal(members_->visualItemRect(item).topLeft()));
+    });
     connect(members_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& position) {
         auto* item = members_->itemAt(position);
         if (!item || !capture_.running() || cid_ != voiceCid_)
@@ -392,6 +480,10 @@ void CommunityPanel::buildUi() {
     auto* network = new QNetworkAccessManager(this);
     auto* fetcher = new MediaFetcher(network, this);
     media_ = new ChatMedia(transcript_, fetcher, this);
+    connect(transcript_, &QTextBrowser::anchorClicked, this, [this](const QUrl& link) {
+        if (link.scheme() == "profile")
+            showProfile(link.host(), link.path().mid(1), QCursor::pos());
+    });
     gifSearch_ = new GifSearch(network, this);
     QSettings settings;
     auto customer = settings.value("gifs/klipyCustomerId").toString();
@@ -452,14 +544,167 @@ void CommunityPanel::connectNode() {
 void CommunityPanel::settings() {
     QSettings saved;
     QDialog dialog(this);
-    dialog.setWindowTitle("Community connection & local saving");
+    dialog.setObjectName("userSettings");
+    dialog.setWindowTitle("User Settings");
     auto* layout = new QVBoxLayout(&dialog);
-    auto* scroll = new QScrollArea(&dialog);
-    scroll->setWidgetResizable(true);
-    auto* content = new QWidget(scroll);
-    auto* form = new QFormLayout(content);
-    scroll->setWidget(content);
-    layout->addWidget(scroll, 1);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    auto* body = new QWidget(&dialog);
+    auto* columns = new QHBoxLayout(body);
+    columns->setContentsMargins(0, 0, 0, 0);
+    columns->setSpacing(0);
+    auto* categories = new QListWidget(body);
+    categories->setObjectName("userSettingsCategories");
+    categories->setAccessibleName("Settings categories");
+    categories->setFixedWidth(180);
+    auto* pages = new QStackedWidget(body);
+    pages->setObjectName("userSettingsPages");
+    columns->addWidget(categories);
+    columns->addWidget(pages, 1);
+    layout->addWidget(body, 1);
+    const auto page = [&](const QString& title, const QString& description) {
+        categories->addItem(title);
+        auto* scroll = new QScrollArea(pages);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidgetResizable(true);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        auto* content = new QWidget(scroll);
+        auto* section = new QVBoxLayout(content);
+        section->setContentsMargins(28, 24, 28, 24);
+        section->setSpacing(16);
+        auto* heading = new QLabel(title, content);
+        heading->setObjectName("settingsHeading");
+        section->addWidget(heading);
+        auto* help = new QLabel(description, content);
+        help->setObjectName("settingsDescription");
+        help->setWordWrap(true);
+        section->addWidget(help);
+        auto* form = new QFormLayout;
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        form->setHorizontalSpacing(16);
+        form->setVerticalSpacing(16);
+        section->addLayout(form);
+        section->addStretch();
+        scroll->setWidget(content);
+        pages->addWidget(scroll);
+        return form;
+    };
+    auto* userForm = page("User", "Your profile is shared with members of your communities.");
+    auto* audioForm = page("Audio", "Choose your microphone, output device, and how you talk.");
+    auto* notificationForm = page("Notifications",
+                                  "Choose which messages and activity get your attention.");
+    auto* connectionForm =
+        page("Connection",
+             online_ ? "Disconnect before changing your relay or direct connection."
+                     : "Use a relay to connect, or leave Relay blank for direct connections.");
+    auto* historyForm = page("Message History",
+                             "Optionally save chat on this device. Missed messages are not "
+                             "downloaded. Community metadata is always saved.");
+    connect(categories, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
+    categories->setCurrentRow(0);
+
+    const auto current = node_ ? node_->profile() : community::Profile{};
+    QByteArray avatar = current.avatar;
+    auto* displayName = new QLineEdit(current.name.isEmpty() ? name_->text() : current.name,
+                                      &dialog);
+    displayName->setObjectName("userDisplayName");
+    displayName->setMaxLength(64);
+    displayName->setPlaceholderText("How people see you");
+    auto* bio = new QPlainTextEdit(current.bio, &dialog);
+    bio->setObjectName("userBio");
+    bio->setAccessibleName("Bio");
+    bio->setPlaceholderText("A little about you");
+    bio->setMinimumHeight(104);
+    bio->setMaximumHeight(144);
+    auto* count = new QLabel(&dialog);
+    count->setObjectName("userBioCount");
+    count->setAlignment(Qt::AlignRight);
+    const auto updateCount = [=] {
+        const auto length = bio->toPlainText().size();
+        count->setText(QString::number(length) + " / " + QString::number(community::kMaxBioLength));
+        count->setStyleSheet(length > community::kMaxBioLength ? "color:#ffb3b3;"
+                                                               : "color:#a6b5bd;");
+    };
+    connect(bio, &QPlainTextEdit::textChanged, &dialog, updateCount);
+    updateCount();
+    auto* picture = new QWidget(&dialog);
+    auto* pictureRow = new QHBoxLayout(picture);
+    pictureRow->setContentsMargins(0, 0, 0, 0);
+    pictureRow->setSpacing(16);
+    auto* preview = new QLabel(picture);
+    preview->setObjectName("userAvatarPreview");
+    preview->setFixedSize(80, 80);
+    preview->setStyleSheet("padding:0; background:transparent;");
+    auto* pictureActions = new QVBoxLayout;
+    auto* choose = button("Change picture", "userChooseAvatar", picture);
+    auto* remove = button("Remove picture", "userRemoveAvatar", picture);
+    pictureActions->addWidget(choose);
+    pictureActions->addWidget(remove);
+    pictureRow->addWidget(preview);
+    pictureRow->addLayout(pictureActions);
+    pictureRow->addStretch();
+    const auto updatePreview = [&] {
+        community::Member member;
+        member.name = displayName->text();
+        member.avatar = avatar;
+        preview->setPixmap(profileAvatar(member, 80, devicePixelRatioF()));
+        remove->setEnabled(!avatar.isEmpty());
+    };
+    connect(displayName, &QLineEdit::textChanged, &dialog, updatePreview);
+    connect(remove, &QPushButton::clicked, &dialog, [&] {
+        avatar.clear();
+        updatePreview();
+    });
+    updatePreview();
+    userForm->addRow("Profile picture", picture);
+    userForm->addRow("Display name", displayName);
+    userForm->addRow("Bio", bio);
+    userForm->addRow(count);
+    auto* footerWidget = new QWidget(&dialog);
+    auto* footer = new QHBoxLayout(footerWidget);
+    footer->setContentsMargins(20, 16, 24, 16);
+    auto* error = new QLabel(footerWidget);
+    error->setObjectName("userSettingsError");
+    error->setTextFormat(Qt::PlainText);
+    error->setWordWrap(true);
+    error->setStyleSheet("color:#ffb3b3;");
+    error->hide();
+    footer->addWidget(error, 1);
+    connect(choose, &QPushButton::clicked, &dialog, [&] {
+        const auto path = QFileDialog::getOpenFileName(&dialog, "Choose a profile picture", {},
+                                                       "Images (*.png *.jpg *.jpeg *.webp *.bmp)");
+        if (path.isEmpty())
+            return;
+        const auto prepared = prepareImageFile(path);
+        auto image = QImage::fromData(prepared.bytes);
+        if (image.isNull()) {
+            error->setText(prepared.error.isEmpty() ? "This image could not be opened."
+                                                    : prepared.error);
+            error->show();
+            return;
+        }
+        const int side = std::min(image.width(), image.height());
+        image = image.copy((image.width() - side) / 2, (image.height() - side) / 2, side, side)
+                    .scaled(128, 128, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+        if (bytes.size() > community::kMaxAvatarBytes) {
+            bytes.clear();
+            buffer.seek(0);
+            image.save(&buffer, "JPEG", 85);
+        }
+        if (bytes.isEmpty() || bytes.size() > community::kMaxAvatarBytes) {
+            error->setText("This picture could not be prepared. Try another image.");
+            error->show();
+            return;
+        }
+        avatar = bytes;
+        error->hide();
+        updatePreview();
+    });
     auto relayAddress = saved.value("community/relay", "relay.disquisition.app").toString();
     if (relayAddress.startsWith("relay://"))
         relayAddress.remove(0, 8);
@@ -475,9 +720,9 @@ void CommunityPanel::settings() {
     relay->setEnabled(!online_);
     host->setEnabled(!online_);
     port->setEnabled(!online_);
-    form->addRow("Relay", relay);
-    form->addRow("Direct advertised host", host);
-    form->addRow("Direct listen port", port);
+    connectionForm->addRow("Relay", relay);
+    connectionForm->addRow("Direct advertised host", host);
+    connectionForm->addRow("Direct listen port", port);
     auto* saving = new QCheckBox("Save messages received or sent by this client", &dialog);
     saving->setObjectName("communitySaveMessages");
     saving->setChecked(saved.value("messages/enabled", false).toBool());
@@ -487,9 +732,13 @@ void CommunityPanel::settings() {
     path->setObjectName("communityMessageFile");
     auto* maximum = new QLineEdit(saved.value("messages/maximum").toString(), &dialog);
     maximum->setPlaceholderText("Unlimited");
-    form->addRow(saving);
-    form->addRow("SQLite file", path);
-    form->addRow("Maximum saved messages", maximum);
+    historyForm->addRow(saving);
+    historyForm->addRow("SQLite file", path);
+    historyForm->addRow("Maximum saved messages", maximum);
+    path->setEnabled(saving->isChecked());
+    maximum->setEnabled(saving->isChecked());
+    connect(saving, &QCheckBox::toggled, path, &QWidget::setEnabled);
+    connect(saving, &QCheckBox::toggled, maximum, &QWidget::setEnabled);
     auto* input = new QComboBox(&dialog);
     auto* output = new QComboBox(&dialog);
     input->addItem("System default", "");
@@ -502,8 +751,13 @@ void CommunityPanel::settings() {
     output->setCurrentIndex(std::max(0, output->findData(saved.value("community/output", ""))));
     input->setEnabled(voiceCid_.isEmpty());
     output->setEnabled(voiceCid_.isEmpty());
-    form->addRow("Microphone", input);
-    form->addRow("Audio output", output);
+    audioForm->addRow("Microphone", input);
+    audioForm->addRow("Audio output", output);
+    if (!voiceCid_.isEmpty()) {
+        auto* help = new QLabel("Leave voice to change your audio devices.", &dialog);
+        help->setWordWrap(true);
+        audioForm->addRow(help);
+    }
     auto* ptt = new QCheckBox("Hold a key to talk", &dialog);
     ptt->setObjectName("communityPushToTalk");
     ptt->setChecked(saved.value("voice/pushToTalk", false).toBool());
@@ -514,11 +768,11 @@ void CommunityPanel::settings() {
                        : std::nullopt, saved.value("voice/pushToTalkKeyName").toString());
     pttKey->setEnabled(ptt->isChecked());
     connect(ptt, &QCheckBox::toggled, pttKey, &QWidget::setEnabled);
-    form->addRow(ptt, pttKey);
+    audioForm->addRow(ptt, pttKey);
     auto* pttHelp = new QLabel("Global push-to-talk needs Input Monitoring on macOS. "
                               "Restart after granting access. On Wayland it works while the app is focused.", &dialog);
     pttHelp->setWordWrap(true);
-    form->addRow(pttHelp);
+    audioForm->addRow(pttHelp);
     auto* muted = new QCheckBox("Mute all notifications", &dialog);
     muted->setObjectName("communityMuteNotifications");
     muted->setChecked(notifications_->settings().muted);
@@ -530,22 +784,20 @@ void CommunityPanel::settings() {
     suppress->setChecked(notifications_->settings().suppressEveryone);
     auto* activity = new QCheckBox("Notify on joins and screen shares", &dialog);
     activity->setChecked(notifications_->settings().activity);
-    form->addRow(muted);
-    form->addRow("Notify for", level);
-    form->addRow(suppress);
-    form->addRow(activity);
-    auto* explanation =
-        new QLabel("Community metadata is always saved. Chat history stays on this device; missed "
-                   "messages are not downloaded. Disconnect to change connection settings.",
-                   &dialog);
-    explanation->setWordWrap(true);
-    form->addRow(explanation);
+    notificationForm->addRow(muted);
+    notificationForm->addRow("Notify for", level);
+    notificationForm->addRow(suppress);
+    notificationForm->addRow(activity);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                          &dialog);
-    layout->addWidget(buttons);
+    footer->addWidget(buttons);
+    layout->addWidget(footerWidget);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-        attempt([&] {
+        try {
+            const community::Profile profile{displayName->text().trimmed(), bio->toPlainText(),
+                                             avatar};
+            community::Profile::fromJson(profile.toJson());
             if (ptt->isChecked() && !pttKey->key())
                 throw std::runtime_error("Choose a push-to-talk key before enabling it.");
             const auto address = relay->text().trimmed();
@@ -562,6 +814,11 @@ void CommunityPanel::settings() {
                     path->text().trimmed().toStdString(), maximum->text().trimmed().isEmpty()
                                                               ? std::nullopt
                                                               : std::optional<std::int64_t>(count));
+            if (!node_)
+                throw std::runtime_error("The local identity is unavailable.");
+            node_->setProfile(profile);
+            name_->setText(profile.name);
+            saved.setValue("community/name", profile.name);
             saved.setValue("voice/pushToTalk", ptt->isChecked());
             if (pttKey->key()) {
                 saved.setValue("voice/pushToTalkKey", *pttKey->key());
@@ -584,9 +841,14 @@ void CommunityPanel::settings() {
             loadHistory(cid_, channel_);
             render();
             dialog.accept();
-        });
+        }
+        catch (const std::exception& exception) {
+            error->setText(QString::fromUtf8(exception.what()));
+            error->show();
+        }
     });
-    dialog.resize(620, 600);
+    dialog.resize(820, 660);
+    dialog.setMinimumSize(680, 520);
     dialog.exec();
 }
 
@@ -596,6 +858,67 @@ void CommunityPanel::create() {
                                             QLineEdit::Normal, {}, &ok);
     if (ok && !name.trimmed().isEmpty())
         attempt([&] { selectCommunity(node_->createCommunity(name)); });
+}
+
+void CommunityPanel::showProfile(const QString& cid, const QString& peer, const QPoint& position) {
+    if (!node_ || !node_->communities().value(cid).isMember(peer))
+        return;
+    if (auto* previous = findChild<QDialog*>("userProfileCard"))
+        previous->close();
+    const auto model = node_->communities().value(cid);
+    const auto member = model.members.value(peer);
+    auto* card = new QDialog(this, Qt::Popup);
+    card->setObjectName("userProfileCard");
+    card->setAttribute(Qt::WA_DeleteOnClose);
+    card->setWindowTitle(member.name + "'s profile");
+    card->setFixedWidth(340);
+    auto* layout = new QVBoxLayout(card);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(16);
+    auto* avatar = new QLabel(card);
+    avatar->setObjectName("profileAvatar");
+    avatar->setFixedSize(80, 80);
+    avatar->setPixmap(profileAvatar(member, 80, devicePixelRatioF()));
+    avatar->setStyleSheet("padding:0; background:transparent;");
+    layout->addWidget(avatar);
+    auto* displayName = new QLabel(member.name, card);
+    displayName->setObjectName("profileDisplayName");
+    displayName->setTextFormat(Qt::PlainText);
+    displayName->setWordWrap(true);
+    displayName->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(displayName);
+    const auto role = peer == model.owner ? "Owner" : member.admin ? "Admin" : "Member";
+    const auto state = online_ && node_->online(cid).contains(peer) ? "Online" : "Offline";
+    auto* detail = new QLabel(QString(state) + " · " + role, card);
+    detail->setObjectName("settingsDescription");
+    layout->addWidget(detail);
+    auto* bio = new QLabel(member.bio.isEmpty() ? "No bio yet." : member.bio, card);
+    bio->setObjectName("profileBio");
+    bio->setTextFormat(Qt::PlainText);
+    bio->setWordWrap(true);
+    bio->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto* scroll = new QScrollArea(card);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(bio);
+    scroll->setFixedHeight(std::clamp(bio->heightForWidth(280) + 16, 56, 200));
+    layout->addWidget(scroll);
+    if (peer == node_->peerId()) {
+        auto* edit = button("Edit profile", "profileEdit", card);
+        layout->addWidget(edit);
+        connect(edit, &QPushButton::clicked, this, [this, card] {
+            card->close();
+            settings();
+        });
+    }
+    card->adjustSize();
+    const auto* screen = QGuiApplication::screenAt(position);
+    const auto bounds = (screen ? screen : QGuiApplication::primaryScreen())->availableGeometry();
+    card->move(std::clamp(position.x(), bounds.left(),
+                          std::max(bounds.left(), bounds.right() - card->width())),
+               std::clamp(position.y(), bounds.top(),
+                          std::max(bounds.top(), bounds.bottom() - card->height())));
+    card->show();
 }
 
 void CommunityPanel::acceptInvite(const QString& link) {
@@ -1059,7 +1382,7 @@ void CommunityPanel::refresh() {
                 label += "  [" + QString::number(unread) + ']';
             auto* child = new QTreeWidgetItem(root, {label});
             if (channel.type == "voice")
-                child->setIcon(0, style()->standardIcon(QStyle::SP_MediaVolume));
+                child->setIcon(0, voiceChannelIcon(devicePixelRatioF()));
             child->setData(0, Qt::UserRole, model.id);
             child->setData(0, Qt::UserRole + 1, channel.id);
             const bool selectedVoice = model.id == selectedVoiceCid_ &&
@@ -1091,23 +1414,30 @@ void CommunityPanel::refresh() {
                 participant->setFlags(Qt::ItemIsEnabled);
                 participant->setData(0, Qt::UserRole + 2, peer.id);
                 participant->setData(0, Qt::UserRole + 3, activity);
-                participant->setSizeHint(0, QSize(160, 28));
+                participant->setData(0, Qt::UserRole, model.id);
+                // Tree item padding is outside the widget's content rectangle.
+                // Leave room for the avatar plus both the row and item insets.
+                participant->setSizeHint(0, QSize(160, 48));
                 auto* row = new QWidget(tree_);
                 row->setAccessibleName(label + ", " + activity.join(", "));
                 auto* line = new QHBoxLayout(row);
-                line->setContentsMargins(0, 0, 4, 0);
-                line->setSpacing(5);
-                auto* avatar = new QLabel(peer.name.left(1).toUpper(), row);
-                avatar->setFixedSize(20, 20);
-                avatar->setAlignment(Qt::AlignCenter);
-                avatar->setStyleSheet(
-                    "background:#39484b; color:#bed9d4; border-radius:10px; font-size:11px;");
-                line->addWidget(avatar);
-                auto* name = new QLabel(label, row);
-                name->setTextFormat(Qt::PlainText);
-                name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-                name->setToolTip(label);
-                line->addWidget(name, 1);
+                line->setContentsMargins(0, 4, 4, 4);
+                line->setSpacing(6);
+                auto* profile = button(QString(label).replace('&', "&&"), "voiceMemberProfile",
+                                       row);
+                profile->setProperty("peer", peer.id);
+                profile->setIcon(QIcon(profileAvatar(peer, 28, devicePixelRatioF())));
+                profile->setIconSize(QSize(28, 28));
+                profile->setMinimumHeight(32);
+                profile->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+                profile->setToolTip("View " + peer.name + "'s profile");
+                profile->setAccessibleName("View profile: " + label);
+                line->addWidget(profile, 1);
+                connect(profile, &QPushButton::clicked, this,
+                        [this, profile, cid = model.id, id = peer.id] {
+                            showProfile(cid, id,
+                                        profile->mapToGlobal(QPoint(0, profile->height())));
+                        });
                 for (const auto& kind : activity) {
                     auto* indicator = new QLabel(row);
                     indicator->setObjectName("voiceActivity");
@@ -1117,6 +1447,8 @@ void CommunityPanel::refresh() {
                     indicator->setFixedSize(16, 16);
                     line->addWidget(indicator);
                 }
+                participant->setSizeHint(0,
+                                         QSize(160, std::max(48, row->sizeHint().height() + 12)));
                 tree_->setItemWidget(participant, 0, row);
             }
             if (selectedVoice && !activeVoice && online_ && model.isMember(node_->peerId())) {
@@ -1146,6 +1478,17 @@ void CommunityPanel::refresh() {
         previousSharing_[community.id] = sharing;
     }
     const auto model = node_->communities().value(cid_);
+    QString profiles = cid_;
+    for (const auto& member : model.members)
+        profiles += member.id + community::digest(member.name.toUtf8() + member.avatar);
+    if (renderedProfiles_ != profiles) {
+        renderedProfiles_ = profiles;
+        const auto position = transcript_->verticalScrollBar()->value();
+        const bool atBottom = position >= transcript_->verticalScrollBar()->maximum() - 4;
+        render();
+        if (!atBottom)
+            transcript_->verticalScrollBar()->setValue(position);
+    }
     mentions_->setMembers(memberNames(cid_));
     if (!model.id.isEmpty() && !model.channels.contains(channel_)) {
         channel_.clear();
@@ -1188,8 +1531,10 @@ void CommunityPanel::refresh() {
         else if (peer.admin)
             label += " · admin";
         auto* item = new QListWidgetItem(label, members_);
+        item->setIcon(QIcon(profileAvatar(peer, 32, devicePixelRatioF())));
+        item->setSizeHint(QSize(160, 44));
         item->setData(Qt::UserRole, peer.id);
-        item->setToolTip(peer.id + "\n" + peer.endpoint);
+        item->setToolTip("View " + peer.name + "'s profile");
         if (!present)
             item->setForeground(QColor("#858c96"));
     }
@@ -1209,7 +1554,9 @@ void CommunityPanel::refresh() {
         }
         voiceStatus_->setText(voiceModel.name + " / " + voiceModel.channels[voiceChannel_].name);
         QSet<QString> active, streaming;
-        for (const auto& peer : node_->online(voiceCid_)) {
+        // Presence is removed when the authenticated connection closes. A
+        // metadata sync briefly clears readiness, but must not tear down video.
+        for (const auto& peer : voiceModel.members.keys()) {
             const auto state = node_->presence(voiceCid_, peer);
             if (peer != node_->peerId() && state.voiceChannel == voiceChannel_) {
                 active.insert(peer);
@@ -1227,13 +1574,24 @@ void CommunityPanel::refresh() {
         for (const auto& peer : streams_ - streaming) {
             stopDrawing(peer);
             stage_->removeStream(peer);
-            watching_.remove(peer);
+            // Preserve watch intent while a peer is disconnected. Explicitly
+            // ending a share or leaving voice still removes the subscription.
+            if (node_->online(voiceCid_).contains(peer) || !voiceModel.isMember(peer))
+                watching_.remove(peer);
+            lastScreenFrames_.remove(peer);
             decoders_.erase(peer);
             frames_.remove(peer);
         }
-        for (const auto& peer : streaming - streams_)
+        for (const auto& peer : streaming - streams_) {
             stage_->addStream(peer, false, memberName(voiceCid_, peer));
+            if (watching_.contains(peer))
+                watch(peer, true);
+        }
         streams_ = streaming;
+        for (const auto& peer : streams_)
+            stage_->setDisplayName(peer, memberName(voiceCid_, peer));
+        if (capture_.running())
+            stage_->setDisplayName(node_->peerId(), memberName(voiceCid_, node_->peerId()));
         QHash<QString, QString> names;
         for (const auto& member : node_->communities().value(voiceCid_).members)
             names[member.id] = member.name;
@@ -1331,6 +1689,23 @@ void CommunityPanel::append(const QString& cid, const QString& channel, Entry en
 void CommunityPanel::showEntry(const Entry& entry) {
     const auto when = QDateTime::fromSecsSinceEpoch(entry.message.timestamp).toString("HH:mm");
     const auto body = text(entry.message.body);
+    const auto cid = text(entry.message.communityId);
+    const auto peer = text(entry.message.senderId);
+    const auto model = node_ ? node_->communities().value(cid) : community::Model{};
+    auto member = model.members.value(peer);
+    const bool hasProfile = model.isMember(peer);
+    if (!hasProfile)
+        member.name = text(entry.message.sender);
+    const auto imageUrl = QUrl("profile-avatar:" +
+                               community::digest(member.name.toUtf8() + member.avatar));
+    transcript_->document()->addResource(QTextDocument::ImageResource, imageUrl,
+                                         profileAvatar(member, 32, devicePixelRatioF()).toImage());
+    const auto href = "profile://" + cid + '/' + peer;
+    const auto link = [&](const QString& content) {
+        return hasProfile ? "<a href='" + href.toHtmlEscaped() +
+                                "' style='color:#9dccca;text-decoration:none'>" + content + "</a>"
+                          : content;
+    };
     QString html;
     qsizetype written = 0;
     for (const auto& mention : findMentions(body, memberNames(text(entry.message.communityId)))) {
@@ -1342,13 +1717,17 @@ void CommunityPanel::showEntry(const Entry& entry) {
     }
     html += body.mid(written).toHtmlEscaped();
     transcript_->append(
-        "<p style='margin:4px 0'><span style='color:#858c96'>" + when +
-        "</span> <b style='color:#9dccca'>" + text(entry.message.sender).toHtmlEscaped() + "</b> " +
-        html.replace('\n', "<br>") +
+        "<table cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
+        "<td width='42' valign='top'>" +
+        link("<img src='" + imageUrl.toString() + "' width='32' height='32'>") +
+        "</td><td valign='top'><p style='margin:0 0 3px 0'>" +
+        link("<b>" + member.name.toHtmlEscaped() + "</b>") +
+        " <span style='color:#a6b5bd;font-size:11px'>" + when + "</span></p>" +
+        "<p style='margin:0'>" + html.replace('\n', "<br>") +
         (entry.undelivered
              ? " <span style='color:#d4ae77'>[not delivered: no peers connected]</span>"
              : "") +
-        "</p>");
+        "</p></td></tr></table>");
     if (!entry.image.isEmpty())
         media_->appendImage(entry.image);
     if (QSettings().value("gifs/showLinkedMedia", true).toBool())
@@ -1396,7 +1775,8 @@ void CommunityPanel::sendChat() {
         }
         append(cid_, channel_,
                {{stamp, name_->text().trimmed().toStdString(), body.toStdString(), "mint",
-                 cid_.toStdString(), channel_.toStdString(), id.toStdString()},
+                 cid_.toStdString(), channel_.toStdString(), id.toStdString(),
+                 node_->peerId().toStdString()},
                 {},
                 count == 0});
         composer_->clear();
@@ -1437,7 +1817,14 @@ void CommunityPanel::sendImage(const PreparedImage& image, const QString& cid,
     uploads_.append({cid, channel, transfer, splitImage(image.bytes), 0});
     imageTimer_.start();
     append(cid, channel,
-           {{QDateTime::currentSecsSinceEpoch(), name_->text().trimmed().toStdString(), "", "mint"},
+           {{QDateTime::currentSecsSinceEpoch(),
+             name_->text().trimmed().toStdString(),
+             "",
+             "mint",
+             cid.toStdString(),
+             channel.toStdString(),
+             {},
+             node_->peerId().toStdString()},
             image.bytes,
             node_->online(cid).size() <= 1},
            false);
@@ -1457,7 +1844,8 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         append(cid, channel,
                {{qint64(data.value("timestamp").toDouble()) / 1000, sender.toStdString(),
                  data.value("body").toString().toStdString(), "mint", cid.toStdString(),
-                 channel.toStdString(), data.value("id").toString().toStdString()},
+                 channel.toStdString(), data.value("id").toString().toStdString(),
+                 peer.toStdString()},
                 {},
                 false});
     }
@@ -1477,7 +1865,14 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         if (image && isDisplayableImage(*image)) {
             notifications_->messageReceived(sender, "sent an image", Mentioned::No);
             append(cid, channel,
-                   {{QDateTime::currentSecsSinceEpoch(), sender.toStdString(), "", "mint"},
+                   {{QDateTime::currentSecsSinceEpoch(),
+                     sender.toStdString(),
+                     "",
+                     "mint",
+                     cid.toStdString(),
+                     channel.toStdString(),
+                     {},
+                     peer.toStdString()},
                     *image,
                     false},
                    false);
@@ -1492,8 +1887,10 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         if (session != drawings_.end()) session->second->receive(peer, payload);
     }
     else if (type == "watch" && cid == voiceCid_ && channel == voiceChannel_) {
-        if (data.value("enabled").toBool() && capture_.running())
+        if (data.value("enabled").toBool() && capture_.running()) {
             watchers_.insert(peer);
+            capture_.requestKeyframe();
+        }
         else
             watchers_.remove(peer);
     }
@@ -1509,6 +1906,8 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         if (frames_.add(peer, quint32(frame), index, count, chunk, encoded)) {
             const auto image = decoders_[peer].decode(quint32(frame),
                                                       data.value("keyframe").toBool(), encoded);
+            if (!image.isNull())
+                lastScreenFrames_[peer] = QDateTime::currentMSecsSinceEpoch();
             if (!image.isNull())
                 stage_->showFrame(peer, image, encoded.size());
         }
@@ -1579,6 +1978,8 @@ void CommunityPanel::leaveVoice() {
         stage_->removeStream(peer);
     streams_.clear();
     watching_.clear();
+    lastScreenFrames_.clear();
+    streamRetry_.stop();
     decoders_.clear();
     frames_ = {};
     {
@@ -1636,12 +2037,17 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
                           {{"target", peer}, {"enabled", enabled}});
         if (enabled) {
             watching_.insert(peer);
+            streamRetry_.start();
             startDrawing(peer, false);
         }
         else {
             stopDrawing(peer);
             watching_.remove(peer);
+            lastScreenFrames_.remove(peer);
             decoders_.erase(peer);
+            frames_.remove(peer);
+            if (watching_.isEmpty())
+                streamRetry_.stop();
         }
         stage_->setWatching(peer, enabled);
     });

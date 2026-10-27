@@ -45,6 +45,8 @@ public:
     StreamTile(const QString& name, bool own, QWidget* parent = nullptr, const QString& label = {});
     QString name() const { return name_; }
     bool own() const { return own_; }
+    QString displayName() const { return label_; }
+    void setDisplayName(const QString& label);
     const QImage& image() const { return view_->image(); }
     void setWatching(bool watching);
     // `available` is false while the tile is alone on the stage.
@@ -62,6 +64,9 @@ signals:
 
 private:
     QString name_;
+    QString label_;
+    QLabel* title_ = nullptr;
+    QLabel* invitationText_ = nullptr;
     bool own_ = false;
     QString detail_;
     QStackedWidget* body_ = nullptr;
@@ -90,6 +95,7 @@ public:
     void addStream(const QString& name, bool own, const QString& label = {});
     void removeStream(const QString& name);
     void setWatching(const QString& name, bool watching);
+    void setDisplayName(const QString& name, const QString& label);
     void setDetail(const QString& name, const QString& detail);
     void showFrame(const QString& name, const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing(const QString& name) const;

@@ -18,8 +18,8 @@ Another client selects **Join** and pastes the link or opens the QR image.
 The default relay is `relay.disquisition.app` on port 3333. Relay settings accept
 a hostname or `hostname:port`, with no scheme required.
 
-For direct mode, clear **Relay** in **Connection & saving**. Direct mode
-advertises a LAN address automatically. **Connection & saving**
+For direct mode, clear **Relay** in **User Settings**. Direct mode
+advertises a LAN address automatically. **User Settings**
 lets you specify a hostname and listening port for connections across routed
 networks. The address must be reachable, including any required port forwarding.
 The automatically selected port is reused after restarting a saved community.
@@ -141,7 +141,7 @@ screen announcements, and screen subscriptions stay within that channel.
 Screen frames go only to peers who choose to watch the share. Leaving the
 channel or losing membership stops the local call and share.
 
-**Connection & saving** controls optional SQLite saving, its file path, and an
+**User Settings** controls optional SQLite saving, its file path, and an
 optional maximum number of messages. Only chat this device received or sent
 is saved. History is scoped by community and channel, including after restart.
 Existing message files upgrade in place without deleting their records.

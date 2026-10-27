@@ -1,10 +1,14 @@
 #include <QApplication>
+#include <QBuffer>
+#include <QCheckBox>
 #include <QDeadlineTimer>
 #include <QDialog>
-#include <QCheckBox>
-#include <QKeyEvent>
+#include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QHostAddress>
 #include <QInputDialog>
+#include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -14,6 +18,7 @@
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QThread>
 #include <QTimer>
 #include <QTreeWidget>
@@ -37,6 +42,7 @@ static bool until(const std::function<bool()>& test) {
     return test();
 }
 int main(int argc, char** argv) {
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
     QTemporaryDir directory;
     app.setOrganizationName("Disquisition-ui-test");
@@ -77,8 +83,19 @@ int main(int argc, char** argv) {
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
+        CHECK(dialog->windowTitle() == "User Settings");
+        auto* categories = dialog->findChild<QListWidget*>("userSettingsCategories");
+        auto* pages = dialog->findChild<QStackedWidget*>("userSettingsPages");
+        CHECK(categories && pages && categories->count() == 5);
+        CHECK(categories->geometry().right() < pages->geometry().left());
+        for (int i = 0; i < categories->count(); ++i) {
+            categories->setCurrentRow(i);
+            CHECK(pages->currentIndex() == i);
+        }
+        categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
         CHECK(relay && relay->text() == "relay.disquisition.app");
+        dialog->findChild<QLineEdit*>("userDisplayName")->setText("Unsaved name");
         dialog->reject();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
@@ -90,6 +107,38 @@ int main(int argc, char** argv) {
     online->click();
     auto* manage = panel->findChild<QPushButton*>("communityManage");
     CHECK(until([&] { return manage->isEnabled(); }));
+    auto* node = panel->findChild<community::Node*>();
+    CHECK(node && node->profile().name == "Alice");
+    QImage picture(160, 100, QImage::Format_RGB32);
+    picture.fill(QColor("#ba7493"));
+    const auto picturePath = directory.path() + "/avatar.png";
+    CHECK(picture.save(picturePath));
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        QTimer::singleShot(0, [&] {
+            auto* picker = qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+            CHECK(picker);
+            picker->selectFile(picturePath);
+            static_cast<QDialog*>(picker)->accept();
+        });
+        dialog->findChild<QPushButton*>("userChooseAvatar")->click();
+        dialog->findChild<QPlainTextEdit*>("userBio")->setPlainText(
+            "Builds things. Listens to music.");
+        CHECK(dialog->grab().save("community-user-settings.png"));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(node->profile().bio == "Builds things. Listens to music.");
+    CHECK(QImage::fromData(node->profile().avatar).size() == QSize(128, 128));
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        dialog->findChild<QPushButton*>("userRemoveAvatar")->click();
+        dialog->reject();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(!node->profile().avatar.isEmpty()); // Cancel also cancels picture removal.
     auto* composer = panel->findChild<QLineEdit*>("communityComposer");
     CHECK(composer->isEnabled());
     composer->setText("Hello from our first community.");
@@ -169,7 +218,6 @@ int main(int argc, char** argv) {
     CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
     CHECK(window.grab().save("community-ui.png"));
     // Exercise presence rendering without opening microphone or screen hardware.
-    auto* node = panel->findChild<community::Node*>();
     CHECK(node);
     node->setVoice(cid, voiceChannel, true, true);
     CHECK(until([&] { return panel->findChild<QPushButton*>("communityMute")->isVisible(); }));
@@ -183,6 +231,12 @@ int main(int argc, char** argv) {
             const auto activity = (*item)->data(0, Qt::UserRole + 3).toStringList();
             CHECK(activity.contains("muted") && activity.contains("deafened"));
             CHECK(tree->itemWidget(*item, 0));
+            auto* row = tree->itemWidget(*item, 0);
+            auto* profile = row->findChild<QPushButton*>("voiceMemberProfile");
+            CHECK(profile && profile->iconSize() == QSize(28, 28));
+            CHECK(row->height() >= profile->iconSize().height());
+            CHECK(profile->height() >= profile->iconSize().height());
+            CHECK(row->rect().contains(profile->geometry()));
         }
     CHECK(selfUnderChannel);
     CHECK(window.grab().save("community-voice.png"));
@@ -226,6 +280,32 @@ int main(int argc, char** argv) {
     CHECK(remote.start("Bob", "127.0.0.1"));
     remote.joinCommunity(node->invite(cid));
     CHECK(until([&] { return node->online(cid).size() == 2 && remote.online(cid).size() == 2; }));
+    remote.setProfile({"Bob", "Music, games & <b>plain text</b>.", node->profile().avatar});
+    CHECK(until([&] {
+        return node->communities()[cid].members[remote.peerId()].bio == remote.profile().bio &&
+               !node->synchronizing(cid) && !remote.synchronizing(cid);
+    }));
+    const auto checkProfileCard = [&] {
+        auto* card = panel->findChild<QDialog*>("userProfileCard");
+        CHECK(card && card->isVisible());
+        CHECK(card->findChild<QLabel*>("profileDisplayName")->text() == "Bob");
+        const auto* bio = card->findChild<QLabel*>("profileBio");
+        CHECK(bio->text() == remote.profile().bio && bio->textFormat() == Qt::PlainText);
+        CHECK(!card->findChild<QLabel*>("profileAvatar")->pixmap().isNull());
+        CHECK(card->grab().save("community-profile.png"));
+        card->close();
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    };
+    auto* members = panel->findChild<QListWidget*>("communityMembers");
+    CHECK(until([&] { return members->count() == 2; }));
+    for (int i = 0; i < members->count(); ++i) {
+        auto* item = members->item(i);
+        if (item->data(Qt::UserRole).toString() == remote.peerId()) {
+            CHECK(!item->icon().isNull());
+            members->itemClicked(item);
+            checkProfileCard();
+        }
+    }
     QString textChannel;
     for (const auto& channel : node->communities()[cid].channels)
         if (channel.type == "text" && channel.name == "general") textChannel = channel.id;
@@ -238,6 +318,12 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return badge.mentions == 1; }));
     CHECK(badge.unread);
     CHECK(transcript->toHtml().contains("#a8e6df"));
+    const auto sender = transcript->document()->find("Bob");
+    CHECK(!sender.isNull() && sender.charFormat().isAnchor());
+    CHECK(sender.charFormat().anchorHref() == "profile://" + cid + '/' + remote.peerId());
+    CHECK(transcript->toHtml().contains("profile-avatar:"));
+    transcript->anchorClicked(QUrl(sender.charFormat().anchorHref()));
+    checkProfileCard();
     composer->setText("/dnd");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(!center->settings().muted && composer->text().isEmpty());
@@ -248,6 +334,15 @@ int main(int argc, char** argv) {
     CHECK(stage);
     CHECK(until([&] { return stage->drawing(remote.peerId()) != nullptr &&
                             remote.presence(cid, node->peerId()).voiceChannel == voiceChannel; }));
+    CHECK(until([&] {
+        for (auto* profile : tree->findChildren<QPushButton*>("voiceMemberProfile"))
+            if (profile->property("peer").toString() == remote.peerId()) {
+                profile->click();
+                checkProfileCard();
+                return true;
+            }
+        return false;
+    }));
     ScreenDrawing ownerInk;
     ScreenDrawingSession owner(remote.peerId(), remote.peerId(), &ownerInk, true);
     QObject::connect(&owner, &ScreenDrawingSession::sendToPeer, &remote,
@@ -264,6 +359,13 @@ int main(int argc, char** argv) {
             owner.receive(sender, message);
         });
     ownerInk.permissionRequested(true);
+    int watchRequests = 0;
+    QObject::connect(&remote, &community::Node::packetReceived,
+                     [&](const QString&, const QString&, const QString&, const QString& kind,
+                         const QJsonObject& data) {
+                         if (kind == "watch" && data.value("enabled").toBool())
+                             ++watchRequests;
+                     });
     stage->watchRequested(remote.peerId());
     CHECK(until([&] { return stage->drawing(remote.peerId())->drawingAllowed(); }));
     CHECK(stage->drawing(remote.peerId())->authorName(remote.peerId()) == "Bob");
@@ -272,8 +374,71 @@ int main(int argc, char** argv) {
     stage->drawing(remote.peerId())->segmentDrawn(stroke);
     CHECK(until([&] { return ownerInk.segments().size() == 1; }));
     CHECK(ownerInk.segments().first().author == node->peerId().toStdString());
+    CHECK(until(
+        [&] { return watchRequests >= 2; })); // Retry a lost watch request / missing first frame.
+    StreamTile* tile = nullptr;
+    for (auto* item : stage->findChildren<StreamTile*>())
+        if (item->name() == remote.peerId())
+            tile = item;
+    CHECK(tile);
+    for (const auto* label : tile->findChildren<QLabel*>())
+        CHECK(!label->text().contains(remote.peerId()));
+    CHECK(tile->displayName() == "Bob");
+    // Encode real video, deliver it through the peer transport, and verify that
+    // the panel replaces its waiting state without screen or camera access.
+    H264Encoder encoder;
+    QImage source(320, 180, QImage::Format_RGB32);
+    source.fill(QColor("#c44967"));
+    QByteArray video;
+    bool keyframe = false;
+    CHECK(encoder.encode(source, source.size(), 30, 0, video, keyframe));
+    CHECK(!video.isEmpty() && keyframe);
+    CHECK(remote.sendScreenFrame(cid, voiceChannel, node->peerId(), 1, {video}, keyframe));
+    CHECK(until([&] { return !tile->image().isNull(); }));
+    CHECK(tile->image().size() == source.size());
+    CHECK(tile->image().pixelColor(100, 100).red() > 150);
+    // A viewer joining a static screen needs an immediately requested keyframe.
+    video.clear();
+    keyframe = false;
+    CHECK(encoder.encode(source, source.size(), 30, 33, video, keyframe, true));
+    CHECK(!video.isEmpty() && keyframe);
+    ScreenStreamDecoder newcomer;
+    CHECK(!newcomer.decode(42, keyframe, video).isNull());
+    for (auto* action : tile->findChildren<QPushButton*>())
+        if (action->text() == "Fullscreen")
+            action->click();
+    QWidget* fullscreen = nullptr;
+    for (auto* item : QApplication::topLevelWidgets())
+        if (item->windowTitle() == "Bob's screen")
+            fullscreen = item;
+    CHECK(fullscreen);
+    remote.setProfile({"Bobby", remote.profile().bio, remote.profile().avatar});
+    CHECK(until([&] { return node->communities()[cid].members[remote.peerId()].name == "Bobby"; }));
+    CHECK(until([&] { return tile->displayName() == "Bobby"; }));
+    CHECK(fullscreen->windowTitle() == "Bobby's screen");
+    for (const auto* label : tile->findChildren<QLabel*>())
+        CHECK(!label->text().contains(remote.peerId()));
+    fullscreen->close();
     panel->findChild<QPushButton*>("communityVoice")->click();
     CHECK(!stage->drawing(remote.peerId()));
+    window.show();
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        auto* buttons = dialog->findChild<QDialogButtonBox*>();
+        auto* bio = dialog->findChild<QPlainTextEdit*>("userBio");
+        bio->setPlainText(QString(community::kMaxBioLength + 1, 'x'));
+        buttons->button(QDialogButtonBox::Save)->click();
+        CHECK(dialog->isVisible() && dialog->findChild<QLabel*>("userSettingsError")->isVisible());
+        CHECK(node->profile().name == "Alice");
+        bio->setPlainText("Builds things. Listens to music.");
+        dialog->findChild<QLineEdit*>("userDisplayName")->setText("Alice Example");
+        buttons->button(QDialogButtonBox::Save)->click();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(until(
+        [&] { return remote.communities()[cid].members[node->peerId()].name == "Alice Example"; }));
+    CHECK(transcript->toPlainText().contains("Alice Example"));
     online->click();
     CHECK(composer->isEnabled() == false);
     std::puts("community_ui_test: ok");

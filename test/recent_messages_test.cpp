@@ -132,16 +132,19 @@ void testChannelIsolationAndLegacyMigration() {
     sqlite3_close(legacy);
     {
         chat::RecentMessages store(file.string());
-        store.append({2, "alice", "community one general", "mint", "one", "general", "message-1"});
+        store.append({2, "alice", "community one general", "mint", "one", "general", "message-1",
+                      "alice-id"});
         store.append({2, "alice", "duplicate", "mint", "one", "general", "message-1"});
         store.append({3, "alice", "community one music", "mint", "one", "music", "message-1"});
         store.append({4, "bob", "community two general", "mint", "two", "general", "message-1"});
         CHECK(store.recent().size() == 1);
         CHECK(store.recent()[0].body == "old message");
+        CHECK(store.recent()[0].senderId.empty());
         const auto general = store.recent("one", "general");
         CHECK(general.size() == 1 && general[0].body == "community one general");
         CHECK(general[0].communityId == "one" && general[0].channelId == "general" &&
               general[0].messageId == "message-1");
+        CHECK(general[0].senderId == "alice-id");
         CHECK(store.recent("one", "music")[0].body == "community one music");
         CHECK(store.recent("two", "general")[0].sender == "bob");
         CHECK(store.recent("missing", "general").empty());
@@ -149,6 +152,7 @@ void testChannelIsolationAndLegacyMigration() {
     {
         chat::RecentMessages reopened(file.string());
         CHECK(reopened.recent("two", "general").size() == 1);
+        CHECK(reopened.recent("one", "general")[0].senderId == "alice-id");
         CHECK(reopened.recent().size() == 1);
     }
     std::filesystem::remove(file);

@@ -13,7 +13,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* communities = new CommunityPanel(this);
     setCentralWidget(communities);
     auto* appMenu = menuBar()->addMenu("disquisition");
-    auto* preferences = appMenu->addAction("Preferences…");
+    auto* preferences = appMenu->addAction("User Settings…");
     preferences->setMenuRole(QAction::PreferencesRole);
     preferences->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     connect(preferences, &QAction::triggered, communities, &CommunityPanel::showSettings);
@@ -25,7 +25,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setStyleSheet(R"(
         QWidget { background: #282c34; color: #c5c8c6; font-family: Inter, "Segoe UI", "Helvetica Neue", sans-serif; font-size: 14px; }
         QLabel#title { background: #9dccca; color: #20262c; font-family: "Cal Sans", Inter, sans-serif; font-size: 17px; font-weight: 400; padding: 3px 5px; }
-        QLineEdit, QSpinBox, QComboBox, QTextBrowser, QListWidget, QTreeWidget { background: #282c34; color: #c5c8c6; border: 1px solid #545b66; border-radius: 0; padding: 5px; selection-background-color: #9dccca; selection-color: #20262c; }
+        QLineEdit, QPlainTextEdit, QSpinBox, QComboBox, QTextBrowser, QListWidget, QTreeWidget { background: #282c34; color: #c5c8c6; border: 1px solid #545b66; border-radius: 0; padding: 5px; selection-background-color: #9dccca; selection-color: #20262c; }
         QLineEdit[invalid="true"] { background: #3b2529; color: #ffb3b3; border: 2px solid #e05252; }
         QComboBox QAbstractItemView { background: #282c34; color: #c5c8c6; selection-background-color: #9dccca; selection-color: #20262c; }
         QTextBrowser { border: 0; padding: 0; font-weight: 600; }
@@ -41,6 +41,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QListWidget#communityManageCategories { background: #242830; border: 0; padding: 8px; }
         QListWidget#communityManageCategories::item { padding: 10px 12px; margin-bottom: 3px; }
         QListWidget#communityManageCategories::item:selected { background: #39484b; color: #d5e9e6; }
+        QListWidget#userSettingsCategories { background: #242830; border: 0; padding: 16px 8px; }
+        QListWidget#userSettingsCategories::item { padding: 12px; margin-bottom: 4px; }
+        QListWidget#userSettingsCategories::item:selected { background: #39484b; color: #d5e9e6; }
+        QLabel#settingsDescription { color: #a6b5bd; }
+        QPushButton#voiceMemberProfile { background: transparent; border: 0; padding: 0; text-align: left; font-family: Inter, "Segoe UI", sans-serif; font-size: 14px; }
+        QPushButton#voiceMemberProfile:hover { background: #39484b; color: #e2f1ef; }
+        QPushButton#voiceMemberProfile:focus { border: 1px solid #9dccca; }
+        QDialog#userProfileCard { background: #242830; border: 1px solid #687c83; }
+        QDialog#userProfileCard QLabel, QDialog#userProfileCard QScrollArea, QDialog#userProfileCard QScrollArea QWidget { background: transparent; }
+        QLabel#profileDisplayName { color: #e2f1ef; font-size: 21px; font-weight: 700; }
+        QLabel#profileBio { color: #c5c8c6; }
         QLabel#settingsHeading { font-size: 19px; font-weight: 700; margin-bottom: 12px; }
         QWidget#communityVoiceControls { background: #242f32; }
         QPushButton#communityJoinVoice { color: #9dccca; border-color: #596f70; padding: 4px 8px; }

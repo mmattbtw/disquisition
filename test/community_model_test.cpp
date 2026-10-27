@@ -92,6 +92,56 @@ void memberHostsAdmitWithoutAdmins() {
     });
 }
 
+void profilesAreOwnedByTheirAuthorAndPersist() {
+    Group group;
+    group.join(group.bob, "bob");
+    Profile profile{"Bobby", "Music & games\nUsually around in the evening.", QByteArray("avatar")};
+    auto data = profile.toJson();
+    data["endpoint"] = "tcp://127.0.0.1:9002";
+    data["peer"] = group.alice.id(); // An author cannot edit a different member.
+    group.model.change(group.bob, "profile", data);
+    const auto roundTrip = Model::fromJson(group.model.toJson());
+    const auto member = roundTrip.members[group.bob.id()];
+    CHECK(member.name == profile.name && member.bio == profile.bio &&
+          member.avatar == profile.avatar);
+    CHECK(roundTrip.members[group.alice.id()].name == "alice");
+    CHECK(!roundTrip.canAdmin(group.bob.id()));
+    // Older clients update routing/name without deleting new profile fields.
+    group.model.change(group.bob, "profile",
+                       {{"name", "Robert"}, {"endpoint", "tcp://127.0.0.1:9003"}});
+    CHECK(group.model.members[group.bob.id()].bio == profile.bio);
+    CHECK(group.model.members[group.bob.id()].avatar == profile.avatar);
+    for (const auto& invalid :
+         {QJsonObject{{"bio", QString(kMaxBioLength + 1, 'a')}},
+          QJsonObject{{"bio", QString(QChar(0))}}, QJsonObject{{"avatar", "not base64"}},
+          QJsonObject{
+              {"avatar", QString::fromLatin1(QByteArray(kMaxAvatarBytes + 1, 'a').toBase64())}}}) {
+        auto bad = data;
+        for (auto it = invalid.begin(); it != invalid.end(); ++it)
+            bad[it.key()] = it.value();
+        const auto before = group.model.revision();
+        rejects([&] { group.model.change(group.bob, "profile", bad); });
+        CHECK(group.model.revision() == before);
+    }
+    rejects([&] { group.model.change(group.carol, "profile", data); });
+    group.model.change(
+        group.bob, "profile",
+        {{"name", "Robert"}, {"endpoint", "tcp://127.0.0.1:9003"}, {"bio", ""}, {"avatar", ""}});
+    CHECK(group.model.members[group.bob.id()].bio.isEmpty() &&
+          group.model.members[group.bob.id()].avatar.isEmpty());
+    QTemporaryDir directory;
+    {
+        Store store(directory.path());
+        store.saveProfile(profile);
+    }
+    {
+        Store reopened(directory.path());
+        const auto saved = reopened.profile();
+        CHECK(saved.name == profile.name && saved.bio == profile.bio &&
+              saved.avatar == profile.avatar);
+    }
+}
+
 void rejectedAdmissionsAreAtomic() {
     Group group;
     const auto revision = group.model.revision();
@@ -221,6 +271,7 @@ int main(int argc, char** argv) {
     relayAddressesAcceptHostnamesAndRejectOtherProtocols();
     identityAndInviteIntegrity();
     memberHostsAdmitWithoutAdmins();
+    profilesAreOwnedByTheirAuthorAndPersist();
     rejectedAdmissionsAreAtomic();
     forgedAdminOperationsCannotBypassPermissions();
     reconnectMergesRevocationsBeforeAdmission();

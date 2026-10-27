@@ -15,7 +15,7 @@ Applications, and eject the disk image.
 ## Connect and join a community
 
 Enter a name and select **Connect**. Fresh installs use `relay.disquisition.app`
-on port 3333. Under **Connection & saving**, enter a relay hostname, optionally
+on port 3333. Under **User Settings**, enter a relay hostname, optionally
 followed by a port. No `relay://` prefix is needed. Saved settings take precedence;
 clear the relay field to use direct connections and advertise a LAN address.
 
@@ -29,6 +29,25 @@ dropped into the chat. GIF search is available in builds configured with a searc
 provider key. Messages are live-only. Optional local SQLite saving records only
 messages this device sends or receives.
 
+## Your profile and settings
+
+Open **User Settings** to edit your profile. **User** contains your display name,
+profile picture, and bio. Pictures are cropped to a square and resized before
+sharing; bios can contain up to 500 characters. Save applies your profile to all
+communities on this identity, including while disconnected. Changes reach peers
+when you connect. Cancel discards the dialog's edits.
+
+Click a person's name or avatar in chat, the member list, or a voice channel to
+open their profile card. Profiles show the display name, picture, and bio. A
+person without a picture gets an initial avatar. Existing saved messages that
+predate sender identities retain their original names.
+
+The settings categories run down the left, with the selected page on the right.
+**Audio** contains devices and push-to-talk, **Notifications** contains message
+and activity alerts, **Connection** contains relay and direct addresses, and
+**Message History** controls local SQLite saving. Leave voice before changing
+audio devices, and disconnect before changing connection details.
+
 ## Voice and screen sharing
 
 Select a voice channel, then choose **Join voice** beneath its name. The current
@@ -39,7 +58,7 @@ appear beneath the voice channel rather than in the member list.
 voice. You can join one voice channel at a time across all communities. Select
 another voice channel and choose **Switch to this channel** to move the call.
 
-Choose microphone and output devices in **Connection & saving** before joining.
+Choose microphone and output devices in **User Settings** before joining.
 Allow microphone access when the operating system asks. On macOS, enable
 microphone access for disquisition in System Settings > Privacy & Security.
 
@@ -47,6 +66,10 @@ Choose **Share screen** while in voice to select a screen or window. Other peers
 in that voice channel choose which streams to watch. macOS also requires Screen
 Recording permission. Use **Stop sharing** to end the stream or **Leave voice**
 to stop the call and share together.
+
+Stream invitations and fullscreen titles use display names. Watching requests a
+fresh keyframe, including when the shared screen is static. If the first frame
+or subscription is missed, the viewer retries automatically.
 
 ## Manage a community
 
@@ -69,6 +92,8 @@ that the address belongs to a client. Enter the relay's hostname instead, or
 clear Relay for direct mode. Repeated retries do not repeat the same error.
 A relay or client running an older protocol must be updated before it can
 connect to communities. The app keeps retrying known peers automatically.
+A lost relay connection retries automatically without pressing Connect again.
+Voice membership is retained, and watched streams resume when the peer returns.
 
 ## Screen sharing
 
@@ -175,7 +200,7 @@ across local rebuilds.
 
 ## Save messages locally
 
-In **Connection & saving**, enable local saving, choose a SQLite file, and
+In **User Settings**, enable local saving, choose a SQLite file, and
 optionally set a maximum message count. History stays on this device and is
 separate for each community and text channel.
 
@@ -190,7 +215,7 @@ app menu or `/dnd` to toggle notification muting.
 
 ## Push to talk
 
-In **Connection & saving**, enable **Hold a key to talk** and choose a key.
+In **User Settings**, enable **Hold a key to talk** and choose a key.
 Voice transmits only while that key is held. Manual mute and deafen still take
 precedence. Windows and X11 support global keys. On macOS, allow Input Monitoring
 and restart the app to use the key while another application is focused.

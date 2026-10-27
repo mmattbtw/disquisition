@@ -24,6 +24,24 @@ bool label(const QString& text, int maximum = 80) {
            std::none_of(text.begin(), text.end(),
                         [](QChar ch) { return ch.category() == QChar::Other_Control; });
 }
+bool profileDetails(const QJsonObject& data) {
+    const auto bio = data.value("bio");
+    const auto bioText = bio.toString();
+    if (!bio.isUndefined() && (!bio.isString() || bioText.size() > kMaxBioLength ||
+                               std::any_of(bioText.begin(), bioText.end(), [](QChar ch) {
+                                   return ch.category() == QChar::Other_Control && ch != '\n' &&
+                                          ch != '\t';
+                               })))
+        return false;
+    const auto avatar = data.value("avatar");
+    if (avatar.isUndefined())
+        return true;
+    if (!avatar.isString() || avatar.toString().size() > ((kMaxAvatarBytes + 2) / 3) * 4)
+        return false;
+    const auto decoded = QByteArray::fromBase64Encoding(avatar.toString().toLatin1(),
+                                                        QByteArray::AbortOnBase64DecodingErrors);
+    return bool(decoded) && decoded.decoded.size() <= kMaxAvatarBytes;
+}
 QString operationId(QJsonObject object) {
     object.remove("signature");
     return digest(canonical(object));
@@ -46,6 +64,17 @@ bool inviteProof(QJsonObject intent, const QJsonObject& grant) {
            CRYPTO_memcmp(proof.constData(), expected.constData(), proof.size()) == 0;
 }
 } // namespace
+
+QJsonObject Profile::toJson() const {
+    return {{"name", name}, {"bio", bio}, {"avatar", QString::fromLatin1(avatar.toBase64())}};
+}
+Profile Profile::fromJson(const QJsonObject& object) {
+    require(label(object.value("name").toString(), 64) && profileDetails(object),
+            "A profile needs a display name of 1–64 characters, a bio of at most 500 characters, "
+            "and a picture of at most 32 KB.");
+    return {object.value("name").toString(), object.value("bio").toString(),
+            QByteArray::fromBase64(object.value("avatar").toString().toLatin1())};
+}
 
 QString freshId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -320,8 +349,12 @@ void Model::rebuild() {
                         validEndpoint(data.value("endpoint").toString()),
                     "invalid community origin data");
             name = data.value("name").toString();
-            members.insert(owner, {owner, data.value("memberName").toString(),
-                                   data.value("endpoint").toString(), true});
+            members.insert(owner, {owner,
+                                   data.value("memberName").toString(),
+                                   data.value("endpoint").toString(),
+                                   true,
+                                   {},
+                                   {}});
             require(data.value("channels").toArray().size() <= 128, "too many channels");
             for (const auto& item : data.value("channels").toArray()) {
                 const auto channel = item.toObject();
@@ -351,16 +384,25 @@ void Model::rebuild() {
                     revoked = true;
             if (revoked)
                 continue;
-            members.insert(peer, {peer, intent.value("name").toString(),
-                                  intent.value("endpoint").toString(), false});
+            members.insert(peer, {peer,
+                                  intent.value("name").toString(),
+                                  intent.value("endpoint").toString(),
+                                  false,
+                                  {},
+                                  {}});
             continue;
         }
         if (kind == "profile") {
             if (members.contains(author) && couldAct(author, key) &&
                 label(data.value("name").toString(), 64) &&
-                validEndpoint(data.value("endpoint").toString())) {
+                validEndpoint(data.value("endpoint").toString()) && profileDetails(data)) {
                 members[author].name = data.value("name").toString();
                 members[author].endpoint = data.value("endpoint").toString();
+                if (data.contains("bio"))
+                    members[author].bio = data.value("bio").toString();
+                if (data.contains("avatar"))
+                    members[author].avatar = QByteArray::fromBase64(
+                        data.value("avatar").toString().toLatin1());
             }
             continue;
         }
@@ -457,7 +499,7 @@ QJsonObject Model::change(const Identity& author, const QString& kind, QJsonObje
         require(label(data.value("name").toString()), "invalid community name");
     if (kind == "profile")
         require(label(data.value("name").toString(), 64) &&
-                    validEndpoint(data.value("endpoint").toString()),
+                    validEndpoint(data.value("endpoint").toString()) && profileDetails(data),
                 "invalid member profile");
     if (kind == "channel")
         require(uuid(data.value("id").toString()) && label(data.value("name").toString()) &&
