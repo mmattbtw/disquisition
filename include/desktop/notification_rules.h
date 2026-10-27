@@ -19,7 +19,8 @@ struct DesktopNotification {
 enum class NotifyLevel { AllMessages, MentionsOnly };
 
 struct NotificationSettings {
-    bool muted = false;
+    // Notifications, unread markers, and app-icon badges are opt-in.
+    bool muted = true;
     NotifyLevel level = NotifyLevel::AllMessages;
     bool suppressEveryone = false;
     // Joins and screen shares.

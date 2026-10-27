@@ -220,6 +220,12 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     });
     notifications_ = new NotificationCenter(window());
     buildUi();
+    connect(notifications_, &NotificationCenter::settingsChanged, this,
+            [this](const NotificationSettings& settings) {
+                if (settings.muted)
+                    unread_.clear();
+                refresh();
+            });
     connect(&pushToTalk_, &PushToTalk::heldChanged, this, &CommunityPanel::voiceState);
     imagePool_.setMaxThreadCount(1);
     if (node_) {
@@ -1858,7 +1864,8 @@ void CommunityPanel::append(const QString& cid, const QString& channel, Entry en
     if (cid == cid_ && channel == channel_)
         showEntry(entry);
     else {
-        ++unread_[key(cid, channel)];
+        if (!notifications_->settings().muted)
+            ++unread_[key(cid, channel)];
         refresh();
     }
     if (rerender)

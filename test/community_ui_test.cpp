@@ -65,7 +65,8 @@ int main(int argc, char** argv) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, directory.path());
     auto notifications = NotificationSettings::load(QSettings());
-    notifications.muted = true; // Exercise badges without posting OS notifications.
+    // Enable indicators for the badge checks; test backends post no OS notifications.
+    notifications.muted = false;
     QSettings notificationSettings;
     notifications.save(notificationSettings);
     const auto data = directory.path() + "/community";
@@ -338,10 +339,24 @@ int main(int argc, char** argv) {
     QString textChannel;
     for (const auto& channel : node->communities()[cid].channels)
         if (channel.type == "text" && channel.name == "general") textChannel = channel.id;
+    QString musicChannel;
+    for (const auto& channel : node->communities()[cid].channels)
+        if (channel.type == "text" && channel.name == "music") musicChannel = channel.id;
+    CHECK(!textChannel.isEmpty() && !musicChannel.isEmpty());
     auto* center = window.findChild<NotificationCenter*>();
-    CHECK(center && center->settings().muted);
+    CHECK(center && !center->settings().muted);
     UnreadBadge badge;
     QObject::connect(center, &NotificationCenter::badgeChanged, [&](const UnreadBadge& next) { badge = next; });
+    const auto channelLabel = [&](const QString& channelId) {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            auto* root = tree->topLevelItem(i);
+            if (root->data(0, Qt::UserRole).toString() != cid) continue;
+            for (int j = 0; j < root->childCount(); ++j)
+                if (root->child(j)->data(0, Qt::UserRole + 1).toString() == channelId)
+                    return root->child(j)->text(0);
+        }
+        return QString();
+    };
     window.hide();
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Hi @Alice"}}) == 1);
     CHECK(until([&] { return badge.mentions == 1; }));
@@ -367,6 +382,24 @@ int main(int argc, char** argv) {
     CHECK(transcript->toHtml().contains("profile-avatar:"));
     transcript->anchorClicked(QUrl(sender.charFormat().anchorHref()));
     checkProfileCard();
+    // Channel unread markers and badges disappear when notifications are off.
+    CHECK(remote.sendPacket(cid, musicChannel, "chat", {{"body", "unread while on"}}) == 1);
+    CHECK(until([&] { return channelLabel(musicChannel).contains("[1]"); }));
+    CHECK(badge.unread);
+    auto settings = center->settings();
+    settings.muted = true;
+    center->setSettings(settings);
+    CHECK(until([&] { return !badge.unread && badge.mentions == 0; }));
+    CHECK(!channelLabel(musicChannel).contains("["));
+    CHECK(remote.sendPacket(cid, musicChannel, "chat", {{"body", "quiet unread"}}) == 1);
+    CHECK(until([&] {
+        chat::RecentMessages history((directory.path() + "/history.db").toStdString());
+        const auto saved = history.recent(cid.toStdString(), musicChannel.toStdString());
+        return !saved.empty() && saved.back().body == "quiet unread";
+    }));
+    QApplication::processEvents();
+    CHECK(!channelLabel(musicChannel).contains("["));
+    CHECK(!badge.unread && badge.mentions == 0);
     composer->setText("/dnd");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(!center->settings().muted && composer->text().isEmpty());
@@ -613,6 +646,24 @@ int main(int argc, char** argv) {
                 if (tree->topLevelItem(i)->child(j)->data(0, Qt::UserRole + 1).toString() == quiet)
                     destination = tree->topLevelItem(i)->child(j);
     CHECK(destination);
+    // Dragging shows who is being moved and highlights the destination channel.
+    QPixmap dragAvatar(28, 28);
+    dragAvatar.fill(Qt::magenta);
+    const QPixmap dragPreview = voiceDragPreview(QIcon(dragAvatar), "Bobby");
+    CHECK(!dragPreview.isNull() && dragPreview.deviceIndependentSize().width() > 48);
+    CHECK(dragPreview.save("community-drag-preview.png"));
+    auto* communityTree = static_cast<CommunityTree*>(tree);
+    const QPoint target = tree->viewport()->mapTo(tree, tree->visualItemRect(destination).center());
+    const QImage plainTree = tree->grab().toImage();
+    communityTree->showDropTarget(cid, quiet);
+    CHECK(communityTree->dropHighlight() == quiet);
+    const QImage highlightedTree = tree->grab().toImage();
+    const qreal ratio = tree->devicePixelRatioF();
+    const QPoint targetPixel(qRound(target.x() * ratio), qRound(target.y() * ratio));
+    CHECK(highlightedTree.pixelColor(targetPixel) != plainTree.pixelColor(targetPixel));
+    CHECK(tree->grab().save("community-drag-target.png"));
+    communityTree->showDropTarget({}, {});
+    CHECK(communityTree->dropHighlight().isEmpty());
     CHECK(static_cast<CommunityTree*>(tree)->requestVoiceMove(cid, voiceChannel, remote.peerId(), destination));
     CHECK(until([&] { return remote.presence(cid, remote.peerId()).voiceChannel == quiet; }));
     remote.moveVoice(cid, node->peerId(), quiet);

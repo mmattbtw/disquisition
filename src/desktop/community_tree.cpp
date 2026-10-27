@@ -4,12 +4,19 @@
 #include <QAbstractButton>
 #include <QDrag>
 #include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QFontMetrics>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPointer>
+#include <QPushButton>
+#include <QScreen>
 #include <QTreeWidgetItemIterator>
 
 namespace {
@@ -22,9 +29,52 @@ QJsonObject payload(const QMimeData* mime) {
 }
 } // namespace
 
+QPixmap voiceDragPreview(const QIcon& avatar, const QString& name) {
+    constexpr int kAvatarSide = 24;
+    constexpr int kGap = 8;
+    constexpr int kPadding = 10;
+    constexpr int kHeight = 36;
+    QFont font = QApplication::font();
+    font.setPixelSize(14);
+    const QFontMetrics metrics(font);
+    const QString label = QString(name).replace("&&", "&");
+    const int width = kPadding + kAvatarSide + kGap + metrics.horizontalAdvance(label) + kPadding;
+    const qreal ratio = QGuiApplication::primaryScreen()
+                            ? QGuiApplication::primaryScreen()->devicePixelRatio()
+                            : 1.0;
+    QPixmap preview(QSize(width, kHeight) * ratio);
+    preview.setDevicePixelRatio(ratio);
+    preview.fill(Qt::transparent);
+
+    QPainter painter(&preview);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    painter.setPen(QPen(QColor("#9dccca"), 1));
+    painter.setBrush(QColor(0x2f, 0x36, 0x3f, 235));
+    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, kHeight - 1), 10, 10);
+
+    const QRectF avatarRect(kPadding, (kHeight - kAvatarSide) / 2.0, kAvatarSide, kAvatarSide);
+    const QPixmap picture = avatar.pixmap(kAvatarSide, kAvatarSide);
+    if (!picture.isNull()) {
+        QPainterPath clip;
+        clip.addEllipse(avatarRect);
+        painter.save();
+        painter.setClipPath(clip);
+        painter.drawPixmap(avatarRect.topLeft(), picture);
+        painter.restore();
+    }
+    painter.setFont(font);
+    painter.setPen(QColor("#e2f1ef"));
+    painter.drawText(QRectF(kPadding + kAvatarSide + kGap, 0,
+                            width - kPadding - kAvatarSide - kGap - kPadding, kHeight),
+                     Qt::AlignVCenter | Qt::AlignLeft, label);
+    return preview;
+}
+
 CommunityTree::CommunityTree(QWidget* parent) : QTreeWidget(parent) {
     setAcceptDrops(true);
-    setDropIndicatorShown(true);
+    // The destination channel itself is highlighted while dragging.
+    setDropIndicatorShown(false);
     setDragDropMode(QAbstractItemView::DragDrop);
     setDragEnabled(false); // Only participant drags use our control protocol.
     setDefaultDropAction(Qt::MoveAction);
@@ -96,7 +146,10 @@ void CommunityTree::armDrag(const QPoint& position) {
     dragCommunity_.clear();
     dragChannel_.clear();
     dragPeer_.clear();
-    const auto* item = itemAt(position);
+    dragAvatar_ = {};
+    dragName_.clear();
+    dragRow_ = nullptr;
+    auto* item = itemAt(position);
     if (!item || !item->data(0, kCanMove).toBool() ||
         item->data(0, kSourceChannel).toString().isEmpty())
         return;
@@ -104,6 +157,13 @@ void CommunityTree::armDrag(const QPoint& position) {
     dragCommunity_ = item->data(0, Qt::UserRole).toString();
     dragChannel_ = item->data(0, kSourceChannel).toString();
     dragPeer_ = item->data(0, Qt::UserRole + 2).toString();
+    dragRow_ = itemWidget(item, 0);
+    if (dragRow_) {
+        if (auto* profile = dragRow_->findChild<QPushButton*>("voiceMemberProfile")) {
+            dragAvatar_ = profile->icon();
+            dragName_ = profile->text();
+        }
+    }
 }
 
 bool CommunityTree::drag(const QPoint& position, Qt::MouseButtons buttons) {
@@ -118,7 +178,18 @@ bool CommunityTree::drag(const QPoint& position, Qt::MouseButtons buttons) {
     dragPeer_.clear();
     QDrag operation(this);
     operation.setMimeData(mime);
+    QPixmap preview;
+    if (!dragName_.isEmpty())
+        preview = voiceDragPreview(dragAvatar_, dragName_);
+    else if (dragRow_)
+        preview = dragRow_->grab();
+    if (!preview.isNull()) {
+        operation.setPixmap(preview);
+        const QSizeF logical = preview.deviceIndependentSize();
+        operation.setHotSpot(QPoint(qRound(logical.width() / 2), qRound(logical.height() / 2)));
+    }
     operation.exec(Qt::MoveAction);
+    showDropTarget({}, {});
     return true;
 }
 
@@ -163,6 +234,48 @@ void CommunityTree::mouseReleaseEvent(QMouseEvent* event) {
     QTreeWidget::mouseReleaseEvent(event);
 }
 
+QTreeWidgetItem* CommunityTree::channelItem(const QString& community,
+                                           const QString& channel) const {
+    if (community.isEmpty() || channel.isEmpty())
+        return nullptr;
+    for (int index = 0; index < topLevelItemCount(); ++index) {
+        auto* root = topLevelItem(index);
+        if (root->data(0, Qt::UserRole).toString() != community)
+            continue;
+        for (int child = 0; child < root->childCount(); ++child) {
+            auto* item = root->child(child);
+            if (item->data(0, Qt::UserRole + 1).toString() == channel)
+                return item;
+        }
+    }
+    return nullptr;
+}
+
+void CommunityTree::showDropTarget(const QString& community, const QString& channel) {
+    if (dropCommunity_ == community && dropChannel_ == channel)
+        return;
+    dropCommunity_ = community;
+    dropChannel_ = channel;
+    viewport()->update();
+}
+
+void CommunityTree::paintEvent(QPaintEvent* event) {
+    QTreeWidget::paintEvent(event);
+    if (dropChannel_.isEmpty())
+        return;
+    const auto* target = channelItem(dropCommunity_, dropChannel_);
+    if (!target)
+        return;
+    const QRect rect = visualItemRect(target);
+    if (!rect.isValid())
+        return;
+    QPainter painter(viewport());
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor(0x9d, 0xcc, 0xca, 220), 1));
+    painter.setBrush(QColor(0x9d, 0xcc, 0xca, 48));
+    painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6);
+}
+
 void CommunityTree::dragEnterEvent(QDragEnterEvent* event) {
     if (event->source() == this && event->mimeData()->hasFormat(kMime))
         event->acceptProposedAction();
@@ -172,15 +285,28 @@ void CommunityTree::dragEnterEvent(QDragEnterEvent* event) {
 
 void CommunityTree::dragMoveEvent(QDragMoveEvent* event) {
     const auto data = payload(event->mimeData());
-    if (event->source() == this &&
+    auto* destination = itemAt(event->position().toPoint());
+    auto* target = voiceChannel(destination);
+    if (event->source() == this && target &&
         canMoveTo(data.value("community").toString(), data.value("channel").toString(),
-                  data.value("peer").toString(), itemAt(event->position().toPoint())))
+                  data.value("peer").toString(), destination)) {
         event->acceptProposedAction();
-    else
+        showDropTarget(target->data(0, Qt::UserRole).toString(),
+                       target->data(0, Qt::UserRole + 1).toString());
+    }
+    else {
         event->ignore();
+        showDropTarget({}, {});
+    }
+}
+
+void CommunityTree::dragLeaveEvent(QDragLeaveEvent* event) {
+    showDropTarget({}, {});
+    QTreeWidget::dragLeaveEvent(event);
 }
 
 void CommunityTree::dropEvent(QDropEvent* event) {
+    showDropTarget({}, {});
     const auto data = payload(event->mimeData());
     if (event->source() == this &&
         requestVoiceMove(data.value("community").toString(), data.value("channel").toString(),
