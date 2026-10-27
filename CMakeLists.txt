@@ -119,6 +119,18 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_notifications PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_notifications PUBLIC Qt6::Gui)
 
+    # Kept apart from the widgets so it can be tested without a display.
+    add_library(desktop_update STATIC
+      include/desktop/update_install.h
+      include/desktop/update_release.h
+      include/desktop/updater.h
+      src/desktop/update_install.cpp
+      src/desktop/update_release.cpp
+      src/desktop/updater.cpp)
+    set_target_properties(desktop_update PROPERTIES AUTOMOC ON)
+    target_include_directories(desktop_update PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_update PUBLIC Qt6::Network)
+
     add_library(desktop_screen STATIC
       include/desktop/screen_drawing.h
       include/desktop/screen_drawing_session.h
@@ -171,11 +183,16 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_picker.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
+    # Released Windows builds open without a console window. Development and
+    # staging builds keep one, so their log shows in the terminal.
+    if(DISQUISITION_BUILD_CHANNEL STREQUAL "production")
+      set_target_properties(disquisition-desktop PROPERTIES WIN32_EXECUTABLE ON)
+    endif()
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_protocol chat_recent_messages desktop_media desktop_notifications desktop_screen
-      Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
+      desktop_update Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
       PREFIX "/fonts"
@@ -360,6 +377,12 @@ if(BUILD_TESTING AND TARGET desktop_notifications)
   add_executable(desktop_notifications_test test/desktop_notifications_test.cpp)
   target_link_libraries(desktop_notifications_test PRIVATE desktop_notifications)
   add_test(NAME desktop_notifications_test COMMAND desktop_notifications_test)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_update)
+  add_executable(desktop_update_test test/desktop_update_test.cpp)
+  target_link_libraries(desktop_update_test PRIVATE desktop_update)
+  add_test(NAME desktop_update_test COMMAND desktop_update_test)
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen)

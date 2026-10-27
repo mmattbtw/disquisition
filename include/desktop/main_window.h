@@ -37,9 +37,11 @@ class QListWidget;
 class QMediaDevices;
 class QMimeData;
 class QNetworkAccessManager;
+class QProgressBar;
 class QPushButton;
 class QSpinBox;
 class QTextBrowser;
+class Updater;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -112,6 +114,9 @@ private:
     void applyMicState();
     void updatePushToTalk();
     void showPreferences();
+    void checkForUpdates();
+    void showUpdateState();
+    void offerUpdateRestart();
     void startTransport(bool relay);
     void handleTransportClosed();
     void retryConnection();
@@ -153,6 +158,13 @@ private:
     QLabel* connectionLabel_ = nullptr;
     QLabel* notificationsLabel_ = nullptr;
     QLabel* voiceLabel_ = nullptr;
+    QLabel* updateLabel_ = nullptr;
+    QProgressBar* updateProgress_ = nullptr;
+    QPushButton* updateButton_ = nullptr;
+    Updater* updater_ = nullptr;
+    bool automaticUpdates_ = true;
+    // Set while a check the user asked for runs, so its result is shown.
+    bool updateCheckRequested_ = false;
     NotificationCenter* notifications_ = nullptr;
     MentionCompleter* mentionCompleter_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;

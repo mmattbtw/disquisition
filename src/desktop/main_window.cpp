@@ -34,6 +34,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPointer>
+#include <QProgressBar>
 #include <QDir>
 #include <QPushButton>
 #include <QRandomGenerator>
@@ -56,6 +57,7 @@
 #include <string>
 #include <utility>
 
+#include "desktop/app_identity.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
 #include "desktop/gif_picker.h"
@@ -65,6 +67,7 @@
 #include "desktop/notification_center.h"
 #include "desktop/remote_media.h"
 #include "desktop/share_picker.h"
+#include "desktop/updater.h"
 
 #ifndef DISQUISITION_GIPHY_API_KEY
 #    define DISQUISITION_GIPHY_API_KEY ""
@@ -240,6 +243,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     const qlonglong parsedMaximum = maximum.toLongLong(&validMaximum);
     if (validMaximum && parsedMaximum > 0) maxSavedMessages_ = parsedMaximum;
     showLinkedMedia_ = settings.value("gifs/showLinkedMedia", true).toBool();
+    automaticUpdates_ = settings.value("updates/automatic", true).toBool();
     pushToTalkEnabled_ = settings.value("voice/pushToTalk", false).toBool();
     if (settings.contains("voice/pushToTalkKey"))
         pushToTalkKey_ = settings.value("voice/pushToTalkKey").toUInt();
@@ -260,6 +264,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
             &MainWindow::showNotificationSettings);
     connect(notifications_, &NotificationCenter::badgeChanged, this,
             [this](const UnreadBadge& badge) { setWindowTitle(badgedTitle("disquisition", badge)); });
+    connect(updater_, &Updater::stateChanged, this, &MainWindow::showUpdateState);
+    connect(updater_, &Updater::downloadProgress, updateProgress_, &QProgressBar::setValue);
+    connect(updateButton_, &QPushButton::clicked, this, [this] {
+        if (updater_->state() == Updater::State::ManualInstall) {
+            QDesktopServices::openUrl(updater_->releasePage());
+        } else {
+            offerUpdateRestart();
+        }
+    });
+    updater_->setAutomatic(automaticUpdates_);
 
     reconnectTimer_.setSingleShot(true);
     reconnectTimer_.setInterval(3000);
@@ -516,6 +530,10 @@ void MainWindow::buildUi() {
     setup->addWidget(settingsButton_);
     page->addLayout(setup);
 
+    network_ = new QNetworkAccessManager(this);
+    updater_ = new Updater(network_, QString::fromUtf8(disquisition::kUpdateRepository),
+                           disquisition::kBuildNumber, this);
+
     auto* appMenu = menuBar()->addMenu(QApplication::applicationDisplayName());
     auto* preferencesAction = appMenu->addAction("Preferences…");
     preferencesAction->setMenuRole(QAction::PreferencesRole);
@@ -525,6 +543,11 @@ void MainWindow::buildUi() {
     connect(saveAction, &QAction::triggered, this, &MainWindow::showPreferences);
     appMenu->addSeparator();
     appMenu->addAction(notifications_->muteAction());
+    if (updater_->enabled()) {
+        auto* checkForUpdatesAction = appMenu->addAction("Check for Updates…");
+        checkForUpdatesAction->setMenuRole(QAction::ApplicationSpecificRole);
+        connect(checkForUpdatesAction, &QAction::triggered, this, &MainWindow::checkForUpdates);
+    }
 
     auto* devices = new QHBoxLayout;
     devices->setSpacing(6);
@@ -556,8 +579,23 @@ void MainWindow::buildUi() {
     notificationsLabel_->setObjectName("notificationsMuted");
     notificationsLabel_->setToolTip("/dnd or the app menu turns them back on");
     voiceLabel_ = new QLabel("voice: off", root);
+    updateLabel_ = new QLabel(root);
+    updateLabel_->setObjectName("updateStatus");
+    updateLabel_->hide();
+    updateProgress_ = new QProgressBar(root);
+    updateProgress_->setObjectName("updateProgress");
+    updateProgress_->setTextVisible(false);
+    updateProgress_->setFixedSize(120, 6);
+    updateProgress_->hide();
+    updateButton_ = new QPushButton(root);
+    updateButton_->setObjectName("update");
+    updateButton_->hide();
     state->addWidget(connectionLabel_);
     state->addStretch();
+    state->addWidget(updateLabel_);
+    state->addWidget(updateProgress_);
+    state->addWidget(updateButton_);
+    state->addSpacing(12);
     state->addWidget(notificationsLabel_);
     state->addSpacing(12);
     state->addWidget(voiceLabel_);
@@ -606,7 +644,6 @@ void MainWindow::buildUi() {
     compose->addWidget(sendButton_);
     page->addLayout(compose);
 
-    network_ = new QNetworkAccessManager(this);
     mediaFetcher_ = new MediaFetcher(network_, this);
     media_ = new ChatMedia(transcript_, mediaFetcher_, this);
     gifSearch_ = new GifSearch(network_, this);
@@ -655,6 +692,10 @@ void MainWindow::buildUi() {
         QLabel#gifStatus, QLabel#gifAttribution { color: #8a9099; font-size: 12px; }
         QLabel#dropOverlay { background: rgba(32, 38, 44, 225); color: #9dccca; border: 2px dashed #9dccca; font-size: 16px; font-weight: 700; }
         QLabel#notificationsMuted { color: #d9a441; }
+        QPushButton#update { background: #9dccca; color: #20262c; border-color: #9dccca; padding: 1px 8px; font-size: 13px; }
+        QLabel#updateStatus { color: #8a9099; font-size: 13px; }
+        QProgressBar#updateProgress { background: #333842; border: 0; }
+        QProgressBar#updateProgress::chunk { background: #9dccca; }
         QListView#mentionSuggestions { border: 1px solid #777f89; selection-background-color: #9dccca; selection-color: #20262c; }
     )");
     // The popup is a window of its own, so it does not inherit the style sheet.
@@ -1155,6 +1196,13 @@ void MainWindow::showPreferences() {
     // Suppressing @everyone stays enabled: it still decides what the badge counts.
     notifyLevel->setEnabled(!shownNotifications.muted);
     notifyActivity->setEnabled(!shownNotifications.muted);
+    QCheckBox* automaticUpdates = nullptr;
+    if (updater_->enabled()) {
+        automaticUpdates = new QCheckBox("Update automatically", &dialog);
+        automaticUpdates->setChecked(automaticUpdates_);
+        automaticUpdates->setToolTip("Downloads new builds in the background. They install "
+                                     "the next time you open the app.");
+    }
     connect(muteNotifications, &QCheckBox::toggled, notifyLevel, &QWidget::setDisabled);
     connect(muteNotifications, &QCheckBox::toggled, notifyActivity, &QWidget::setDisabled);
     connect(saveMessages, &QCheckBox::toggled, messageFileRow, &QWidget::setEnabled);
@@ -1182,6 +1230,9 @@ void MainWindow::showPreferences() {
     form->addRow("notify me about", notifyLevel);
     form->addRow("", suppressEveryone);
     form->addRow("", notifyActivity);
+    if (automaticUpdates) {
+        form->addRow("", automaticUpdates);
+    }
     layout->addLayout(form);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
                                           &dialog);
@@ -1259,6 +1310,10 @@ void MainWindow::showPreferences() {
     chosenNotifications.suppressEveryone = suppressEveryone->isChecked();
     chosenNotifications.activity = notifyActivity->isChecked();
     notifications_->setSettings(chosenNotifications);
+    if (automaticUpdates) {
+        automaticUpdates_ = automaticUpdates->isChecked();
+        updater_->setAutomatic(automaticUpdates_);
+    }
     if (!saveMessages_) {
         recentMessages_.reset();
         savedMessagesLoaded_ = false;
@@ -1288,6 +1343,85 @@ void MainWindow::showPreferences() {
     settings.setValue("messages/maximum",
                       maxSavedMessages_ ? QString::number(*maxSavedMessages_) : QString());
     settings.setValue("gifs/showLinkedMedia", showLinkedMedia_);
+    settings.setValue("updates/automatic", automaticUpdates_);
+}
+
+void MainWindow::checkForUpdates() {
+    updateCheckRequested_ = true;
+    updater_->check();
+    // A check under way reports when it finishes. A waiting update, which
+    // check() leaves alone, is reported now.
+    showUpdateState();
+}
+
+void MainWindow::showUpdateState() {
+    using State = Updater::State;
+    const State state = updater_->state();
+    const QString build = "Build " + QString::number(updater_->availableBuild());
+    const QString nextStart =
+        " installs the next time you open " + QApplication::applicationDisplayName() + ".";
+    const bool working = state == State::Downloading || state == State::Extracting;
+    updateLabel_->setVisible(working);
+    updateProgress_->setVisible(working);
+    if (working) {
+        updateLabel_->setText(state == State::Downloading ? "downloading update"
+                                                          : "preparing update");
+        updateLabel_->setToolTip(build + nextStart);
+        updateProgress_->setValue(state == State::Downloading ? 0 : 100);
+    }
+    updateButton_->setVisible(state == State::Ready || state == State::ManualInstall);
+    if (state == State::Ready) {
+        updateButton_->setText("Update Ready");
+        updateButton_->setToolTip(build + nextStart + " Click to restart now.");
+    } else if (state == State::ManualInstall) {
+        updateButton_->setText("Download Update");
+        updateButton_->setToolTip(build + " cannot be installed in this folder.");
+    }
+
+    if (!updateCheckRequested_ || state == State::Idle || state == State::Checking) {
+        return;
+    }
+    updateCheckRequested_ = false;
+    const QString title = "Check for Updates";
+    switch (state) {
+    case State::UpToDate:
+        QMessageBox::information(this, title,
+                                 "You have the latest build (" +
+                                     QString::number(updater_->currentBuild()) + ").");
+        break;
+    case State::Downloading:
+        QMessageBox::information(this, title, build + " is downloading. It" + nextStart);
+        break;
+    case State::Ready:
+        offerUpdateRestart();
+        break;
+    case State::ManualInstall:
+        if (QMessageBox::question(this, title,
+                                  build + " is available, but the app cannot update itself in "
+                                          "the folder it is in. Download it from GitHub?") ==
+            QMessageBox::Yes) {
+            QDesktopServices::openUrl(updater_->releasePage());
+        }
+        break;
+    case State::Installed:
+        QMessageBox::information(this, title, build + " is installed and starts next time.");
+        break;
+    case State::Failed:
+        QMessageBox::warning(this, title, updater_->error());
+        break;
+    default:
+        break;
+    }
+}
+
+void MainWindow::offerUpdateRestart() {
+    const QString question = "Build " + QString::number(updater_->availableBuild()) +
+                             " installs the next time you open " +
+                             QApplication::applicationDisplayName() + ". Restart now?";
+    if (QMessageBox::question(this, "Update Ready", question) == QMessageBox::Yes &&
+        !updater_->restart()) {
+        QMessageBox::warning(this, "Update", updater_->error());
+    }
 }
 
 void MainWindow::openSavedMessages() {

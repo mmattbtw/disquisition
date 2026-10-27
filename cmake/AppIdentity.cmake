@@ -18,3 +18,19 @@ else()
   message(FATAL_ERROR
     "Invalid DISQUISITION_BUILD_CHANNEL '${DISQUISITION_BUILD_CHANNEL}'; choose development, staging, or production")
 endif()
+
+# The desktop workflow stamps production builds with its run number, which
+# also tags their release (main-<number>). Unstamped builds never update
+# themselves, so production cannot replace a local or staging app.
+set(DISQUISITION_BUILD_NUMBER "0" CACHE STRING
+    "Release build number the desktop app updates from; 0 turns updates off")
+set(DISQUISITION_UPDATE_REPOSITORY "mmattbtw/disquisition" CACHE STRING
+    "GitHub repository whose latest release the desktop app updates to")
+if(NOT DISQUISITION_BUILD_NUMBER MATCHES "^[0-9]+$")
+  message(FATAL_ERROR
+    "Invalid DISQUISITION_BUILD_NUMBER '${DISQUISITION_BUILD_NUMBER}'; use a workflow run number, or 0")
+endif()
+if(NOT DISQUISITION_BUILD_NUMBER EQUAL 0 AND NOT DISQUISITION_BUILD_CHANNEL STREQUAL "production")
+  message(FATAL_ERROR
+    "DISQUISITION_BUILD_NUMBER is only for production builds, not ${DISQUISITION_BUILD_CHANNEL}")
+endif()

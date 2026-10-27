@@ -15,6 +15,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # Production builds update themselves to newer releases, which the release
+      # job below tags main-<run number>. Staging builds have 0 and never update.
+      DISQUISITION_BUILD_NUMBER: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_number || 0 }}
       # MSVC reads extra flags from CL; /MP compiles each project's sources in
       # parallel instead of one file at a time. Other compilers ignore it.
       CL: /MP
@@ -178,14 +181,14 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$env:DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
 
       - name: Build desktop client
         run: cmake --build build --config Release --target disquisition-desktop --parallel
