@@ -238,9 +238,9 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         });
         connect(node_.get(), &community::Node::joinRejected, this,
                 [this](const QString&, const QString&) {
-                    note("Invite rejected. Check the code with the community owner.");
+                    noteError("Invite rejected. Check the code with the community owner.");
                 });
-        connect(node_.get(), &community::Node::errorOccurred, this, &CommunityPanel::note);
+        connect(node_.get(), &community::Node::errorOccurred, this, &CommunityPanel::noteError);
         connect(node_.get(), &community::Node::relayConnectionChanged, this,
                 [this](bool connected) {
                     note(connected ? "Relay connected."
@@ -338,7 +338,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     });
     connect(&capture_, &ScreenCapture::errorOccurred, this, [this](const QString& error) {
         stopSharing();
-        note(error);
+        noteError(error);
     });
     refresh();
     render();
@@ -357,12 +357,19 @@ void CommunityPanel::attempt(const std::function<void()>& action) {
         action();
     }
     catch (const std::exception& error) {
-        note(QString::fromUtf8(error.what()));
+        noteError(QString::fromUtf8(error.what()));
     }
 }
 void CommunityPanel::note(const QString& message) {
+    // Routine status stays out of the footer; only failures surface there.
+    Q_UNUSED(message);
+    status_->clear();
+    status_->hide();
+}
+void CommunityPanel::noteError(const QString& message) {
     status_->setText(message);
     status_->setToolTip(message);
+    status_->setVisible(!message.isEmpty());
 }
 
 void CommunityPanel::buildUi() {
@@ -411,6 +418,32 @@ void CommunityPanel::buildUi() {
     connect(join_, &QPushButton::clicked, this, &CommunityPanel::join);
     connect(tree_, &QTreeWidget::currentItemChanged, this,
             [this](QTreeWidgetItem* item) { select(item); });
+    tree_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tree_, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& position) {
+        auto* item = tree_->itemAt(position);
+        if (!item || item->parent() || !node_)
+            return;
+        const auto target = item->data(0, Qt::UserRole).toString();
+        const auto model = node_->communities().value(target);
+        if (target.isEmpty() || !model.isMember(node_->peerId()) ||
+            model.owner == node_->peerId())
+            return;
+        QMenu menu(this);
+        leaveAction_->setData(target);
+        leaveAction_->setVisible(true);
+        leaveAction_->setEnabled(true);
+        menu.addAction(leaveAction_);
+        menu.exec(tree_->viewport()->mapToGlobal(position));
+        leaveAction_->setData({});
+        refresh();
+    });
+    leaveAction_ = new QAction("Leave community…", this);
+    leaveAction_->setObjectName("communityLeave");
+    connect(leaveAction_, &QAction::triggered, this, [this] {
+        const auto target = leaveAction_->data().toString();
+        leaveAction_->setData({});
+        leaveCommunity(target);
+    });
     auto* conversation = new QWidget(split);
     auto* chat = new QVBoxLayout(conversation);
     chat->setContentsMargins(4, 0, 0, 0);
@@ -423,13 +456,6 @@ void CommunityPanel::buildUi() {
     headingRow->addWidget(heading_, 1);
     headingRow->addWidget(invite_);
     headingRow->addWidget(manage_);
-    auto* communityActions = button("Community", "communityActions", conversation);
-    auto* communityMenu = new QMenu(communityActions);
-    auto* leaveAction = communityMenu->addAction("Leave community…");
-    leaveAction->setObjectName("communityLeave");
-    connect(leaveAction, &QAction::triggered, this, &CommunityPanel::leaveCommunity);
-    communityActions->setMenu(communityMenu);
-    headingRow->addWidget(communityActions);
     chat->addLayout(headingRow);
     topic_ = new QLabel("Create a community or join with an invite link or QR image.",
                         conversation);
@@ -542,6 +568,7 @@ void CommunityPanel::buildUi() {
     status_ = new QLabel(this);
     status_->setObjectName("communityStatus");
     status_->setWordWrap(true);
+    status_->hide();
     layout->addWidget(status_);
     addAction(notifications_->muteAction());
     status_->setTextFormat(Qt::PlainText);
@@ -573,7 +600,8 @@ void CommunityPanel::buildUi() {
 
 void CommunityPanel::connectNode() {
     if (!node_) {
-        note(failure_);
+        if (!failure_.isEmpty())
+            noteError(failure_);
         return;
     }
     if (online_) {
@@ -1113,7 +1141,7 @@ void CommunityPanel::invite() {
                                                            "community-invite.png",
                                                            "PNG image (*.png)");
             if (!path.isEmpty() && !qr.save(path))
-                note("Could not save QR image.");
+                noteError("Could not save QR image.");
         });
         auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
         layout->addWidget(close);
@@ -1448,6 +1476,7 @@ void CommunityPanel::refresh() {
     }
     for (auto* action : {invite_, manage_, send_, image_, gif_, voice_, mute_, deafen_, share_})
         action->setEnabled(false);
+    const bool composerFocused = composer_->hasFocus();
     composer_->setEnabled(false);
     connect_->setEnabled(usable);
     connect_->setText(online_ ? "Disconnect" : "Connect");
@@ -1456,7 +1485,10 @@ void CommunityPanel::refresh() {
     join_->setEnabled(usable && online_);
     voiceControls_->setVisible(online_ && !voiceCid_.isEmpty());
     if (!usable) {
-        note(failure_);
+        if (!failure_.isEmpty())
+            noteError(failure_);
+        else
+            note(QString());
         return;
     }
     if (!node_->communities().value(cid_).isMember(node_->peerId())) {
@@ -1627,7 +1659,10 @@ void CommunityPanel::refresh() {
         if (!atBottom)
             transcript_->verticalScrollBar()->setValue(position);
     }
-    mentions_->setMembers(memberNames(cid_));
+    QStringList mentionable = memberNames(cid_);
+    if (model.isMember(node_->peerId()))
+        mentionable.removeAll(model.members.value(node_->peerId()).name);
+    mentions_->setMembers(mentionable);
     if (!model.id.isEmpty() && !model.channels.contains(channel_)) {
         channel_.clear();
         for (const auto& item : orderedChannels(model))
@@ -1657,13 +1692,11 @@ void CommunityPanel::refresh() {
     invite_->setEnabled(admin);
     manage_->setEnabled(admin);
     const bool canLeave = member && model.owner != node_->peerId();
-    auto* communityActions = findChild<QPushButton*>("communityActions");
-    communityActions->setVisible(canLeave);
-    communityActions->setEnabled(canLeave);
-    auto* leaveAction = findChild<QAction*>("communityLeave");
-    leaveAction->setVisible(canLeave);
-    leaveAction->setEnabled(canLeave);
+    leaveAction_->setVisible(canLeave);
+    leaveAction_->setEnabled(canLeave);
     composer_->setEnabled(textChannel);
+    if (composerFocused && textChannel)
+        composer_->setFocus(Qt::OtherFocusReason);
     send_->setEnabled(textChannel);
     image_->setEnabled(online_ && textChannel);
     gif_->setEnabled(online_ && textChannel);
@@ -1876,8 +1909,8 @@ void CommunityPanel::showEntry(const Entry& entry) {
     html += body.mid(written).toHtmlEscaped();
     if (onlyMedia) html.clear();
     transcript_->append(
-        "<table cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
-        "<td width='42' valign='top'>" +
+        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
+        "<td width='42' valign='top'" + QString(mentioned ? " bgcolor='#453d2c'" : "") + ">" +
         link("<img src='" + imageUrl.toString() + "' width='32' height='32'>") +
         "</td><td valign='top'" + (mentioned ? " bgcolor='#453d2c'" : "") +
         "><p style='margin:0 0 3px 0'>" +
@@ -1920,7 +1953,7 @@ void CommunityPanel::sendChat() {
         runCommand(body);
         return;
     }
-    if (!online_) { note("Connect before sending messages."); return; }
+    if (!online_) { noteError("Connect before sending messages."); return; }
     attempt([&] {
         const auto body = composer_->text().trimmed();
         const auto id = freshId();
@@ -1966,7 +1999,8 @@ void CommunityPanel::prepareUpload(std::function<PreparedImage()> prepare) {
 void CommunityPanel::sendImage(const PreparedImage& image, const QString& cid,
                                const QString& channel) {
     if (!online_ || !image.error.isEmpty() || image.bytes.isEmpty()) {
-        note(image.error);
+        if (!image.error.isEmpty())
+            noteError(image.error);
         return;
     }
     if (!node_->communities().value(cid).isMember(node_->peerId()) ||
@@ -2122,7 +2156,7 @@ void CommunityPanel::joinVoice() {
         if (!online_)
             return;
         if (!granted) {
-            note("Microphone access is required to join voice.");
+            noteError("Microphone access is required to join voice.");
             return;
         }
         const auto model = node_->communities().value(cid);
@@ -2133,7 +2167,7 @@ void CommunityPanel::joinVoice() {
         QSettings settings;
         if (!audio_.start(settings.value("community/input").toString(),
                           settings.value("community/output").toString())) {
-            note("The selected audio devices are unavailable.");
+            noteError("The selected audio devices are unavailable.");
             return;
         }
         voiceCid_ = cid;
@@ -2204,7 +2238,7 @@ void CommunityPanel::share() {
     if (dialog.exec() != QDialog::Accepted || !dialog.chosen())
         return;
     if (!capture_.start(*dialog.chosen())) {
-        note("Could not start screen sharing.");
+        noteError("Could not start screen sharing.");
         return;
     }
     stage_->addStream(node_->peerId(), true, name_->text().trimmed());
@@ -2482,9 +2516,11 @@ void CommunityPanel::runCommand(const QString& command) {
     composer_->clear();
 }
 
-void CommunityPanel::leaveCommunity() {
-    if (!node_ || !node_->communities().value(cid_).isMember(node_->peerId())) return;
-    const auto model = node_->communities().value(cid_);
+void CommunityPanel::leaveCommunity(const QString& target) {
+    const auto cid = target.isEmpty() ? cid_ : target;
+    if (!node_ || !node_->communities().value(cid).isMember(node_->peerId())) return;
+    const auto model = node_->communities().value(cid);
+    const bool selected = cid == cid_;
     if (model.owner == node_->peerId()) {
         commandReply("Community", "You own this community. Open Manage > Community > Delete community to remove it for everyone.");
         return;
@@ -2496,7 +2532,8 @@ void CommunityPanel::leaveCommunity() {
         if (voiceCid_ == model.id) leaveVoice();
         node_->edit(model.id, "leave", {});
         refresh();
-        render();
+        if (selected)
+            render();
         note("Left " + model.name + '.');
     });
 }

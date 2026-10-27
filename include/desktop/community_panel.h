@@ -67,7 +67,7 @@ private:
     void sendChat();
     void runCommand(const QString& command);
     void commandReply(const QString& title, const QString& body);
-    void leaveCommunity();
+    void leaveCommunity(const QString& cid = {});
     bool deleteCommunity(const QString& cid);
     void receive(const QString& cid, const QString& channel, const QString& peer,
                  const QString& type, const QJsonObject& data);
@@ -93,6 +93,7 @@ private:
     QString memberName(const QString& cid, const QString& peer) const;
     void attempt(const std::function<void()>& action);
     void note(const QString& text);
+    void noteError(const QString& text);
 
     std::unique_ptr<community::Node> node_;
     QString failure_;
@@ -130,6 +131,7 @@ private:
     QLabel* heading_ = nullptr;
     QLabel* topic_ = nullptr;
     QLabel* status_ = nullptr;
+    QAction* leaveAction_ = nullptr;
     QLabel* voiceStatus_ = nullptr;
     QWidget* voiceControls_ = nullptr;
     QPushButton* create_ = nullptr;

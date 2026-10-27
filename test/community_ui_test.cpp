@@ -1,7 +1,9 @@
 #include <QApplication>
 #include <QAction>
+#include <QAbstractItemView>
 #include <QBuffer>
 #include <QCheckBox>
+#include <QCompleter>
 #include <QDeadlineTimer>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -12,6 +14,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
@@ -25,6 +28,7 @@
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextCursor>
+#include <QTextTable>
 #include <QThread>
 #include <QTimer>
 #include <QTreeWidget>
@@ -164,6 +168,8 @@ int main(int argc, char** argv) {
     CHECK(!node->profile().avatar.isEmpty()); // Cancel also cancels picture removal.
     auto* composer = panel->findChild<QLineEdit*>("communityComposer");
     CHECK(composer->isEnabled());
+    auto* status = panel->findChild<QLabel*>("communityStatus");
+    CHECK(status && status->isHidden());
     composer->setText("Hello from our first community.");
     panel->findChild<QPushButton*>("communitySend")->click();
     auto* transcript = panel->findChild<QTextBrowser*>("communityTranscript");
@@ -342,6 +348,12 @@ int main(int argc, char** argv) {
     CHECK(badge.unread);
     CHECK(transcript->document()->find("@Alice").charFormat().background().color() == QColor("#3e4372"));
     CHECK(transcript->toHtml().contains("#453d2c"));
+    const auto mentioned = transcript->document()->find("@Alice");
+    auto* mentionedTable = mentioned.currentTable();
+    CHECK(mentionedTable && mentionedTable->format().width().type() == QTextLength::PercentageLength &&
+          mentionedTable->format().width().rawValue() == 100);
+    CHECK(mentionedTable->cellAt(0, 0).format().background().color() == QColor("#453d2c"));
+    CHECK(mentionedTable->cellAt(0, 1).format().background().color() == QColor("#453d2c"));
     CHECK(window.grab().save("community-mentions.png"));
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Legacy color"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Legacy color"); }));
@@ -610,6 +622,28 @@ int main(int argc, char** argv) {
     panel->findChild<QPushButton*>("communityVoice")->click();
     CHECK(!stage->drawing(remote.peerId()));
     window.show();
+    QApplication::setActiveWindow(&window);
+    composer->setFocus();
+    CHECK(composer->hasFocus());
+    composer->setText("/color pink");
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QApplication::sendEvent(composer, &enter);
+    CHECK(composer->text().isEmpty());
+    CHECK(composer->hasFocus());
+    // Mention suggestions never include the local member.
+    QKeyEvent at(QEvent::KeyPress, Qt::Key_At, Qt::ShiftModifier, "@");
+    QApplication::sendEvent(composer, &at);
+    auto* completer = panel->findChild<QCompleter*>();
+    CHECK(completer);
+    auto* suggestions = completer->popup();
+    CHECK(suggestions && suggestions->isVisible());
+    QStringList suggested;
+    for (int row = 0; row < suggestions->model()->rowCount(); ++row)
+        suggested.append(suggestions->model()->index(row, 0).data().toString());
+    CHECK(suggested.contains("Bobby") && suggested.contains("everyone") && suggested.contains("here"));
+    CHECK(!suggested.contains("Alice"));
+    suggestions->hide();
+    composer->clear();
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
@@ -637,7 +671,8 @@ int main(int argc, char** argv) {
         CHECK(node->synchronizing(cid));
         QApplication::processEvents(QEventLoop::ExcludeSocketNotifiers);
         CHECK(manage->isEnabled() && panel->findChild<QPushButton*>("communityInvite")->isEnabled());
-        CHECK(panel->findChild<QPushButton*>("communityActions")->isHidden());
+        CHECK(!panel->findChild<QAction*>("communityLeave")->isVisible());
+        CHECK(panel->findChild<QPushButton*>("communityActions") == nullptr);
         QTimer::singleShot(0, [&] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             CHECK(dialog && dialog->findChild<QPushButton*>("communityDelete"));
@@ -651,6 +686,12 @@ int main(int argc, char** argv) {
     online->click();
     CHECK(composer->isEnabled()); // Local commands and owner controls still work offline.
     CHECK(manage->isEnabled() && node->communities()[cid].canAdmin(node->peerId()));
+    // The footer stays hidden for routine activity and appears for failures.
+    CHECK(status->isHidden());
+    composer->setText("offline message");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(status->isVisible() && status->text().contains("Connect before sending"));
+    composer->clear();
     composer->setText("/help");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(transcript->toPlainText().contains("/help") || transcript->toPlainText().contains("/users"));
@@ -698,6 +739,24 @@ int main(int argc, char** argv) {
     auto* leaveAction = panel->findChild<QAction*>("communityLeave");
     CHECK(leaveAction->isVisible() && leaveAction->isEnabled());
     CHECK(!manage->isEnabled() && !node->communities()[visit].canAdmin(node->peerId()));
+    const auto leaveFromSidebar = [&](QTreeWidgetItem* server) {
+        bool offered = false;
+        QTimer::singleShot(0, [&] {
+            auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+            CHECK(menu);
+            QAction* action = nullptr;
+            for (auto* candidate : menu->actions())
+                if (candidate->objectName() == "communityLeave")
+                    action = candidate;
+            CHECK(action && action->isVisible() && action->isEnabled());
+            offered = true;
+            confirm(QMessageBox::Yes);
+            action->trigger();
+        });
+        QMetaObject::invokeMethod(tree, "customContextMenuRequested", Qt::DirectConnection,
+                                  Q_ARG(QPoint, tree->visualItemRect(server).center()));
+        CHECK(offered);
+    };
     {
         std::vector<std::unique_ptr<QSignalBlocker>> blockers;
         for (auto* socket : node->findChildren<QSslSocket*>())
@@ -708,8 +767,12 @@ int main(int argc, char** argv) {
         CHECK(node->synchronizing(visit));
         QApplication::processEvents(QEventLoop::ExcludeSocketNotifiers);
         CHECK(leaveAction->isEnabled());
-        confirm(QMessageBox::Yes);
-        leaveAction->trigger();
+        QTreeWidgetItem* visitRoot = nullptr;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i)
+            if (tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == visit)
+                visitRoot = tree->topLevelItem(i);
+        CHECK(visitRoot);
+        leaveFromSidebar(visitRoot);
         CHECK(!node->communities().value(visit).isMember(node->peerId()));
     }
     for (auto* socket : node->findChildren<QSslSocket*>())
