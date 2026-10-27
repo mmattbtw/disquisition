@@ -142,7 +142,7 @@ DecodeStatus decode(std::string& buffer, Message& out);
 
 // Parses "0" to "255".
 bool parseColorIndex(const std::string& color, int& index);
-// Indexes the terminal client keeps for its own notices.
+// Color indexes reserved for system notices by the wire protocol.
 bool isReservedSystemColor(int index);
 bool isValidColor(const std::string& color);
 

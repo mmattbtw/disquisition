@@ -263,8 +263,15 @@ across local rebuilds.
 
 In Preferences, check "Save chat messages locally," choose a SQLite file and
 optionally set a maximum message count. You can also use `/save <path.db>` or
-`/save off`. See [local message history](command-line.md#local-message-history)
-for storage and retention details.
+`/save off`. Local saving is off by default. Leaving the maximum blank keeps
+every message. The app appends each new chat message as it arrives or is sent,
+and shows the 1,000 most recent saved messages when you connect. The stored
+history can grow beyond what the UI displays. `/clear` clears the message pane
+without deleting saved messages.
+
+The SQLite `saved_messages` table has `timestamp` in Unix seconds, `sender`,
+`body`, and `color` columns. The app does not save system notices or send saved
+messages to the server.
 
 ## Release builds
 
