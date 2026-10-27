@@ -427,10 +427,7 @@ void CommunityPanel::buildUi() {
     auto* communityMenu = new QMenu(communityActions);
     auto* leaveAction = communityMenu->addAction("Leave community…");
     leaveAction->setObjectName("communityLeave");
-    auto* deleteAction = communityMenu->addAction("Delete community…");
-    deleteAction->setObjectName("communityDelete");
     connect(leaveAction, &QAction::triggered, this, &CommunityPanel::leaveCommunity);
-    connect(deleteAction, &QAction::triggered, this, &CommunityPanel::deleteCommunity);
     communityActions->setMenu(communityMenu);
     headingRow->addWidget(communityActions);
     chat->addLayout(headingRow);
@@ -1127,7 +1124,7 @@ void CommunityPanel::invite() {
 }
 
 void CommunityPanel::manage() {
-    if (!node_ || !node_->communities().contains(cid_))
+    if (!node_ || !node_->communities().value(cid_).canAdmin(node_->peerId()))
         return;
     const auto cid = cid_;
     const auto model = node_->communities().value(cid);
@@ -1207,6 +1204,18 @@ void CommunityPanel::manage() {
                    general);
     ownershipHelp->setWordWrap(true);
     form->addRow(ownershipHelp);
+    if (model.owner == node_->peerId()) {
+        auto* deletionHelp = new QLabel(
+            "Deleting this community removes it for all members. This cannot be undone.", general);
+        deletionHelp->setWordWrap(true);
+        auto* remove = button("Delete community…", "communityDelete", general);
+        remove->setStyleSheet("color:#ffb3b3; border-color:#e05252;");
+        form->addRow(deletionHelp);
+        form->addRow(remove);
+        connect(remove, &QPushButton::clicked, &dialog, [this, &dialog, cid] {
+            if (deleteCommunity(cid)) dialog.accept();
+        });
+    }
     addPage(general, "Community");
 
     auto* channelsPage = new QWidget(tabs);
@@ -1644,16 +1653,16 @@ void CommunityPanel::refresh() {
                                      QString::number(model.members.size()) + " members · host " +
                                      memberName(cid_, node_->host(cid_)))
                         : channel.topic);
-    const bool admin = model.canAdmin(node_->peerId()) && !node_->synchronizing(cid_);
+    const bool admin = model.canAdmin(node_->peerId());
     invite_->setEnabled(admin);
     manage_->setEnabled(admin);
-    findChild<QPushButton*>("communityActions")->setEnabled(member);
+    const bool canLeave = member && model.owner != node_->peerId();
+    auto* communityActions = findChild<QPushButton*>("communityActions");
+    communityActions->setVisible(canLeave);
+    communityActions->setEnabled(canLeave);
     auto* leaveAction = findChild<QAction*>("communityLeave");
-    auto* deleteAction = findChild<QAction*>("communityDelete");
-    leaveAction->setVisible(member && model.owner != node_->peerId());
-    deleteAction->setVisible(member && model.owner == node_->peerId());
-    leaveAction->setEnabled(!node_->synchronizing(cid_));
-    deleteAction->setEnabled(!node_->synchronizing(cid_));
+    leaveAction->setVisible(canLeave);
+    leaveAction->setEnabled(canLeave);
     composer_->setEnabled(textChannel);
     send_->setEnabled(textChannel);
     image_->setEnabled(online_ && textChannel);
@@ -2477,7 +2486,7 @@ void CommunityPanel::leaveCommunity() {
     if (!node_ || !node_->communities().value(cid_).isMember(node_->peerId())) return;
     const auto model = node_->communities().value(cid_);
     if (model.owner == node_->peerId()) {
-        commandReply("Community", "You own this community. Use Delete community to remove it for everyone.");
+        commandReply("Community", "You own this community. Open Manage > Community > Delete community to remove it for everyone.");
         return;
     }
     if (QMessageBox::question(this, "Leave community", "Leave " + model.name +
@@ -2492,18 +2501,21 @@ void CommunityPanel::leaveCommunity() {
     });
 }
 
-void CommunityPanel::deleteCommunity() {
-    if (!node_) return;
-    const auto model = node_->communities().value(cid_);
-    if (!model.isMember(node_->peerId()) || model.owner != node_->peerId()) return;
+bool CommunityPanel::deleteCommunity(const QString& cid) {
+    if (!node_) return false;
+    const auto model = node_->communities().value(cid);
+    if (!model.isMember(node_->peerId()) || model.owner != node_->peerId()) return false;
     if (QMessageBox::question(this, "Delete community", "Delete " + model.name +
         " for all members? This cannot be undone.", QMessageBox::Yes | QMessageBox::Cancel,
-        QMessageBox::Cancel) != QMessageBox::Yes) return;
+        QMessageBox::Cancel) != QMessageBox::Yes) return false;
+    bool deleted = false;
     attempt([&] {
         if (voiceCid_ == model.id) leaveVoice();
         node_->edit(model.id, "delete", {});
         refresh();
         render();
         note("Deleted " + model.name + '.');
+        deleted = true;
     });
+    return deleted;
 }

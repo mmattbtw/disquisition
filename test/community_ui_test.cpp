@@ -18,6 +18,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
+#include <QSslSocket>
 #include <QStackedWidget>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -27,6 +29,8 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <functional>
+#include <memory>
+#include <vector>
 
 #include "check.h"
 #include "community/store.h"
@@ -623,6 +627,27 @@ int main(int argc, char** argv) {
     CHECK(until(
         [&] { return remote.communities()[cid].members[node->peerId()].name == "Alice Example"; }));
     CHECK(transcript->toPlainText().contains("Alice Example"));
+    // Transport readiness is not authority. An owner can open Manage while
+    // another member has not acknowledged the latest metadata.
+    {
+        std::vector<std::unique_ptr<QSignalBlocker>> blockers;
+        for (auto* socket : node->findChildren<QSslSocket*>())
+            blockers.push_back(std::make_unique<QSignalBlocker>(socket));
+        node->edit(cid, "rename", {{"name", node->communities()[cid].name}});
+        CHECK(node->synchronizing(cid));
+        QApplication::processEvents(QEventLoop::ExcludeSocketNotifiers);
+        CHECK(manage->isEnabled() && panel->findChild<QPushButton*>("communityInvite")->isEnabled());
+        CHECK(panel->findChild<QPushButton*>("communityActions")->isHidden());
+        QTimer::singleShot(0, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            CHECK(dialog && dialog->findChild<QPushButton*>("communityDelete"));
+            CHECK(dialog->grab().save("community-owner-manage.png"));
+            dialog->reject();
+        });
+        manage->click();
+    }
+    for (auto* socket : node->findChildren<QSslSocket*>())
+        if (socket->bytesAvailable()) QMetaObject::invokeMethod(socket, "readyRead", Qt::DirectConnection);
     online->click();
     CHECK(composer->isEnabled()); // Local commands and owner controls still work offline.
     CHECK(manage->isEnabled() && node->communities()[cid].canAdmin(node->peerId()));
@@ -643,13 +668,25 @@ int main(int argc, char** argv) {
         if (tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == study) {
             tree->setCurrentItem(tree->topLevelItem(i)); break;
         }
-    auto* deleteAction = panel->findChild<QAction*>("communityDelete");
-    CHECK(deleteAction->isVisible() && deleteAction->isEnabled());
-    confirm(QMessageBox::Cancel);
-    deleteAction->trigger();
+    CHECK(!panel->findChild<QAction*>("communityDelete"));
+    const auto deleteFromManage = [&](QMessageBox::StandardButton answer) {
+        QTimer::singleShot(0, [&confirm, answer] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            CHECK(dialog && dialog->objectName() == "communityManageDialog");
+            auto* remove = dialog->findChild<QPushButton*>("communityDelete");
+            CHECK(remove && remove->isEnabled());
+            confirm(answer);
+            remove->click();
+            if (answer == QMessageBox::Cancel) {
+                CHECK(dialog->isVisible());
+                dialog->reject();
+            }
+        });
+        manage->click();
+    };
+    deleteFromManage(QMessageBox::Cancel);
     CHECK(!node->communities()[study].deleted);
-    confirm(QMessageBox::Yes);
-    deleteAction->trigger();
+    deleteFromManage(QMessageBox::Yes);
     CHECK(node->communities()[study].deleted);
     CHECK(tree->topLevelItemCount() == 1);
     online->click();
@@ -659,9 +696,24 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return node->communities().value(visit).isMember(node->peerId()) &&
                              !node->synchronizing(visit) && tree->topLevelItemCount() == 2; }));
     auto* leaveAction = panel->findChild<QAction*>("communityLeave");
-    CHECK(leaveAction->isVisible() && !deleteAction->isVisible());
-    confirm(QMessageBox::Yes);
-    leaveAction->trigger();
+    CHECK(leaveAction->isVisible() && leaveAction->isEnabled());
+    CHECK(!manage->isEnabled() && !node->communities()[visit].canAdmin(node->peerId()));
+    {
+        std::vector<std::unique_ptr<QSignalBlocker>> blockers;
+        for (auto* socket : node->findChildren<QSslSocket*>())
+            blockers.push_back(std::make_unique<QSignalBlocker>(socket));
+        auto profile = node->profile();
+        profile.bio += "!";
+        node->setProfile(profile);
+        CHECK(node->synchronizing(visit));
+        QApplication::processEvents(QEventLoop::ExcludeSocketNotifiers);
+        CHECK(leaveAction->isEnabled());
+        confirm(QMessageBox::Yes);
+        leaveAction->trigger();
+        CHECK(!node->communities().value(visit).isMember(node->peerId()));
+    }
+    for (auto* socket : node->findChildren<QSslSocket*>())
+        if (socket->bytesAvailable()) QMetaObject::invokeMethod(socket, "readyRead", Qt::DirectConnection);
     CHECK(until([&] { return !node->communities().value(visit).isMember(node->peerId()) &&
                              !remote.communities().value(visit).isMember(node->peerId()); }));
     CHECK(tree->topLevelItemCount() == 1);

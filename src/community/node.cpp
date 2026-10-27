@@ -271,8 +271,6 @@ void Node::joinCommunity(const QString& link) {
 QString Node::invite(const QString& cid) {
     if (!models_.contains(cid))
         throw std::runtime_error("unknown community");
-    if (models_[cid].members.size() > 1 && synchronizing(cid))
-        throw std::runtime_error("community metadata is still synchronizing");
     const auto preferred = models_[cid].host(online(cid));
     auto model = models_.value(cid);
     const auto code = model.issueInvite(store_.identity());
@@ -300,8 +298,8 @@ QString Node::invite(const QString& cid) {
 void Node::edit(const QString& cid, const QString& kind, const QJsonObject& data) {
     if (!models_.contains(cid))
         throw std::runtime_error("unknown community");
-    if (synchronizing(cid))
-        throw std::runtime_error("community metadata is still synchronizing");
+    // Authority comes from signed community state. An unresponsive peer must
+    // not prevent local edits or a member leaving; concurrent state merges later.
     auto model = models_.value(cid);
     model.change(store_.identity(), kind, data);
     save(std::move(model));

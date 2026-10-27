@@ -68,7 +68,7 @@ private:
     void runCommand(const QString& command);
     void commandReply(const QString& title, const QString& body);
     void leaveCommunity();
-    void deleteCommunity();
+    bool deleteCommunity(const QString& cid);
     void receive(const QString& cid, const QString& channel, const QString& peer,
                  const QString& type, const QJsonObject& data);
     void append(const QString& cid, const QString& channel, Entry entry, bool persist = true);

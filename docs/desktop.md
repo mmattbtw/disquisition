@@ -143,11 +143,12 @@ or subscription is missed, the viewer retries automatically.
 
 ## Leave or delete a community
 
-Open the **Community** menu beside the channel heading. **Leave community**
-removes your membership; you need a new invite to rejoin. The owner instead has
-**Delete community**, which permanently deletes the community for all members.
-Both actions ask for confirmation. Members who were offline learn about the
-change when they reconnect. Saved local message files are kept.
+Any member other than the owner can open the **Community** menu beside the
+channel heading and choose **Leave community**. This removes your membership;
+you need a new invite to rejoin. The owner can open **Manage > Community** and
+choose **Delete community** to permanently delete it for all members.
+Both actions ask for confirmation and work even while peers are synchronizing.
+Members who were offline learn about the change when they reconnect. Saved local message files are kept.
 
 Disconnecting keeps your memberships and owner or admin permissions. Owners and
 admins can manage saved community metadata while offline; updates synchronize

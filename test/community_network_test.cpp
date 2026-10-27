@@ -363,6 +363,53 @@ void directAdmissionIsolationAndConnectionReuse() {
     largeScreenFrameDelivers(a, b, cid, voice);
 }
 
+void localAuthorityDoesNotDependOnPeerSynchronization() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("local authority");
+    b.joinCommunity(a.invite(cid));
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+
+    // Bob's live authenticated connection stops consuming metadata. Alice
+    // retains authority while her first signed update awaits acknowledgement.
+    const auto bobSockets = b.findChildren<QSslSocket*>();
+    CHECK(!bobSockets.isEmpty());
+    for (auto* socket : bobSockets)
+        socket->blockSignals(true);
+    a.edit(cid, "rename", {{"name", "first local edit"}});
+    CHECK(a.synchronizing(cid));
+    CHECK(a.communities()[cid].canAdmin(a.peerId()));
+    a.edit(cid, "rename", {{"name", "owner remains in control"}});
+    CHECK(Invite::fromLink(a.invite(cid)).community == cid);
+    CHECK(a.communities()[cid].name == "owner remains in control");
+
+    // A member also retains the right to leave when a different peer is
+    // unresponsive, including while their own profile update is unacknowledged.
+    for (auto* socket : a.findChildren<QSslSocket*>())
+        socket->blockSignals(true);
+    b.setProfile({"bob", "unsynchronized profile", {}});
+    CHECK(b.synchronizing(cid));
+    CHECK(!b.communities()[cid].canAdmin(b.peerId()));
+    b.edit(cid, "leave", {});
+    CHECK(!b.communities()[cid].isMember(b.peerId()));
+
+    // Restore both links and verify signed concurrent updates still converge.
+    for (auto* socket : a.findChildren<QSslSocket*>()) {
+        socket->blockSignals(false);
+        QMetaObject::invokeMethod(socket, "readyRead", Qt::QueuedConnection);
+    }
+    for (auto* socket : bobSockets) {
+        socket->blockSignals(false);
+        QMetaObject::invokeMethod(socket, "readyRead", Qt::QueuedConnection);
+    }
+    CHECK(until([&] { return !a.communities()[cid].isMember(b.peerId()); }));
+    CHECK(a.communities()[cid].name == "owner remains in control");
+}
+
 void metadataUpdatesKeepMembersOnlineAndVoiceConnected() {
     QTemporaryDir ad, bd;
     Node a(ad.path()), b(bd.path());
@@ -694,6 +741,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "TLS backend unavailable: %s\n", backend.toUtf8().constData());
         return 77;
     }
+    localAuthorityDoesNotDependOnPeerSynchronization();
     relayRejectsInvalidAndRetiredOptions();
     directAdmissionIsolationAndConnectionReuse();
     directListenerReportsRelayAddressMixupsWithoutTlsErrors();
