@@ -48,6 +48,18 @@ and activity alerts, **Connection** contains relay and direct addresses, and
 **Message History** controls local SQLite saving. Leave voice before changing
 audio devices, and disconnect before changing connection details.
 
+## Chat colors and linked media
+
+Each app session starts with a random pastel chat color. Use `/color pink`,
+`/color mint`, `/color butter`, `/color periwinkle`, `/color lilac`, `/color aqua`,
+or `/color peach` to change it. Numeric xterm colors from 0 to 255 also work,
+except reserved colors 1, 2 and 250. New messages carry the chosen color to peers
+and local history, and the drawing tool's **chat color** follows it.
+
+In **User Settings > Message History**, turn **Show linked GIFs and images in
+chat** off to stop loading linked media automatically. Uploaded images still
+appear in chat. The setting is saved on this device.
+
 ## Voice and screen sharing
 
 Select a voice channel, then choose **Join voice** beneath its name. The current

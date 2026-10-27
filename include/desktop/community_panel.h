@@ -89,6 +89,7 @@ private:
     bool online_ = false;
     bool refreshQueued_ = false;
     QString cid_, channel_;
+    QString messageColor_;
     QString renderedProfiles_;
     QString voiceCid_, voiceChannel_;
     QString selectedVoiceCid_, selectedVoiceChannel_;
@@ -149,6 +150,7 @@ private:
         quint32 transfer;
         QList<QByteArray> chunks;
         int next = 0;
+        QString color;
     };
     QList<Upload> uploads_;
     QThreadPool imagePool_; // waits for preparation before other members are destroyed

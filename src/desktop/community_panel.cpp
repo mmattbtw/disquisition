@@ -58,6 +58,50 @@
 
 using community::freshId;
 namespace {
+QColor xtermColor(int index) {
+    static const int basic[][3] = {
+        {0, 0, 0},       {205, 49, 49},   {13, 188, 121}, {229, 229, 16},
+        {36, 114, 200},  {188, 63, 188},  {17, 168, 205}, {229, 229, 229},
+        {102, 102, 102}, {241, 76, 76},   {35, 209, 139}, {245, 245, 67},
+        {59, 142, 234},  {214, 112, 214}, {41, 184, 219}, {255, 255, 255}};
+    if (index < 16) {
+        return QColor(basic[index][0], basic[index][1], basic[index][2]);
+    }
+    if (index < 232) {
+        const int value = index - 16;
+        const int levels[] = {0, 95, 135, 175, 215, 255};
+        return QColor(levels[value / 36], levels[(value / 6) % 6], levels[value % 6]);
+    }
+    const int gray = 8 + (index - 232) * 10;
+    return QColor(gray, gray, gray);
+}
+
+QColor chatColor(const QString& value) {
+    static const QHash<QString, int> named {
+        {"pink", 211}, {"mint", 121}, {"butter", 229}, {"periwinkle", 111},
+        {"lilac", 183}, {"aqua", 159}, {"peach", 216}};
+    if (named.contains(value)) {
+        return xtermColor(named.value(value));
+    }
+    bool valid = false;
+    const int index = value.toInt(&valid);
+    return valid && index >= 0 && index <= 255 ? xtermColor(index) : xtermColor(121);
+}
+
+const QStringList kChatColors{"pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
+bool validChatColor(const QString& value) {
+    if (kChatColors.contains(value)) return true;
+    if (value.isEmpty() || value.size() > 3) return false;
+    for (const auto character : value)
+        if (character < QLatin1Char('0') || character > QLatin1Char('9')) return false;
+    const int index = value.toInt();
+    return index <= 255 && index != 1 && index != 2 && index != 250;
+}
+QString packetColor(const QJsonObject& data) {
+    const auto color = data.value("color").toString();
+    return validChatColor(color) ? color : QStringLiteral("mint");
+}
+
 QString key(const QString& cid, const QString& channel) {
     return cid + '/' + channel;
 }
@@ -182,6 +226,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     catch (const std::exception& error) {
         failure_ = QString::fromUtf8(error.what());
     }
+    messageColor_ = kChatColors[QRandomGenerator::global()->bounded(kChatColors.size())];
     notifications_ = new NotificationCenter(window());
     buildUi();
     connect(&pushToTalk_, &PushToTalk::heldChanged, this, &CommunityPanel::voiceState);
@@ -227,6 +272,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                               {{"transfer", double(upload.transfer)},
                                {"index", upload.next},
                                {"count", upload.chunks.size()},
+                               {"color", upload.color},
                                {"bytes",
                                 QString::fromLatin1(upload.chunks[upload.next].toBase64())}});
         });
@@ -732,6 +778,10 @@ void CommunityPanel::settings() {
     path->setObjectName("communityMessageFile");
     auto* maximum = new QLineEdit(saved.value("messages/maximum").toString(), &dialog);
     maximum->setPlaceholderText("Unlimited");
+    auto* linkedMedia = new QCheckBox("Show linked GIFs and images in chat", &dialog);
+    linkedMedia->setObjectName("communityShowLinkedMedia");
+    linkedMedia->setChecked(saved.value("gifs/showLinkedMedia", true).toBool());
+    historyForm->addRow(linkedMedia);
     historyForm->addRow(saving);
     historyForm->addRow("SQLite file", path);
     historyForm->addRow("Maximum saved messages", maximum);
@@ -833,6 +883,7 @@ void CommunityPanel::settings() {
             saved.setValue("community/port", port->value());
             saved.setValue("community/input", input->currentData());
             saved.setValue("community/output", output->currentData());
+            saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());
             saved.setValue("messages/maximum", maximum->text().trimmed());
@@ -1723,7 +1774,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
         "</td><td valign='top'><p style='margin:0 0 3px 0'>" +
         link("<b>" + member.name.toHtmlEscaped() + "</b>") +
         " <span style='color:#a6b5bd;font-size:11px'>" + when + "</span></p>" +
-        "<p style='margin:0'>" + html.replace('\n', "<br>") +
+        "<p style='margin:0;color:" + chatColor(text(entry.message.color)).name() + "'>" + html.replace('\n', "<br>") +
         (entry.undelivered
              ? " <span style='color:#d4ae77'>[not delivered: no peers connected]</span>"
              : "") +
@@ -1762,19 +1813,35 @@ void CommunityPanel::sendChat() {
         composer_->clear();
         return;
     }
+    const auto command = composer_->text().trimmed();
+    if (command == "/color" || command.startsWith("/color ")) {
+        const auto requested = command.mid(6).trimmed().toLower();
+        if (!validChatColor(requested)) {
+            note("Use /color pink|mint|butter|periwinkle|lilac|aqua|peach or 0-255. Colors 1, 2 and 250 are reserved. Current color: " + messageColor_);
+            return;
+        }
+        messageColor_ = requested;
+        for (const auto& [peer, session] : drawings_)
+            if (auto* drawing = stage_->drawing(peer)) drawing->setChatColor(chatColor(messageColor_));
+        composer_->clear();
+        note("Chat color: " + messageColor_);
+        return;
+    }
     attempt([&] {
         const auto body = composer_->text().trimmed();
         const auto id = freshId();
         const auto stamp = QDateTime::currentSecsSinceEpoch();
         const int count =
             node_->sendPacket(cid_, channel_, "chat",
-                              {{"id", id}, {"body", body}, {"timestamp", double(stamp * 1000)}});
+                              {{"id", id}, {"body", body}, {"color", messageColor_},
+                               {"timestamp", double(stamp * 1000)}});
         if (entries_[key(cid_, channel_)].isEmpty()) {
             media_->clear();
             transcript_->clear();
         }
         append(cid_, channel_,
-               {{stamp, name_->text().trimmed().toStdString(), body.toStdString(), "mint",
+               {{stamp, name_->text().trimmed().toStdString(), body.toStdString(),
+                 messageColor_.toStdString(),
                  cid_.toStdString(), channel_.toStdString(), id.toStdString(),
                  node_->peerId().toStdString()},
                 {},
@@ -1814,13 +1881,13 @@ void CommunityPanel::sendImage(const PreparedImage& image, const QString& cid,
         return;
     }
     const auto transfer = QRandomGenerator::global()->generate();
-    uploads_.append({cid, channel, transfer, splitImage(image.bytes), 0});
+    uploads_.append({cid, channel, transfer, splitImage(image.bytes), 0, messageColor_});
     imageTimer_.start();
     append(cid, channel,
            {{QDateTime::currentSecsSinceEpoch(),
              name_->text().trimmed().toStdString(),
              "",
-             "mint",
+             messageColor_.toStdString(),
              cid.toStdString(),
              channel.toStdString(),
              {},
@@ -1843,7 +1910,8 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         }
         append(cid, channel,
                {{qint64(data.value("timestamp").toDouble()) / 1000, sender.toStdString(),
-                 data.value("body").toString().toStdString(), "mint", cid.toStdString(),
+                 data.value("body").toString().toStdString(), packetColor(data).toStdString(),
+                 cid.toStdString(),
                  channel.toStdString(), data.value("id").toString().toStdString(),
                  peer.toStdString()},
                 {},
@@ -1868,7 +1936,7 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
                    {{QDateTime::currentSecsSinceEpoch(),
                      sender.toStdString(),
                      "",
-                     "mint",
+                     packetColor(data).toStdString(),
                      cid.toStdString(),
                      channel.toStdString(),
                      {},
@@ -2113,6 +2181,7 @@ void CommunityPanel::startDrawing(const QString& peer, bool owner) {
     for (const auto& member : node_->communities().value(voiceCid_).members)
         names[member.id] = member.name;
     drawing->setAuthorNames(names);
+    drawing->setChatColor(chatColor(messageColor_));
     const auto cid = voiceCid_, channel = voiceChannel_;
     connect(session.get(), &ScreenDrawingSession::sendToPeer, this,
         [this, cid, channel](const QString& target, const chat::Message& payload) {

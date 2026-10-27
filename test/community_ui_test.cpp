@@ -95,6 +95,8 @@ int main(int argc, char** argv) {
         categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
         CHECK(relay && relay->text() == "relay.disquisition.app");
+        auto* linkedMedia = dialog->findChild<QCheckBox*>("communityShowLinkedMedia");
+        CHECK(linkedMedia && linkedMedia->isChecked());
         dialog->findChild<QLineEdit*>("userDisplayName")->setText("Unsaved name");
         dialog->reject();
     });
@@ -125,10 +127,20 @@ int main(int argc, char** argv) {
         dialog->findChild<QPushButton*>("userChooseAvatar")->click();
         dialog->findChild<QPlainTextEdit*>("userBio")->setPlainText(
             "Builds things. Listens to music.");
+        auto* linkedMedia = dialog->findChild<QCheckBox*>("communityShowLinkedMedia");
+        linkedMedia->setChecked(false);
+        dialog->findChild<QCheckBox*>("communitySaveMessages")->setChecked(true);
+        dialog->findChild<QLineEdit*>("communityMessageFile")->setText(directory.path() + "/history.db");
+        dialog->findChild<QListWidget*>("userSettingsCategories")->setCurrentRow(4);
+        QApplication::processEvents();
+        CHECK(linkedMedia->isVisible());
+        CHECK(dialog->grab().save("community-media-settings.png"));
+        dialog->findChild<QListWidget*>("userSettingsCategories")->setCurrentRow(0);
         CHECK(dialog->grab().save("community-user-settings.png"));
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(!QSettings().value("gifs/showLinkedMedia", true).toBool());
     CHECK(node->profile().bio == "Builds things. Listens to music.");
     CHECK(QImage::fromData(node->profile().avatar).size() == QSize(128, 128));
     QTimer::singleShot(0, [&] {
@@ -318,6 +330,12 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return badge.mentions == 1; }));
     CHECK(badge.unread);
     CHECK(transcript->toHtml().contains("#a8e6df"));
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Legacy color"}}) == 1);
+    CHECK(until([&] { return transcript->toPlainText().contains("Legacy color"); }));
+    CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#87ffaf"));
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Invalid color"}, {"color", "<b>bad</b>"}}) == 1);
+    CHECK(until([&] { return transcript->toPlainText().contains("Invalid color"); }));
+    CHECK(transcript->document()->find("Invalid color").charFormat().foreground().color() == QColor("#87ffaf"));
     const auto sender = transcript->document()->find("Bob");
     CHECK(!sender.isNull() && sender.charFormat().isAnchor());
     CHECK(sender.charFormat().anchorHref() == "profile://" + cid + '/' + remote.peerId());
@@ -327,6 +345,32 @@ int main(int argc, char** argv) {
     composer->setText("/dnd");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(!center->settings().muted && composer->text().isEmpty());
+    QString sentColor;
+    QObject::connect(&remote, &community::Node::packetReceived,
+        [&](const QString&, const QString&, const QString&, const QString& type, const QJsonObject& data) {
+            if (type == "chat") sentColor = data.value("color").toString();
+        });
+    composer->setText("/color pink");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(composer->text().isEmpty());
+    composer->setText("A pink community message");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(until([&] { return sentColor == "pink"; }));
+    CHECK(transcript->document()->find("A pink community message").charFormat().foreground().color() == QColor("#ff87af"));
+    {
+        chat::RecentMessages history((directory.path() + "/history.db").toStdString());
+        const auto saved = history.recent(cid.toStdString(), textChannel.toStdString());
+        CHECK(!saved.empty() && saved.back().body == "A pink community message");
+        CHECK(saved.back().color == "pink");
+    }
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "A peach reply"}, {"color", "peach"}}) == 1);
+    CHECK(until([&] { return transcript->toPlainText().contains("A peach reply"); }));
+    CHECK(transcript->document()->find("A peach reply").charFormat().foreground().color() == QColor("#ffaf87"));
+    // Invalid commands leave the previous color intact and do not send chat.
+    composer->setText("/color 250");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(composer->text() == "/color 250");
+    composer->clear();
     // Watch a remote community share and exchange ink through the actual panel wiring.
     node->setVoice(cid, voiceChannel);
     remote.setVoice(cid, voiceChannel, false, false, true);
@@ -369,6 +413,7 @@ int main(int argc, char** argv) {
     stage->watchRequested(remote.peerId());
     CHECK(until([&] { return stage->drawing(remote.peerId())->drawingAllowed(); }));
     CHECK(stage->drawing(remote.peerId())->authorName(remote.peerId()) == "Bob");
+    CHECK(stage->drawing(remote.peerId())->chatColor() == QColor("#ff87af"));
     chat::ScreenDraw stroke;
     stroke.id = stroke.stroke = 1;
     stage->drawing(remote.peerId())->segmentDrawn(stroke);
