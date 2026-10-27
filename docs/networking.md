@@ -20,20 +20,11 @@ no message tables and stores no chat history.
 ## Direct connections
 
 Each direct client opens a peer listener on an automatically selected port.
-On a LAN, the server announces the source address it sees. Across routed
-networks, pass a reachable address with `--advertise` and forward the chosen
-`--p2p-port` through the firewall or router.
-
-Pass `--local` to announce the client's local IPv4 address automatically. This is useful when the server sees a different address, such as when it runs on the same machine. The selected address appears in the client's greeting. Use `--advertise` instead when peers need a public address. With `--relay`, `--local` applies only during direct fallback enabled by `--leak-my-ip`.
-
-```sh
-./build/client \
-  --host chat.example.net \
-  --port 9000 \
-  --name matt \
-  --advertise matt.example.net \
-  --p2p-port 9011
-```
+On a LAN, the server announces the source address it sees. In the desktop app,
+set the server address and port in Preferences and leave the relay address
+blank to connect directly. Across routed networks, set a reachable public host
+and forward the TCP chat port through the firewall or router. Select
+"Advertise local IP automatically" for clients on the same LAN.
 
 If two connected users request the same name, the server gives the later user a suffix such as `-2`.
 
@@ -43,11 +34,10 @@ After sign-in, the server sends the client a roster containing each user's
 host and peer port. For each pair of users, the lexicographically earlier name
 opens the connection. This produces one TCP connection per pair.
 
-The terminal client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
+The desktop client sends messages live to the peer mesh. The server does not store messages or replay recent history to new clients.
 
-The terminal client retries a lost server connection every three seconds.
-Existing peer links can continue carrying live messages while the server is
-unavailable, but discovery stops.
+The desktop client retries a lost server connection every three seconds.
+Discovery stops while the server is unavailable.
 
 ## Use a relay
 
@@ -63,33 +53,22 @@ Run the relay on a host that can accept inbound TCP connections:
   --listen 3333
 ```
 
-Then connect clients to it:
-
-```sh
-./build/client --relay relay.example.net:3333 --name matt
-./build/client --relay relay.example.net:3333 --name jesse
-```
+In the desktop app, set the relay address to `relay.example.net` and the relay
+port to `3333` in Preferences, then enter a name and choose Join.
 
 The relay opens a separate server session and peer mesh for each attached user. Clients requesting the same name keep separate sessions; the server assigns a suffix such as `matt-2` to later arrivals. It keeps its roster in memory, does not have a database, and drops a user's in-memory state when that client disconnects. The central server handles names and discovery.
 
 If the chat server goes down, the relay retries it every three seconds. Peer links that are already established may continue to carry live traffic.
 
-The relay port defaults to `3333` when it is omitted from `--relay`. The relay's own `--listen` option has the same default.
+The relay's `--listen` port defaults to `3333`.
 
 ### Optional direct fallback
 
-`--leak-my-ip` lets a relayed terminal client fall back to a direct server connection when the relay is unavailable. It starts a local peer listener, reveals the client address to the server and other peers, and switches back to the relay when it returns.
-
-```sh
-./build/client \
-  --relay relay.example.net:3333 \
-  --host chat.example.net \
-  --port 9000 \
-  --leak-my-ip \
-  --name matt
-```
-
-If `--host` is absent, the fallback assumes that the chat server runs on the relay host at the selected server port, which defaults to `9000`.
+In desktop Preferences, enable "Connect directly if relay fails (reveals your
+IP)" to use the configured server when the relay is unavailable. This reveals
+your address to the server and direct peers. See the
+[desktop guide](desktop.md#relay-and-direct-fallback) for retry behavior and
+voice transitions.
 
 ## Desktop media
 

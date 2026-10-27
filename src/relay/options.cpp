@@ -18,8 +18,8 @@ constexpr const char* kUsage = R"(usage: relay --advertise <host> [options]
   -h, --help              show this message
 
 Names come from the clients: any number of clients may attach, each
-signing in as the name it supplies. Point a client at it with:
-  client --relay <advertise-host>:<listen>
+signing in as the name it supplies. In the desktop app, set the relay
+address to <advertise-host> and relay port to <listen> in Preferences.
 )";
 
 } // namespace

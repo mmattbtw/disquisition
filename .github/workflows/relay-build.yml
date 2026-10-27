@@ -1,0 +1,53 @@
+name: relay build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: relay build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install SQLite on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Install SQLite on macOS
+        if: runner.os == 'macOS'
+        run: brew install sqlite
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_DESKTOP_APP=OFF
+          -DBUILD_LEGACY_TARGETS=ON
+          -DBUILD_TESTING=OFF
+
+      - name: Build relay
+        run: cmake --build build --target relay --parallel
+
+      - name: Prepare relay download
+        run: cp build/relay build/disquisition-relay-${{ matrix.platform }}
+
+      - name: Upload relay
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/disquisition-relay-${{ matrix.platform }}
+          archive: false
+          if-no-files-found: error

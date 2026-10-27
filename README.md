@@ -1,6 +1,6 @@
 # disquisition
 
-Disquisition is a C++20 group chat app with desktop and terminal clients.
+Disquisition is a C++20 group chat app with a desktop client.
 The desktop app supports voice chat and screen sharing. A central server
 handles names and discovery; text messages travel between peers, directly or
 through an optional relay. The server does not store chat history.
@@ -22,12 +22,12 @@ See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
 
-For Linux or macOS, install a C++20 compiler, CMake 3.16+, SQLite 3.24+ and
-ncurses development headers. The first build also needs Git and network access.
+For Linux or macOS, install a C++20 compiler, CMake 3.16+ and SQLite 3.24+
+development headers. The first build also needs Git and network access.
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite ncurses
+brew install cmake sqlite
 ```
 
 Build and run the tests:
@@ -48,19 +48,16 @@ Start the server:
 ./build/server --port 9000 --db chat.db
 ```
 
-Run each client in a separate terminal:
-
-```sh
-./build/client --host 127.0.0.1 --port 9000 --name matt
-./build/client --host 127.0.0.1 --port 9000 --name jesse
-```
+Open the desktop app and set the server address to `127.0.0.1`
+and server port to `9000` in Preferences.
+Leave the relay address blank to connect directly, enter a name and choose Join.
 
 ## Documentation
 
 - [Building and packaging](docs/building.md)
 - [Desktop app](docs/desktop.md)
 - [Servers, peers and relays](docs/networking.md)
-- [Terminal client and command-line reference](docs/command-line.md)
+- [Server and relay command-line reference](docs/command-line.md)
 - [C++ client library](docs/client-library.md)
 - [Git crash course](docs/git_crash_course.md)
 
