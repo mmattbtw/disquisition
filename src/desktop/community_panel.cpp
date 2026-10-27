@@ -546,15 +546,7 @@ void CommunityPanel::buildUi() {
     status_->setObjectName("communityStatus");
     status_->setWordWrap(true);
     layout->addWidget(status_);
-    notificationStatus_ = new QLabel("Notifications muted", this);
-    notificationStatus_->setObjectName("notificationsMuted");
-    notificationStatus_->setVisible(notifications_->settings().muted);
-    layout->addWidget(notificationStatus_);
     addAction(notifications_->muteAction());
-    connect(notifications_, &NotificationCenter::settingsChanged, this,
-            [this](const NotificationSettings& settings) {
-                notificationStatus_->setVisible(settings.muted);
-            });
     status_->setTextFormat(Qt::PlainText);
     auto* network = new QNetworkAccessManager(this);
     auto* fetcher = new MediaFetcher(network, this);

@@ -150,7 +150,6 @@ private:
     ScreenStage* stage_ = nullptr;
     NotificationCenter* notifications_ = nullptr;
     MentionCompleter* mentions_ = nullptr;
-    QLabel* notificationStatus_ = nullptr;
     QMap<QString, QSet<QString>> previousOnline_, previousSharing_;
     PushToTalk pushToTalk_;
     std::map<QString, std::unique_ptr<ScreenDrawingSession>> drawings_;
