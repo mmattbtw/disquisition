@@ -26,10 +26,23 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-`make` runs the configure and build commands. The application targets are
+`make` runs the configure and build commands for the full project, including tests.
+Build just one application with:
+
+```sh
+make desktop  # Desktop client in build-desktop
+make relay    # Relay in build-relay
+```
+
+These targets use separate build directories, disable tests, and configure only
+the requested application. `make desktop BUILD_CHANNEL=staging` selects the staging
+client. Override `DESKTOP_BUILD_DIR` or `RELAY_BUILD_DIR` to choose another output
+directory. `make clean` removes all three build directories.
+
+The CMake application targets are
 `relay` and `disquisition-desktop`. CMake skips the desktop target when its
 Widgets/Multimedia or FFmpeg dependencies are unavailable. Core/Network and
-OpenSSL are required. `make clean` removes the build directory.
+OpenSSL are required.
 
 ## Desktop app
 
