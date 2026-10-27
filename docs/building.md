@@ -4,8 +4,8 @@ Run commands from the repository root unless a section says otherwise.
 
 ## Requirements
 
-Both the desktop app and relay need a C++20 compiler, CMake 3.16+, Qt 6.6+
-Core/Network, and OpenSSL 3+ Crypto.
+Both the desktop app and relay need a C++20 compiler, CMake 3.16+, and OpenSSL 3+
+Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.6+.
 
 The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
 and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, and `libswscale`.
@@ -16,6 +16,37 @@ On macOS with Homebrew:
 
 ```sh
 brew install cmake qt openssl@3 sqlite ffmpeg pkgconf
+```
+
+## Ubuntu VPS relay setup
+
+On Ubuntu 22.04, 24.04, or newer, install the development packages and build:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential cmake qt6-base-dev libssl-dev
+make relay
+./build-relay/relay --listen 3333
+```
+
+The relay uses Qt Core and Network without a GUI or display server. Ubuntu's
+`qt6-base-dev` package supplies `Qt6Config.cmake` and is sufficient for the relay;
+Qt Multimedia, SQLite, and FFmpeg are not needed. Use `make relay` on a VPS;
+plain `make` also configures the desktop and its newer Qt dependencies.
+
+If apt cannot find `qt6-base-dev`, enable Ubuntu's Universe repository:
+
+```sh
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository -y universe
+sudo apt-get update
+sudo apt-get install -y qt6-base-dev
+```
+
+If you already installed Qt outside the package manager, point CMake at it:
+
+```sh
+CMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 make relay
 ```
 
 ## Build and test

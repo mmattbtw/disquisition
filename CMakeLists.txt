@@ -19,7 +19,24 @@ endif()
 
 include(FetchContent)
 include(CTest)
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Network)
+# The headless community transport only needs the Qt base API available in
+# Ubuntu 22.04. The desktop client's multimedia code needs a newer Qt.
+if(BUILD_DESKTOP_APP)
+  set(DISQUISITION_QT_MIN_VERSION 6.6)
+else()
+  set(DISQUISITION_QT_MIN_VERSION 6.2)
+endif()
+find_package(Qt6 ${DISQUISITION_QT_MIN_VERSION} QUIET COMPONENTS Core Network)
+if(NOT Qt6_FOUND)
+  message(FATAL_ERROR
+    "Qt ${DISQUISITION_QT_MIN_VERSION}+ Core/Network development files were not found.\n"
+    "For a relay on Ubuntu 22.04 or newer, install dependencies with:\n"
+    "  sudo apt-get update\n"
+    "  sudo apt-get install build-essential cmake qt6-base-dev libssl-dev\n"
+    "Then run: make relay\n"
+    "For a custom Qt installation, set CMAKE_PREFIX_PATH to its installation prefix "
+    "or Qt6_DIR to the directory containing Qt6Config.cmake.")
+endif()
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 
 # SQLite is only used for local desktop message saving and its tests. A
