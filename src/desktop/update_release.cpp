@@ -50,8 +50,7 @@ std::optional<Release> parseLatestRelease(const QByteArray& json, const QString&
             asset.value("state").toString() != "uploaded") {
             continue;
         }
-        // Only download from this repository's own release, wherever GitHub
-        // then redirects to.
+        // Only download from this repository's own release.
         const QUrl url(asset.value("browser_download_url").toString(), QUrl::StrictMode);
         if (url != QUrl(base + "download/" + tag + "/" + assetName)) {
             return std::nullopt;

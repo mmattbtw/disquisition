@@ -44,8 +44,6 @@ Installation currentInstallation() {
 QList<Replacement> planReplacements(const Installation& installation, QString* error) {
     const QDir payload(installation.payloadDir());
     if (installation.bundle) {
-        // The app in the disk image replaces this one under its current name,
-        // so a renamed app stays renamed.
         const QStringList apps = payload.entryList({"*.app"}, QDir::Dirs | QDir::NoDotAndDotDot);
         if (apps.size() != 1 ||
             !QFileInfo::exists(payload.filePath(apps.first()) + "/Contents/Info.plist")) {
@@ -66,8 +64,7 @@ QList<Replacement> planReplacements(const Installation& installation, QString* e
                                         installation.root + "/" + relative,
                                         installation.backupDir() + "/" + relative});
     }
-    // The app is started again from the same path, so the update must
-    // replace the executable rather than add one somewhere else.
+    // The app restarts from the same path, so the update must replace it.
     const QString executable =
         QDir(installation.root)
             .filePath(QDir(installation.root).relativeFilePath(installation.executable));
@@ -91,8 +88,6 @@ bool applyReplacements(const QList<Replacement>& replacements, QString* error) {
     QList<Step> steps;
     QDir filesystem;
 
-    // Undoes the steps in reverse, so a path is free again before anything
-    // moves back into it.
     const auto rollBack = [&](const QString& reason) {
         QStringList stuck;
         for (auto step = steps.crbegin(); step != steps.crend(); ++step) {
@@ -132,7 +127,6 @@ bool applyReplacements(const QList<Replacement>& replacements, QString* error) {
 }
 
 bool markStaged(const Installation& installation, int build) {
-    // QSaveFile renames the marker into place, so it is never half written.
     QSaveFile marker(installation.stagedMarker());
     return marker.open(QIODevice::WriteOnly) && marker.write(QByteArray::number(build)) > 0 &&
            marker.commit();
@@ -182,7 +176,5 @@ bool startStagedUpdate(const Installation& installation, int currentBuild) {
         qWarning().noquote() << "Could not install build" << *build << "-" << error;
         return false;
     }
-    // If the new build cannot be started, this one carries on, and the new
-    // build runs from the next start.
     return launchInstallation(installation);
 }

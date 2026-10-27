@@ -1349,8 +1349,6 @@ void MainWindow::showPreferences() {
 void MainWindow::checkForUpdates() {
     updateCheckRequested_ = true;
     updater_->check();
-    // A check under way reports when it finishes. A waiting update, which
-    // check() leaves alone, is reported now.
     showUpdateState();
 }
 

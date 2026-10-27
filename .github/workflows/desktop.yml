@@ -15,8 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Production builds update themselves to newer releases, which the release
-      # job below tags main-<run number>. Staging builds have 0 and never update.
+      # Matches the main-<run number> release tag. 0 disables updates.
       DISQUISITION_BUILD_NUMBER: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_number || 0 }}
       # MSVC reads extra flags from CL; /MP compiles each project's sources in
       # parallel instead of one file at a time. Other compilers ignore it.

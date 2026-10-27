@@ -15,13 +15,6 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 
-// Keeps a production build up to date with the latest main release.
-//
-// A check asks GitHub for the latest release. If it is newer than this
-// build, its archive for this platform is downloaded beside the
-// installation and extracted.
-// startStagedUpdate() installs it the next time the app starts, so an
-// update never interrupts a call, or restart() installs it right away.
 class Updater final : public QObject {
     Q_OBJECT
 

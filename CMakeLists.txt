@@ -119,7 +119,6 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_notifications PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_notifications PUBLIC Qt6::Gui)
 
-    # Kept apart from the widgets so it can be tested without a display.
     add_library(desktop_update STATIC
       include/desktop/update_install.h
       include/desktop/update_release.h
@@ -183,8 +182,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_picker.cpp
       src/desktop/voice_engine.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
-    # Released Windows builds open without a console window. Development and
-    # staging builds keep one, so their log shows in the terminal.
+    # No console window in release builds; dev and staging keep it for logs.
     if(DISQUISITION_BUILD_CHANNEL STREQUAL "production")
       set_target_properties(disquisition-desktop PROPERTIES WIN32_EXECUTABLE ON)
     endif()

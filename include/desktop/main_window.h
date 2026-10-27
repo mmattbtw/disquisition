@@ -163,7 +163,6 @@ private:
     QPushButton* updateButton_ = nullptr;
     Updater* updater_ = nullptr;
     bool automaticUpdates_ = true;
-    // Set while a check the user asked for runs, so its result is shown.
     bool updateCheckRequested_ = false;
     NotificationCenter* notifications_ = nullptr;
     MentionCompleter* mentionCompleter_ = nullptr;

@@ -11,11 +11,9 @@
 
 namespace {
 
-// Late enough that the build this one replaced at startup has quit, and its
-// files left in the backup folder can be removed.
+// Late enough that the build replaced at startup has quit and unlocked its files.
 constexpr int kFirstCheckDelayMs = 15 * 1000;
 constexpr int kCheckIntervalMs = 6 * 60 * 60 * 1000;
-// A request is abandoned after this long without receiving any data.
 constexpr int kTransferTimeoutMs = 30 * 1000;
 
 QNetworkRequest gitHubRequest(const QUrl& url) {
@@ -75,8 +73,6 @@ void Updater::check() {
     if (!enabled() || busy() || state_ == State::Ready || state_ == State::Installed) {
         return;
     }
-    // Every check starts clean. This also removes the files the last
-    // update replaced, which Windows keeps locked until that app quits.
     if (!QDir(installation_.workDir).removeRecursively()) {
         fail("Files from the last update in " + QDir::toNativeSeparators(installation_.workDir) +
              " could not be removed.");
@@ -157,8 +153,6 @@ void Updater::receiveRelease(QNetworkReply* reply) {
 }
 
 void Updater::download() {
-    // The work folder sits beside the installation, so failing to create it
-    // means the update could not be installed either.
     if (!QDir().mkpath(installation_.payloadDir())) {
         setState(State::ManualInstall);
         return;
@@ -219,8 +213,6 @@ void Updater::extract() {
     const QString archive = archivePath();
     const QString payload = installation_.payloadDir();
 #if defined(Q_OS_MACOS)
-    // Copy out only the app: the disk image also holds the Applications
-    // shortcut and the installer window's background.
     const QString mount = installation_.workDir + "/mount";
     QDir().mkpath(mount);
     runTool("/usr/bin/hdiutil",
@@ -244,8 +236,7 @@ void Updater::extract() {
                         {mount + "/" + apps.first(), payload + "/" + apps.first()}, detach);
             });
 #elif defined(Q_OS_WIN)
-    // Windows' own tar reads zip archives. Another tar earlier on PATH,
-    // such as the one Git installs, may not.
+    // Git's tar, often first on PATH, can't read zip archives.
     runTool(QDir(qEnvironmentVariable("SystemRoot")).filePath("System32/tar.exe"),
             {"-xf", QDir::toNativeSeparators(archive), "-C", QDir::toNativeSeparators(payload)},
             [this](bool extracted) { finishExtracting(extracted); });
@@ -261,7 +252,6 @@ void Updater::finishExtracting(bool extracted) {
         fail("Could not extract " + releaseAssetName() + ".");
         return;
     }
-    // Check now that the update can be installed, rather than at startup.
     QString error;
     if (planReplacements(installation_, &error).isEmpty()) {
         fail("The update cannot be installed: " + error + ".");

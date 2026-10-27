@@ -19,9 +19,6 @@ else()
     "Invalid DISQUISITION_BUILD_CHANNEL '${DISQUISITION_BUILD_CHANNEL}'; choose development, staging, or production")
 endif()
 
-# The desktop workflow stamps production builds with its run number, which
-# also tags their release (main-<number>). Unstamped builds never update
-# themselves, so production cannot replace a local or staging app.
 set(DISQUISITION_BUILD_NUMBER "0" CACHE STRING
     "Release build number the desktop app updates from; 0 turns updates off")
 set(DISQUISITION_UPDATE_REPOSITORY "mmattbtw/disquisition" CACHE STRING
