@@ -584,14 +584,16 @@ bool Model::validCode(const QString& code) const {
 }
 
 QJsonObject joinIntent(const Identity& peer, const Invite& invite, const QString& name,
-                       const QString& endpoint, const QString& host, const QString& nonce) {
+                       const QString& endpoint, const QString& host, const QString& nonce,
+                       const QString& request) {
     QJsonObject intent{{"community", invite.community},
                        {"peer", peer.id()},
                        {"invite", digest(invite.code.toUtf8())},
                        {"name", name},
                        {"endpoint", endpoint},
                        {"host", host},
-                       {"nonce", nonce.isEmpty() ? randomCode() : nonce}};
+                       {"nonce", nonce.isEmpty() ? randomCode() : nonce},
+                       {"request", request.isEmpty() ? randomCode() : request}};
     intent["proof"] = QString::fromLatin1(
         QMessageAuthenticationCode::hash(canonical(intent), invite.code.toUtf8(),
                                          QCryptographicHash::Sha256)

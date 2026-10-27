@@ -82,7 +82,11 @@ struct Node::Link {
     QSet<QString> claimed;
     QSet<QString> allowed;
     QSet<QString> ready;
-    QSet<QString> synchronizing;
+    QMap<QString, qint64> synchronizing;
+    void beginSynchronization(const QString& cid) {
+        if (!synchronizing.contains(cid))
+            synchronizing.insert(cid, now());
+    }
     QMap<QString, QJsonObject> admissions;
     struct Snapshot {
         QString owner;
@@ -600,6 +604,8 @@ void Node::authorize(Link* link, const QString& cid) {
     if (!writable(link, cid))
         return;
     link->allowed.insert(cid);
+    if (!link->ready.contains(cid))
+        link->beginSynchronization(cid);
     send(link, {{"type", "offer"}, {"community", cid}, {"revision", models_[cid].revision()}});
 }
 
@@ -623,7 +629,7 @@ void Node::sendState(Link* link, const QString& cid) {
     const auto snapshot = models_[cid].toJson();
     const auto operations = snapshot.value("operations").toArray();
     // Established members stay online while exchanging newer metadata.
-    link->synchronizing.insert(cid);
+    link->beginSynchronization(cid);
     send(link, {{"type", "state-begin"},
                 {"community", cid},
                 {"owner", models_[cid].owner},
@@ -764,7 +770,7 @@ void Node::handle(Link* link, const QJsonObject& message) {
         const auto owner = models_.contains(cid) ? models_[cid].owner : pending_[cid].owner;
         if (owner != message.value("owner").toString())
             throw std::runtime_error("community owner mismatch");
-        link->synchronizing.insert(cid);
+        link->beginSynchronization(cid);
         link->snapshots[cid] = {owner, {}, count, 0};
         return;
     }
@@ -892,8 +898,7 @@ bool Node::synchronizing(const QString& cid) const {
     if (now() < recoveringUntil_)
         return true;
     for (auto* link : links_) {
-        const auto peer = link->peer.isEmpty() ? link->expected : link->peer;
-        if (models_.contains(cid) && models_[cid].isMember(peer) &&
+        if (link->hello && models_.contains(cid) && models_[cid].isMember(link->peer) &&
             (!link->ready.contains(cid) || link->synchronizing.contains(cid)))
             return true;
     }
@@ -1244,6 +1249,11 @@ void Node::tick() {
             if (!links_.contains(link))
                 continue;
             bool stalled = false;
+            // A peer answering pings but withholding metadata or its ack must
+            // not keep every admission waiting forever. Close and retry it.
+            for (const auto started : link->synchronizing)
+                if (now() - started > 20000)
+                    stalled = true;
             for (const auto& snapshot : link->snapshots)
                 if (now() - snapshot.started > 20000)
                     stalled = true;

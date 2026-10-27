@@ -363,6 +363,54 @@ void directAdmissionIsolationAndConnectionReuse() {
     largeScreenFrameDelivers(a, b, cid, voice);
 }
 
+void stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever() {
+    QTemporaryDir ad, bd, cd;
+    Node a(ad.path()), b(bd.path()), c(cd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1") &&
+          c.start("carol", "127.0.0.1"));
+    const auto cid = a.createCommunity("bounded metadata wait");
+    const auto invitation = a.invite(cid);
+    b.joinCommunity(invitation);
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    for (auto* socket : b.findChildren<QSslSocket*>())
+        socket->blockSignals(true);
+    a.edit(cid, "rename", {{"name", "unacknowledged update"}});
+    CHECK(a.synchronizing(cid));
+    c.joinCommunity(invitation);
+    CHECK(until([&] { return a.communities()[cid].isMember(c.peerId()); }, 24000));
+    CHECK(!a.online(cid).contains(b.peerId()));
+}
+
+void stalledUnauthenticatedMemberDoesNotBlockAdmissions() {
+    QTemporaryDir ad, bd, cd;
+    Node a(ad.path()), b(bd.path()), c(cd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1") &&
+          c.start("carol", "127.0.0.1"));
+    const auto cid = a.createCommunity("unreachable member");
+    const auto invitation = a.invite(cid);
+    b.joinCommunity(invitation);
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+
+    const auto oldPort = b.port();
+    b.stop();
+    QTcpServer stalled;
+    CHECK(stalled.listen(QHostAddress::LocalHost, oldPort));
+    CHECK(until([&] { return stalled.hasPendingConnections(); }));
+    auto* socket = stalled.nextPendingConnection();
+    CHECK(socket != nullptr);
+    // This endpoint accepts TCP but never authenticates as Bob. It must not
+    // suspend all admissions while Alice repeatedly retries the stale route.
+    c.joinCommunity(invitation);
+    CHECK(until([&] { return c.online(cid).size() == 2 && a.online(cid).size() == 2; }, 4000));
+    CHECK(a.communities()[cid].isMember(c.peerId()));
+}
+
 void localAuthorityDoesNotDependOnPeerSynchronization() {
     QTemporaryDir ad, bd;
     Node a(ad.path()), b(bd.path());
@@ -474,6 +522,31 @@ void voiceMovesRequireAdminAndPreserveMuteState() {
     CHECK(until([&] { return moved == 1 && a.presence(cid, b.peerId()).voiceChannel == destination; }));
     CHECK(b.presence(cid, b.peerId()).muted && b.presence(cid, b.peerId()).deafened);
     CHECK(!b.presence(cid, b.peerId()).sharing);
+}
+
+void repeatedRejoinUsesExistingPeerConnection() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    diagnostics(a);
+    diagnostics(b);
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("rejoining");
+    const auto invitation = a.invite(cid);
+    b.joinCommunity(invitation);
+    CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    const auto shared = a.createCommunity("keep the connection");
+    b.joinCommunity(a.invite(shared));
+    CHECK(until([&] { return a.online(shared).size() == 2 && b.online(shared).size() == 2; }));
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        b.edit(cid, "leave", {});
+        if (attempt == 0)
+            CHECK(until([&] { return !a.communities()[cid].isMember(b.peerId()); }));
+        // Later attempts deliberately rejoin before the previous leave is acknowledged.
+        b.joinCommunity(invitation);
+        CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+        CHECK(a.online(shared).size() == 2 && b.online(shared).size() == 2);
+        CHECK(a.connectionCount() == 1 && b.connectionCount() == 1);
+    }
 }
 
 void leavingAndDeletingPropagateWithoutInterruptingOtherCommunities() {
@@ -741,6 +814,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "TLS backend unavailable: %s\n", backend.toUtf8().constData());
         return 77;
     }
+    stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever();
+    stalledUnauthenticatedMemberDoesNotBlockAdmissions();
     localAuthorityDoesNotDependOnPeerSynchronization();
     relayRejectsInvalidAndRetiredOptions();
     directAdmissionIsolationAndConnectionReuse();
@@ -748,6 +823,7 @@ int main(int argc, char** argv) {
     relayDiagnosticsAreReportedOnceAcrossRetries();
     metadataUpdatesKeepMembersOnlineAndVoiceConnected();
     voiceMovesRequireAdminAndPreserveMuteState();
+    repeatedRejoinUsesExistingPeerConnection();
     leavingAndDeletingPropagateWithoutInterruptingOtherCommunities();
     relayHostMigrationAndReconnection();
     returningHostSynchronizesBeforeAcceptingInvites();

@@ -93,7 +93,7 @@ private:
 
 QJsonObject joinIntent(const Identity& peer, const Invite& invite, const QString& name,
                        const QString& endpoint, const QString& host = {},
-                       const QString& nonce = {});
+                       const QString& nonce = {}, const QString& request = {});
 bool validEndpoint(const QString& endpoint);
 // Relay settings accept a hostname, host:port, or the internal relay:// URI.
 QString normalizeRelayEndpoint(const QString& address);

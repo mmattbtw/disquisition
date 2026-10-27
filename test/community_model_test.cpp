@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QMessageAuthenticationCode>
 #include <QSslCertificate>
 #include <QTemporaryDir>
 #include <cstdio>
@@ -315,6 +316,95 @@ void leavingBlocksConcurrentHostAdmissionsAndEdits() {
     CHECK(group.model.revision() == stale.revision());
 }
 
+void separateJoinAttemptsOnTheSameConnectionHaveDistinctSignedRequests() {
+    Group group;
+    const auto intent = joinIntent(group.bob, group.invite, "bob", "tcp://127.0.0.1:9002",
+                                   group.alice.id(), "unchanged TLS challenge");
+    group.model.admit(group.alice, intent);
+    group.model.change(group.bob, "leave", {});
+    CHECK(!intent.value("request").toString().isEmpty());
+    const auto retry = joinIntent(group.bob, group.invite, "bob", "tcp://127.0.0.1:9002",
+                                  group.alice.id(), "unchanged TLS challenge",
+                                  intent.value("request").toString());
+    CHECK(intent == retry); // Retransmission of one attempt stays idempotent.
+    const auto next = joinIntent(group.bob, group.invite, "bob", "tcp://127.0.0.1:9002",
+                                 group.alice.id(), "unchanged TLS challenge");
+    CHECK(intent != next);
+    CHECK(group.model.acceptsIntent(group.alice.id(), next));
+    CHECK(!group.model.acceptsIntent(group.alice.id(), intent));
+    group.model.admit(group.alice, next);
+    CHECK(Model::fromJson(group.model.toJson()).isMember(group.bob.id()));
+}
+
+void legacyJoinIntentsWithoutRequestIdsRemainValidAndReplayProtected() {
+    Group group;
+    auto legacy = joinIntent(group.bob, group.invite, "bob", "tcp://127.0.0.1:9002");
+    legacy.remove("request");
+    legacy.remove("proof");
+    legacy.remove("signature");
+    legacy["proof"] = QString::fromLatin1(
+        QMessageAuthenticationCode::hash(canonical(legacy), group.code.toUtf8(),
+                                         QCryptographicHash::Sha256).toHex());
+    legacy = signedObject(legacy, group.bob, "disquisition/community-join/v1\n");
+    CHECK(group.model.acceptsIntent(group.alice.id(), legacy));
+    group.model.admit(group.alice, legacy);
+    group.model = Model::fromJson(group.model.toJson());
+    CHECK(group.model.isMember(group.bob.id()));
+    group.model.change(group.bob, "leave", {});
+    CHECK(!group.model.acceptsIntent(group.alice.id(), legacy));
+    group.join(group.bob, "new client");
+    CHECK(group.model.isMember(group.bob.id()));
+}
+
+void rejoiningThroughAStaleHostMergesTheSignedDepartureFirst() {
+    Group group;
+    group.join(group.bob, "bob");
+    auto returningPeer = group.model;
+    const auto oldSnapshot = group.model.toJson();
+    returningPeer.change(group.bob, "leave", {});
+    const auto newIntent = joinIntent(group.bob, group.invite, "returning bob",
+                                     "tcp://127.0.0.1:9010");
+    CHECK(group.model.isMember(group.bob.id())); // Host missed the departure.
+    CHECK(group.model.merge(returningPeer.toJson()));
+    CHECK(!group.model.isMember(group.bob.id()));
+    CHECK(group.model.acceptsIntent(group.alice.id(), newIntent));
+    group.model.admit(group.alice, newIntent);
+    returningPeer.merge(group.model.toJson());
+    CHECK(returningPeer.isMember(group.bob.id()));
+    CHECK(returningPeer.members[group.bob.id()].endpoint == "tcp://127.0.0.1:9010");
+    returningPeer.merge(oldSnapshot);
+    CHECK(returningPeer.isMember(group.bob.id()));
+    // A second leave/rejoin must supersede both departures after a restart.
+    returningPeer = Model::fromJson(returningPeer.toJson());
+    returningPeer.change(group.bob, "leave", {});
+    group.model.merge(returningPeer.toJson());
+    group.join(group.bob, "back again");
+    returningPeer.merge(group.model.toJson());
+    CHECK(returningPeer.isMember(group.bob.id()));
+    CHECK(returningPeer.members[group.bob.id()].name == "back again");
+}
+
+void aHostCannotReplayTheOriginalJoinInsideSignedHistoryAfterALeave() {
+    Group group;
+    const auto intent = joinIntent(group.bob, group.invite, "bob", "tcp://127.0.0.1:9002");
+    group.model.admit(group.alice, intent);
+    group.model.change(group.bob, "leave", {});
+    const auto rejoin = group.model.admit(group.alice,
+        joinIntent(group.bob, group.invite, "bob again", "tcp://127.0.0.1:9002"));
+    auto snapshot = group.model.toJson();
+    auto operations = snapshot.value("operations").toArray();
+    for (qsizetype index = 0; index < operations.size(); ++index) {
+        if (operations[index].toObject() != rejoin)
+            continue;
+        auto replay = rejoin;
+        replay["data"] = QJsonObject{{"intent", intent}};
+        operations[index] = signedObject(replay, group.alice,
+                                         "disquisition/community-operation/v1\n");
+    }
+    snapshot["operations"] = operations;
+    CHECK(!Model::fromJson(snapshot).isMember(group.bob.id()));
+}
+
 void onlyOwnerCanDeleteAndTombstonesSurviveMergesAndPersistence() {
     Group group;
     group.join(group.bob, "bob");
@@ -375,6 +465,10 @@ int main(int argc, char** argv) {
     removingHostPreservesItsPreviouslyAcceptedAdmissions();
     leavingOnlyRemovesTheAuthorAndAllowsFreshAdmission();
     leavingBlocksConcurrentHostAdmissionsAndEdits();
+    separateJoinAttemptsOnTheSameConnectionHaveDistinctSignedRequests();
+    legacyJoinIntentsWithoutRequestIdsRemainValidAndReplayProtected();
+    rejoiningThroughAStaleHostMergesTheSignedDepartureFirst();
+    aHostCannotReplayTheOriginalJoinInsideSignedHistoryAfterALeave();
     onlyOwnerCanDeleteAndTombstonesSurviveMergesAndPersistence();
     std::puts("community_model_test: ok");
 }
