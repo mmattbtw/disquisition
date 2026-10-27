@@ -96,6 +96,26 @@ if(BUILD_DESKTOP_APP)
     pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
+    add_library(desktop_penguins STATIC
+      src/desktop/chat_color.cpp src/desktop/penguin_overlay.cpp
+      src/desktop/penguin_sprites.cpp)
+    target_include_directories(desktop_penguins PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_penguins PUBLIC Qt6::Widgets)
+    qt_add_resources(desktop_penguins penguins
+      PREFIX "/penguins"
+      BASE resources/penguins
+      FILES
+        resources/penguins/walk/1.png resources/penguins/walk/2.png
+        resources/penguins/walk/3.png resources/penguins/walk/4.png
+        resources/penguins/walk/5.png resources/penguins/walk/6.png
+        resources/penguins/walk/7.png resources/penguins/walk/8.png)
+    if(APPLE)
+      target_sources(desktop_penguins PRIVATE src/desktop/mac_penguin_overlay.mm)
+      find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
+      target_link_libraries(desktop_penguins PRIVATE ${APPKIT_FRAMEWORK})
+    elseif(WIN32)
+      target_link_libraries(desktop_penguins PRIVATE user32)
+    endif()
     # GIF search, media links and image transfer, kept apart from the
     # widgets so they can be tested without a display.
     add_library(desktop_media STATIC
@@ -174,7 +194,7 @@ if(BUILD_DESKTOP_APP)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_protocol chat_recent_messages desktop_media desktop_notifications desktop_screen
+      chat_protocol chat_recent_messages desktop_media desktop_penguins desktop_notifications desktop_screen
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -354,6 +374,18 @@ if(BUILD_TESTING AND TARGET desktop_media)
   target_link_libraries(desktop_media_test PRIVATE desktop_media)
   add_test(NAME desktop_media_test COMMAND desktop_media_test)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_penguins)
+  add_executable(penguin_overlay_test test/penguin_overlay_test.cpp)
+  target_link_libraries(penguin_overlay_test PRIVATE desktop_penguins)
+  if(APPLE)
+    set_source_files_properties(test/penguin_overlay_test.cpp PROPERTIES LANGUAGE OBJCXX)
+    target_link_libraries(penguin_overlay_test PRIVATE ${APPKIT_FRAMEWORK})
+  endif()
+  add_test(NAME penguin_overlay_test COMMAND penguin_overlay_test)
+  set_tests_properties(penguin_overlay_test PROPERTIES
+    TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_notifications)

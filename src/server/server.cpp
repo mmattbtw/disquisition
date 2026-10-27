@@ -287,6 +287,9 @@ bool Server::handleFrames(Client& client) {
             case MsgType::ScreenFrame:
                 handleScreenFrame(client, message);
                 break;
+            case MsgType::PenguinSprite:
+                handlePenguinSprite(client, message);
+                break;
             default:
                 reject(client, "unexpected message");
                 break;
@@ -333,6 +336,9 @@ void Server::handleLogin(Client& client, const Message& message) {
     for (const Client& other : clients_) {
         if (&other != &client && other.authenticated) {
             send(client, peerMessage(MsgType::Peer, addressOf(other)));
+            if (!other.sprite.empty()) {
+                for (const auto& frame : spriteMessages(other.sprite, other.name)) send(client, frame);
+            }
             if (other.sharingScreen) {
                 send(client, Message{MsgType::ScreenShare, {other.name, "1"}});
             }
@@ -369,6 +375,22 @@ void Server::handleStore(Client& client, const Message& message) {
     }
 
     // Accept legacy storage frames without retaining or logging their contents.
+}
+
+void Server::handlePenguinSprite(Client& client, const Message& message) {
+    if (!client.authenticated) {
+        reject(client, "sign in first");
+        return;
+    }
+    if (!client.incomingSprite.accept(message)) {
+        reject(client, "invalid sprite transfer");
+        return;
+    }
+    if (!client.incomingSprite.complete()) return;
+    client.sprite = client.incomingSprite.data();
+    client.incomingSprite = {};
+    // The sender cannot choose whose sprite to replace.
+    for (const auto& frame : spriteMessages(client.sprite, client.name)) broadcast(frame, &client);
 }
 
 void Server::handleFetchHistory(Client& client) {

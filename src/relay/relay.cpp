@@ -364,6 +364,7 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::Speaking:
         case MsgType::ScreenShare:
         case MsgType::ScreenFrame:
+        case MsgType::PenguinSprite:
             sendToClient(user, message);
             break;
 
@@ -405,6 +406,7 @@ void Relay::handleClientMessage(User& user, const Message& message) {
         case MsgType::ScreenShare:
         case MsgType::ScreenWatch:
         case MsgType::ScreenFrame:
+        case MsgType::PenguinSprite:
             if (user.serverReady && !user.server.failed()) {
                 user.server.send(message);
             }

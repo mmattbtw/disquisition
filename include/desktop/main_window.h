@@ -3,6 +3,7 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
+#include <QMap>
 #include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -27,6 +28,8 @@ class ChatMedia;
 class GifPicker;
 class GifSearch;
 class MediaFetcher;
+class PenguinOverlay;
+class QAction;
 class MentionCompleter;
 class NotificationCenter;
 struct NotificationSettings;
@@ -83,6 +86,8 @@ private:
     void handlePeerMessage(QTcpSocket* socket, const chat::Message& message);
     void sendFrame(QTcpSocket* socket, const chat::Message& message);
     void sendVoiceState();
+    void publishSprite(bool sendReset = false);
+    void receiveSprite(const chat::Message& message);
     void receiveChat(const chat::Message& message);
     QStringList memberNames() const;
     void showNotificationSettings(const NotificationSettings& settings);
@@ -157,6 +162,13 @@ private:
     MentionCompleter* mentionCompleter_ = nullptr;
     QMediaDevices* mediaDevices_ = nullptr;
     ScreenStage* stage_ = nullptr;
+    PenguinOverlay* penguins_ = nullptr;
+    QAction* penguinsAction_ = nullptr;
+    bool penguinsUnlocked_ = false;
+    bool showPenguins_ = false;
+    bool penguinsWander_ = true;
+    int penguinsIdleMinutes_ = 10;
+    QMap<QString, chat::SpriteTransfer> spriteTransfers_;
 
     QTcpSocket server_;
     QTcpSocket relayProbe_;

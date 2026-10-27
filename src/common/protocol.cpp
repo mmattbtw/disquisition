@@ -248,6 +248,56 @@ Message peerImageMessage(const ImageChunk& chunk) {
                     std::to_string(chunk.count), chunk.data}};
 }
 
+bool SpriteTransfer::accept(const Message& message, bool fromServer) {
+    const std::size_t offset = fromServer ? 1 : 0;
+    auto invalid = [this] {
+        *this = {};
+        return false;
+    };
+    if (message.type != MsgType::PenguinSprite || message.fields.size() < offset ||
+        (fromServer && (message.fields[0].empty() || message.fields[0].size() > kMaxNameLength + 20))) {
+        return invalid();
+    }
+    if (message.fields.size() == offset) {
+        *this = {};
+        return true;
+    }
+    if (message.fields.size() != offset + 3) return invalid();
+    std::uint32_t index = 0, count = 0;
+    const auto& bytes = message.fields[offset + 2];
+    if (!parseU32(message.fields[offset], index) || !parseU32(message.fields[offset + 1], count) ||
+        count == 0 || count > kMaxSpriteChunks || index >= count || bytes.empty() ||
+        bytes.size() > kImageChunkSize) return invalid();
+    if (index == 0) {
+        data_.clear();
+        next_ = 0;
+        count_ = count;
+    }
+    if (index != next_ || count != count_ || data_.size() + bytes.size() > kMaxSpriteBytes) {
+        return invalid();
+    }
+    data_ += bytes;
+    ++next_;
+    return true;
+}
+
+std::vector<Message> spriteMessages(const std::string& data, const std::string& sender) {
+    if (data.size() > kMaxSpriteBytes || sender.size() > kMaxNameLength + 20) return {};
+    std::vector<Message> messages;
+    const std::size_t count = (data.size() + kImageChunkSize - 1) / kImageChunkSize;
+    for (std::size_t index = 0; index < std::max<std::size_t>(1, count); ++index) {
+        Message message{MsgType::PenguinSprite, {}};
+        if (!sender.empty()) message.fields.push_back(sender);
+        if (!data.empty()) {
+            message.fields.push_back(std::to_string(index));
+            message.fields.push_back(std::to_string(count));
+            message.fields.push_back(data.substr(index * kImageChunkSize, kImageChunkSize));
+        }
+        messages.push_back(std::move(message));
+    }
+    return messages;
+}
+
 bool parsePeerData(const Message& message, PeerData& out) {
     if (message.type != MsgType::PeerData || message.fields.size() != 4)
         return false;

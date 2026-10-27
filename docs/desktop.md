@@ -27,6 +27,62 @@ Preferences. Saved connection settings take precedence over these defaults.
 For your own server, set the server address and port in Preferences. Use Cmd+,
 on macOS to open it. Set the relay address, or leave it blank to connect directly.
 
+## Desktop penguins
+
+Desktop penguins are off and hidden from Preferences and the menu until you
+type `/waddleon` in chat. This enables them and permanently unlocks their
+controls on your device. After unlocking, use **Desktop penguins** in the
+disquisition menu or Preferences to turn them on or off. Once enabled, joining
+the server puts a little Club Penguin character for you and every connected
+member along the bottom of each display. They wander above other
+applications, including when the chat window is minimized. Names appear below
+the penguins. Their colors match their text chat colors, including named shades
+and xterm-256 colors. Your `/color` command updates your penguin immediately;
+other people's colors update when they send a text or image message. Until
+their color is known, their penguin uses the default mint. Positions are local
+to each desktop.
+
+New text messages appear in speech bubbles above their sender for 5 to 12 seconds.
+Penguins stop to speak, and a new message replaces that person's current bubble.
+Long messages show a shortened preview; the full message stays in chat. Saved
+history and system notices do not create bubbles. Leaving or losing the server
+connection clears the overlay until you reconnect.
+
+Penguins disappear after 10 minutes without a text or image message and return
+when that person sends another message. New arrivals get the same grace period.
+In Preferences, set **hide inactive penguins after** to a different number of
+minutes, or **Never** to keep everyone visible. Voice activity, saved history,
+and color changes do not reset the timeout. Hiding and reopening the overlay
+does not reset it either.
+
+The overlay lets mouse clicks and keyboard input pass through to your apps.
+Toggle **Desktop penguins** in the disquisition menu, or use Preferences.
+Uncheck **Let penguins wander** to keep characters still while retaining chat
+bubbles. macOS Reduce Motion and Windows animation settings also stop wandering.
+These choices are saved between launches. The sprites are included in the app.
+
+After unlocking, the **custom sprite** dropdown in Preferences lets you choose
+**Custom images** and upload two images: **Standing**, facing forward, and
+**Walking**, facing left. The walking image flips when moving right. Both images
+keep their original colors and represent you on everyone's desktop. Other members
+use Club Penguin by default, or their own uploaded sprites. Your images are sent
+to the server and shared with current members and new arrivals while you are
+connected. Transparent PNGs work best; JPEG, WebP and GIF are
+also accepted, using the first frame of animated images. Choose files under
+10 MB and no larger than 4096 by 4096 pixels. The app saves resized copies when
+you save Preferences, so you can move or delete the originals. Cancel discards
+changes. Choose **Off (Club Penguin)** to restore the bundled penguins without
+losing your uploaded images.
+
+Sprite synchronization requires a server and relay built from this version.
+The server associates uploads with your assigned name and forgets them when you
+leave. Your saved images are announced again when you reconnect. Turning custom
+sprites off restores your Club Penguin sprite for everyone.
+
+On macOS, the overlay joins Spaces and can appear over fullscreen applications.
+On Linux, always-on-top behavior depends on the window manager; Wayland
+compositors may restrict overlays above other applications.
+
 ## Voice chat
 
 Voice stays off until you choose Join voice.

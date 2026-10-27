@@ -41,6 +41,8 @@ private:
         std::uint16_t peerPort = 0;
         std::uint16_t voicePort = 0;
         bool sharingScreen = false;
+        SpriteTransfer incomingSprite;
+        std::string sprite;
         std::set<std::string> watching; // sharers whose frames this client receives
         bool authenticated = false;
         bool closing = false; // drop once `out` is flushed
@@ -63,6 +65,7 @@ private:
     void handleScreenShare(Client& client, const Message& message);
     void handleScreenWatch(Client& client, const Message& message);
     void handleScreenFrame(Client& client, const Message& message);
+    void handlePenguinSprite(Client& client, const Message& message);
     void endScreenShare(const Client& sharer);
     void reject(Client& client, const std::string& reason);
 

@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -282,6 +283,114 @@ void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) 
 void signIn(RawSession& session, const std::string& name) {
     CHECK(session.connection.send(chat::Message{chat::MsgType::Login, {name, "1", ""}}));
     CHECK(session.next(chat::MsgType::LoginOk).fields.at(0) == name);
+}
+
+void testPersonalSprites(std::uint16_t serverPort, std::uint16_t relayPort) {
+    using chat::MsgType;
+    using chat::Message;
+    RawSession alice(serverPort);
+    signIn(alice, "sprite_alice");
+    RawSession bob(relayPort);
+    signIn(bob, "sprite_bob");
+    const std::string aliceSprite(chat::kImageChunkSize + 42, '\0');
+    const std::string bobSprite(chat::kImageChunkSize * 2 + 1, 'b');
+    auto upload = [](RawSession& session, const std::string& data) {
+        for (const auto& frame : chat::spriteMessages(data)) CHECK(session.connection.send(frame));
+    };
+    auto receive = [](RawSession& session, const std::string& name, const std::string& data) {
+        chat::SpriteTransfer transfer;
+        for (;;) {
+            const auto frame = session.next(MsgType::PenguinSprite);
+            CHECK(!frame.fields.empty() && frame.fields[0] == name);
+            CHECK(transfer.accept(frame, true));
+            if (transfer.complete()) break;
+        }
+        CHECK(transfer.data() == data);
+    };
+    // HistoryEnd is a barrier after login and its sprite replay. Collect every
+    // sprite before it, including any reset, without relying on arbitrary sleeps.
+    auto snapshot = [](RawSession& session) {
+        CHECK(session.connection.send(Message{MsgType::FetchHistory, {}}));
+        std::map<std::string, chat::SpriteTransfer> transfers;
+        std::map<std::string, std::string> sprites;
+        bool finished = false;
+        CHECK(waitFor([&] {
+            Message frame;
+            while (session.connection.poll(frame)) {
+                if (frame.type == MsgType::HistoryEnd) {
+                    finished = true;
+                    return true;
+                }
+                if (frame.type != MsgType::PenguinSprite) continue;
+                CHECK(!frame.fields.empty());
+                auto& transfer = transfers[frame.fields[0]];
+                CHECK(transfer.accept(frame, true));
+                if (transfer.complete()) {
+                    if (transfer.data().empty()) sprites.erase(frame.fields[0]);
+                    else sprites[frame.fields[0]] = transfer.data();
+                }
+            }
+            return false;
+        }));
+        CHECK(finished);
+        return sprites;
+    };
+    upload(alice, aliceSprite);
+    receive(bob, "sprite_alice", aliceSprite);
+    upload(bob, bobSprite);
+    receive(alice, "sprite_bob", bobSprite);
+
+    RawSession directNewcomer(serverPort);
+    signIn(directNewcomer, "sprite_direct_new");
+    const auto directSprites = snapshot(directNewcomer);
+    CHECK(directSprites.size() == 2);
+    CHECK(directSprites.at("sprite_alice") == aliceSprite);
+    CHECK(directSprites.at("sprite_bob") == bobSprite);
+    RawSession relayNewcomer(relayPort);
+    signIn(relayNewcomer, "sprite_relay_new");
+    CHECK(snapshot(relayNewcomer) == directSprites);
+
+    const std::string replacement(chat::kImageChunkSize + 1, 'r');
+    const auto update = chat::spriteMessages(replacement);
+    CHECK(alice.connection.send(update.front()));
+    // Ensure the first chunk was processed before the newcomer joins.
+    CHECK(alice.connection.send(Message{MsgType::FetchHistory, {}}));
+    alice.next(MsgType::HistoryEnd);
+    RawSession duringUpload(serverPort);
+    signIn(duringUpload, "sprite_during");
+    CHECK(snapshot(duringUpload).at("sprite_alice") == aliceSprite);
+    CHECK(alice.connection.send(update.back()));
+    receive(bob, "sprite_alice", replacement);
+
+    upload(bob, {});
+    receive(alice, "sprite_bob", {});
+    RawSession afterReset(relayPort);
+    signIn(afterReset, "sprite_after_reset");
+    const auto resetSprites = snapshot(afterReset);
+    CHECK(resetSprites.size() == 1 && resetSprites.at("sprite_alice") == replacement);
+
+    // A claimed sender is not part of the client message format.
+    RawSession attacker(serverPort);
+    signIn(attacker, "sprite_attacker");
+    CHECK(attacker.connection.send(Message{MsgType::PenguinSprite,
+                                          {"sprite_alice", "0", "1", "fake"}}));
+    CHECK(attacker.next(MsgType::Error).fields.at(0) == "invalid sprite transfer");
+    alice.connection.stop();
+    CHECK(waitFor([&] {
+        Message message;
+        while (bob.connection.poll(message)) {
+            if (message.type == MsgType::PeerLeft &&
+                message.fields == std::vector<std::string>{"sprite_alice"}) return true;
+        }
+        return false;
+    }));
+    RawSession rejoined(serverPort);
+    signIn(rejoined, "sprite_alice");
+    RawSession afterDeparture(serverPort);
+    signIn(afterDeparture, "sprite_after_leave");
+    CHECK(snapshot(afterDeparture).empty());
+    upload(rejoined, aliceSprite);
+    receive(bob, "sprite_alice", aliceSprite);
 }
 
 void testRelayDuplicateNames(std::uint16_t relayPort) {
@@ -576,6 +685,7 @@ int main(int argc, char** argv) {
 
     testServerRejectsUnexpectedFrames(gServer.port);
     testVoiceAndRelayHealth(gServer.port, gRelay.port);
+    testPersonalSprites(gServer.port, gRelay.port);
     testScreenSharing(gServer.port, gRelay.port);
     testRelayPeerData(gServer.port, gRelay.port);
     testRelayDuplicateNames(gRelay.port);
