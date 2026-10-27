@@ -204,6 +204,15 @@ In **User Settings**, enable local saving, choose a SQLite file, and
 optionally set a maximum message count. History stays on this device and is
 separate for each community and text channel.
 
+Local saving is off by default. Leaving the maximum blank keeps every saved
+message. The app loads the 1,000 most recent saved messages for the selected
+channel; the database can retain more than the UI displays.
+
+The SQLite `saved_messages` table stores `timestamp` in Unix seconds, `sender`,
+`body`, and `color`, with `community_id`, `channel_id`, and `message_id` identifying
+the message's scope. Saved history stays on this device and is not replayed to
+other members.
+
 ## Notifications and mentions
 
 Desktop notifications, unread badges, and taskbar alerts apply to incoming
