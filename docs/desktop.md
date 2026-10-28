@@ -15,9 +15,11 @@ Applications, and eject the disk image.
 ## Connect and join a community
 
 Enter a name and select **Connect**. Fresh installs use `relay.disquisition.app`
-on port 3333. Under **User Settings**, enter a relay hostname, optionally
-followed by a port. No `relay://` prefix is needed. Saved settings take precedence;
-clear the relay field to use direct connections and advertise a LAN address.
+on port 3333. Once your display name is saved, the app connects automatically
+at startup using your saved connection settings. Under **User Settings**, enter a
+relay hostname, optionally followed by a port. No `relay://` prefix is needed.
+Saved settings take precedence; clear the relay field to use direct connections
+and advertise a LAN address.
 
 Select **Create** for a new community, or **Join** to paste an invite or open its
 QR image. **Invite** lets owners and admins copy an invite link or save a QR code.

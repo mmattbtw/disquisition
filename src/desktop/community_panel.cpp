@@ -89,8 +89,9 @@ QString text(const std::string& value) {
 constexpr double kVoiceActivityLevel = 180; // RMS, about -45 dBFS.
 constexpr int kVoiceActivityHoldFrames = 10;
 void paintSpeaking(QWidget* row, bool speaking) {
-    row->setStyleSheet(speaking ? QStringLiteral("background-color: rgba(94, 190, 126, 70);"
-                                                 "border-radius: 6px;")
+    row->setStyleSheet(speaking ? QStringLiteral("QWidget#voiceParticipantRow {"
+                                                 "background-color: rgba(94, 190, 126, 70);"
+                                                 "border-radius: 6px; }")
                                 : QString());
 }
 QPushButton* button(const QString& title, const char* name, QWidget* parent) {
@@ -384,6 +385,11 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     for (const auto& argument : QCoreApplication::arguments())
         if (argument.startsWith("disquisition://join/"))
             pendingLink_ = argument;
+    if (node_ && !name_->text().trimmed().isEmpty())
+        QTimer::singleShot(0, this, [this] {
+            if (!online_)
+                connectNode();
+        });
 }
 
 CommunityPanel::~CommunityPanel() {
@@ -1700,7 +1706,10 @@ void CommunityPanel::refresh() {
                 auto label = peer.name;
                 if (peer.id == node_->peerId())
                     label += " (you)";
-                auto* participant = new QTreeWidgetItem(child, {label});
+                // The profile button paints the name. A display label on the
+                // tree item would show through its transparent background.
+                auto* participant = new QTreeWidgetItem(child);
+                participant->setData(0, Qt::AccessibleTextRole, label);
                 participant->setFlags(Qt::ItemIsEnabled);
                 participant->setData(0, Qt::UserRole + 2, peer.id);
                 participant->setData(0, Qt::UserRole + 3, activity);
@@ -1709,6 +1718,7 @@ void CommunityPanel::refresh() {
                 // Leave room for the avatar plus both the row and item insets.
                 participant->setSizeHint(0, QSize(160, 48));
                 auto* row = new QWidget(tree_);
+                row->setObjectName("voiceParticipantRow");
                 row->setAccessibleName(label + ", " + activity.join(", "));
                 auto* line = new QHBoxLayout(row);
                 line->setContentsMargins(0, 4, 4, 4);

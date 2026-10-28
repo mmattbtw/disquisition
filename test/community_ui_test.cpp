@@ -8,6 +8,8 @@
 #include <QDeadlineTimer>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QHostAddress>
 #include <QInputDialog>
@@ -48,6 +50,14 @@
 #include "desktop/penguin_sprites.h"
 #include "desktop/screen_stage.h"
 #include "fake_relay_audio.h"
+// Stable identities keep the custom-sprite screenshot probes in separate lanes
+// and positions, rather than randomly obscuring one another.
+static void seedIdentity(const QString& directory, char seed) {
+    CHECK(QDir().mkpath(directory));
+    QFile key(directory + "/identity.key");
+    CHECK(key.open(QIODevice::WriteOnly));
+    CHECK(key.write(QByteArray(32, seed)) == 32);
+}
 static bool until(const std::function<bool()>& test) {
     QDeadlineTimer deadline(6000);
     while (!deadline.hasExpired()) {
@@ -71,14 +81,24 @@ int main(int argc, char** argv) {
     notifications.muted = false;
     QSettings notificationSettings;
     notifications.save(notificationSettings);
+    // A fresh identity with no saved display name waits for the user to connect.
+    {
+        CommunityPanel fresh(nullptr, directory.path() + "/fresh");
+        QApplication::processEvents();
+        CHECK(fresh.findChild<QPushButton*>("communityConnect")->text() == "Connect");
+    }
     const auto data = directory.path() + "/community";
     app.setProperty("communityDataDirectory", data);
-    QSettings().setValue("community/name", "Alice");
     QSettings().setValue("community/host", "127.0.0.1");
+    QSettings().setValue("community/relay", "");
     QTcpServer reservation;
     CHECK(reservation.listen(QHostAddress::LocalHost, 0));
+    seedIdentity(data, 1);
     {
         community::Store store(data);
+        auto profile = store.profile();
+        profile.name = "Alice";
+        store.saveProfile(profile);
         auto model = community::Model::create(store.identity(), "After hours", "Alice",
                                               "tcp://127.0.0.1:" +
                                                   QString::number(reservation.serverPort()));
@@ -89,12 +109,17 @@ int main(int argc, char** argv) {
                       {"topic", "What are you listening to?"}});
         store.save(model);
     }
+    reservation.close();
     MainWindow window;
     window.resize(1140, 780);
     window.show();
     auto* panel = window.findChild<CommunityPanel*>();
     CHECK(panel);
     CHECK(window.centralWidget() == panel);
+    auto* online = panel->findChild<QPushButton*>("communityConnect");
+    CHECK(online);
+    // Returning clients connect from their persisted profile without a click.
+    CHECK(until([&] { return online->text() == "Disconnect"; }));
     CHECK(!panel->findChild<QPushButton*>("communityMute")->isVisible());
     CHECK(!panel->findChild<QPushButton*>("communityDeafen")->isVisible());
     CHECK(!panel->findChild<QPushButton*>("communityShare")->isVisible());
@@ -112,19 +137,13 @@ int main(int argc, char** argv) {
         }
         categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
-        CHECK(relay && relay->text() == "relay.disquisition.app");
+        CHECK(relay && relay->text().isEmpty());
         auto* linkedMedia = dialog->findChild<QCheckBox*>("communityShowLinkedMedia");
         CHECK(linkedMedia && linkedMedia->isChecked());
         dialog->findChild<QLineEdit*>("userDisplayName")->setText("Unsaved name");
         dialog->reject();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
-    // This isolated fixture uses direct loopback connections.
-    QSettings().setValue("community/relay", "");
-    auto* online = panel->findChild<QPushButton*>("communityConnect");
-    CHECK(online);
-    reservation.close();
-    online->click();
     auto* manage = panel->findChild<QPushButton*>("communityManage");
     CHECK(until([&] { return manage->isEnabled(); }));
     auto* node = panel->findChild<community::Node*>();
@@ -257,7 +276,7 @@ int main(int argc, char** argv) {
     CHECK(panel->findChild<QPushButton*>("communityShare")->isVisible());
     bool selfUnderChannel = false;
     for (QTreeWidgetItemIterator item(tree); *item; ++item)
-        if ((*item)->text(0) == "Alice (you)" && (*item)->parent() &&
+        if ((*item)->data(0, Qt::UserRole + 2).toString() == node->peerId() && (*item)->parent() &&
             (*item)->parent()->data(0, Qt::UserRole + 1).toString() == voiceChannel) {
             selfUnderChannel = true;
             const auto activity = (*item)->data(0, Qt::UserRole + 3).toStringList();
@@ -266,6 +285,9 @@ int main(int argc, char** argv) {
             auto* row = tree->itemWidget(*item, 0);
             auto* profile = row->findChild<QPushButton*>("voiceMemberProfile");
             CHECK(profile && profile->iconSize() == QSize(28, 28));
+            CHECK(profile->text() == "Alice (you)");
+            CHECK((*item)->text(0).isEmpty()); // No second name painted beneath the row widget.
+            CHECK((*item)->data(0, Qt::AccessibleTextRole).toString() == "Alice (you)");
             CHECK(row->height() >= profile->iconSize().height());
             CHECK(profile->height() >= profile->iconSize().height());
             CHECK(row->rect().contains(profile->geometry()));
@@ -308,6 +330,7 @@ int main(int argc, char** argv) {
     QSettings().setValue("voice/pushToTalk", false);
     // Incoming channel messages pass through mention detection and update the app badge.
     QTemporaryDir remoteData;
+    seedIdentity(remoteData.path(), 2);
     community::Node remote(remoteData.path());
     CHECK(remote.start("Bob", "127.0.0.1"));
     remote.joinCommunity(node->invite(cid));
@@ -508,6 +531,7 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return overlayPixels(Qt::red) > 1000; }));
     {
         QTemporaryDir lateData;
+        seedIdentity(lateData.path(), 4);
         community::Node late(lateData.path());
         QByteArray lateSprite;
         ImageAssembler lateReceiver;
@@ -596,6 +620,7 @@ int main(int argc, char** argv) {
         auto* row = speakingRow();
         return row && row->styleSheet().contains("background-color");
     }));
+    CHECK(speakingRow()->styleSheet().contains("QWidget#voiceParticipantRow"));
     CHECK(tree->grab().save("community-voice-speaking.png"));
     for (int index = 0; index < 12; ++index)
         CHECK(remote.sendPacket(cid, voiceChannel, "audio",
