@@ -14,6 +14,8 @@
 #include <optional>
 #include <utility>
 
+#include "common/media_limits.h"
+
 class QTcpSocket;
 
 // Images people drop into the chat travel to every peer as PeerImage chunks.

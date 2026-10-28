@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <vector>
 
-#include "common/protocol.h"
+#include "common/media_limits.h"
 
 namespace {
 

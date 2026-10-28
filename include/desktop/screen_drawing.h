@@ -9,7 +9,7 @@
 #include <QWidget>
 #include <optional>
 
-#include "common/protocol.h"
+#include "common/drawing_protocol.h"
 #include "desktop/share_source.h"
 
 class QPainter;
@@ -32,6 +32,8 @@ public:
         qint64 seen = 0;
     };
     explicit ScreenDrawing(QObject* parent = nullptr);
+    void setAuthorNames(const QHash<QString, QString>& names) { authorNames_ = names; emit updated(); }
+    QString authorName(const QString& id) const { return authorNames_.value(id, id); }
     void setIdentity(const QString& name, bool owner);
     void setChatColor(const QColor& color);
     QColor chatColor() const { return chatColor_; }
@@ -90,6 +92,7 @@ private:
     bool enabled_ = false;
     bool banned_ = false;
     Tool tool_ = Tool::None;
+    QHash<QString, QString> authorNames_;
     QString localName_;
     bool owner_ = false;
     QColor chatColor_{"#87ffaf"};

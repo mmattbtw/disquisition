@@ -24,38 +24,15 @@ jobs:
         include:
           - os: ubuntu-24.04
             artifact: disquisition-desktop-linux-x64
-            audio-module: alsa
-            re-library: libre.a
-            static-openssl: 'ON'
             openssl-root: ''
           - os: macos-15
             artifact: disquisition-desktop-macos-arm64
-            audio-module: coreaudio
-            re-library: libre.a
-            static-openssl: 'ON'
             openssl-root: /opt/homebrew/opt/openssl@3
           - os: windows-2022
             artifact: disquisition-desktop-windows-x64
-            audio-module: wasapi
-            re-library: re-static.lib
-            static-openssl: 'ON'
             openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check out libre
-        uses: actions/checkout@v4
-        with:
-          repository: baresip/re
-          ref: v4.11.0
-          path: third_party/re
-
-      - name: Check out baresip
-        uses: actions/checkout@v4
-        with:
-          repository: baresip/baresip
-          ref: v4.11.0
-          path: third_party/baresip
 
       # install-qt-action otherwise picks the newest Python, which on Windows is
       # 3.15 and has no py7zr dependency wheels yet, so they compile every run.
@@ -72,15 +49,15 @@ jobs:
           cache: true
           setup-python: false
 
-      - name: Install Linux voice dependencies
+      - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libssl-dev libxcb1-dev libpulse-dev pkg-config libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
+          sudo apt-get install -y libsqlite3-dev libssl-dev libxcb1-dev pkg-config libavcodec-dev libavutil-dev libpulse-dev libswresample-dev libswscale-dev
 
-      - name: Install macOS voice dependencies
+      - name: Install macOS desktop dependencies
         if: runner.os == 'macOS'
-        run: brew install openssl@3 ffmpeg pkgconf
+        run: brew install openssl@3 sqlite ffmpeg pkgconf
 
       # The Windows caches below hold binaries built with the runner image's MSVC
       # and vcpkg ports tree, so key them on the image: a cache from an older
@@ -102,7 +79,7 @@ jobs:
           path: C:/vcpkg/installed
           key: vcpkg-installed-${{ steps.image.outputs.id }}-openssl-sqlite3-pkgconf
 
-      - name: Install Windows voice dependencies
+      - name: Install Windows desktop dependencies
         if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
@@ -125,6 +102,7 @@ jobs:
         run: |
           $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
           "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$installed/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install prebuilt Windows FFmpeg
         if: runner.os == 'Windows'
@@ -142,62 +120,35 @@ jobs:
           Expand-Archive $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'ffmpeg')
           $ffmpeg = Join-Path $env:RUNNER_TEMP "ffmpeg/$package"
           "FFMPEG_ROOT=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$ffmpeg/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      # libre and baresip are pinned, so reuse the built baresip.exe until the
-      # image (MSVC, vcpkg OpenSSL) or the build inputs in this workflow change.
-      - name: Restore Windows baresip build
-        id: baresip-cache
-        if: runner.os == 'Windows'
-        uses: actions/cache/restore@v4
-        with:
-          path: build-baresip/output
-          key: baresip-${{ steps.image.outputs.id }}-${{ hashFiles('.github/workflows/desktop.yml', 'cmake/bundled-baresip/**') }}
-
-      - name: Build libre
-        if: steps.baresip-cache.outputs.cache-hit != 'true'
-        run: |
-          cmake -S third_party/re -B build-re -DCMAKE_BUILD_TYPE=Release -DLIBRE_BUILD_SHARED=OFF -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/baresip-prefix"
-          cmake --build build-re --config Release --target re --parallel
-          cmake --install build-re --config Release
-
-      - name: Build baresip with voice modules
-        if: steps.baresip-cache.outputs.cache-hit != 'true'
-        run: |
-          cmake -S cmake/bundled-baresip -B build-baresip -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/baresip-prefix" -DBARESIP_SOURCE_DIR="${{ github.workspace }}/third_party/baresip" -DBARESIP_AUDIO_MODULE=${{ matrix.audio-module }} -DRE_INCLUDE_DIR="${{ github.workspace }}/baresip-prefix/include/re" -DRE_LIBRARY="${{ github.workspace }}/baresip-prefix/lib/${{ matrix.re-library }}" -DOPENSSL_USE_STATIC_LIBS=${{ matrix.static-openssl }} -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}"
-          cmake --build build-baresip --config Release --target baresip_exe --parallel
-
-      - name: Save Windows baresip build
-        if: runner.os == 'Windows' && steps.baresip-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: build-baresip/output
-          key: ${{ steps.baresip-cache.outputs.cache-primary-key }}
 
       - name: Configure
         if: runner.os != 'Windows'
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
 
-      - name: Build desktop client
-        run: cmake --build build --config Release --target disquisition-desktop --parallel
+      - name: Build desktop and all tests
+        run: cmake --build build --config Release --parallel
+
+      - name: Test community and media behavior
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package Linux build
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist/licenses
-          cp build/disquisition-desktop build-baresip/output/baresip dist/
-          cp third_party/baresip/LICENSE dist/licenses/baresip.LICENSE
-          cp third_party/re/LICENSE dist/licenses/libre.LICENSE
+          cp build/disquisition-desktop dist/
           cp /usr/share/doc/libssl-dev/copyright dist/licenses/OpenSSL.LICENSE
+          cp build/_deps/community_zxing-src/LICENSE dist/licenses/ZXing.LICENSE
           tar -czf disquisition-desktop-linux-x64.tar.gz -C dist .
 
       - name: Package macOS app
@@ -205,10 +156,9 @@ jobs:
         run: |
           app=$(cat build/disquisition-app-bundle-Release.txt)
           mkdir -p "$app/Contents/Resources/licenses"
-          cp third_party/baresip/LICENSE "$app/Contents/Resources/licenses/baresip.LICENSE"
-          cp third_party/re/LICENSE "$app/Contents/Resources/licenses/libre.LICENSE"
           cp "$(brew --prefix openssl@3)/LICENSE.txt" "$app/Contents/Resources/licenses/OpenSSL.LICENSE"
-          scripts/package-macos.sh "$app" build-baresip/output/baresip disquisition-desktop-macos-arm64.dmg
+          cp build/_deps/community_zxing-src/LICENSE "$app/Contents/Resources/licenses/ZXing.LICENSE"
+          scripts/package-macos.sh "$app" disquisition-desktop-macos-arm64.dmg
 
       - name: Package Windows app
         if: runner.os == 'Windows'
@@ -216,12 +166,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item build/Release/disquisition-desktop.exe dist/
-          Copy-Item build-baresip/output/baresip.exe dist/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" dist/
           New-Item -ItemType Directory -Path dist/licenses | Out-Null
-          Copy-Item third_party/baresip/LICENSE dist/licenses/baresip.LICENSE
-          Copy-Item third_party/re/LICENSE dist/licenses/libre.LICENSE
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/share/openssl/copyright" dist/licenses/OpenSSL.LICENSE
+          Copy-Item build/_deps/community_zxing-src/LICENSE dist/licenses/ZXing.LICENSE
           windeployqt --release --no-translations dist/disquisition-desktop.exe
           Copy-Item "$env:FFMPEG_ROOT/bin/*.dll" dist/
           Copy-Item "$env:FFMPEG_ROOT/LICENSE.txt" dist/licenses/FFmpeg.LICENSE

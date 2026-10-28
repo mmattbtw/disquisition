@@ -22,10 +22,11 @@ namespace {
 constexpr const char* kEncoders[] = {"libopus", "opus"};
 // Keeps music clear while staying small next to the video.
 constexpr qint64 kBitrate = 128'000;
-// Enough to ride out packets that video holds up, little enough to stay in
-// step with the picture.
-constexpr qint64 kPrefillUs = 80'000;
-constexpr qint64 kMaxDelayUs = 400'000;
+// Enough to ride out ordinary jitter, little enough to stay in step with the
+// picture.
+constexpr qint64 kPrefillUs = 60'000;
+constexpr qint64 kMaxCushionUs = 200'000;
+constexpr qint64 kSettleUs = 5'000'000;
 constexpr qint64 kSinkBufferUs = 40'000;
 
 // Capture delivers interleaved floats, which libopus takes as they are.
@@ -246,16 +247,21 @@ QByteArray ScreenAudioDecoder::decode(const QByteArray& packet) {
     return pcm;
 }
 
-PlaybackBuffer::PlaybackBuffer(qsizetype prefill, qsizetype limit, int bytesPerFrame)
-    : cushion_(prefill), growth_(prefill / 4 / bytesPerFrame * bytesPerFrame), limit_(limit),
-      bytesPerFrame_(bytesPerFrame) {
+PlaybackBuffer::PlaybackBuffer(qsizetype prefill, qsizetype maxCushion, qsizetype settle,
+                               int bytesPerFrame)
+    : prefill_(prefill), cushion_(prefill), growth_(prefill / 4 / bytesPerFrame * bytesPerFrame),
+      maxCushion_(maxCushion), settle_(settle), bytesPerFrame_(bytesPerFrame) {
     open(QIODevice::ReadOnly | QIODevice::Unbuffered);
 }
 
 void PlaybackBuffer::push(const QByteArray& pcm) {
     QMutexLocker lock(&mutex_);
+    if (starving_) {
+        cushion_ = std::min(cushion_ + starved_ + growth_, maxCushion_);
+        starving_ = false;
+    }
     pending_ += pcm;
-    if (pending_.size() > limit_) {
+    if (pending_.size() > 2 * cushion_) {
         const qsizetype excess = pending_.size() - cushion_;
         pending_.remove(0, excess - excess % bytesPerFrame_);
     }
@@ -271,49 +277,104 @@ qint64 PlaybackBuffer::readData(char* data, qint64 size) {
         copied = std::min(static_cast<qsizetype>(size), pending_.size());
         std::memcpy(data, pending_.constData(), static_cast<size_t>(copied));
         pending_.remove(0, copied);
-        // Ran dry: wait for a bigger cushion to build up.
         if (copied < size) {
             playing_ = false;
-            cushion_ = std::min(cushion_ + growth_, limit_ / 2);
+            starving_ = true;
+            starved_ = 0;
+            steady_ = 0;
+            lowest_ = kUnmeasured;
         }
+        else {
+            lowest_ = std::min(lowest_, pending_.size());
+            if ((steady_ += copied) >= settle_) {
+                if (lowest_ > growth_) {
+                    cushion_ = std::max(cushion_ - growth_, prefill_);
+                }
+                steady_ = 0;
+                lowest_ = kUnmeasured;
+            }
+        }
+    }
+    if (starving_) {
+        starved_ += size - copied;
     }
     std::memset(data + copied, 0, static_cast<size_t>(size - copied));
     return size;
 }
 
 ScreenAudioPlayer::ScreenAudioPlayer(QObject* parent) : QObject(parent) {
+    thread_.setObjectName("Share playback");
+    worker_ = new QObject;
+    worker_->moveToThread(&thread_);
+    thread_.start(QThread::TimeCriticalPriority);
     setOutputDevice({});
 }
 
-ScreenAudioPlayer::~ScreenAudioPlayer() = default;
+ScreenAudioPlayer::~ScreenAudioPlayer() {
+    // Sinks belong to the playback thread and must stop there.
+    QMetaObject::invokeMethod(worker_, [this] { streams_.clear(); },
+                              Qt::BlockingQueuedConnection);
+    thread_.quit();
+    thread_.wait();
+    delete worker_;
+}
+
+void ScreenAudioPlayer::post(std::function<void()> work) {
+    QMetaObject::invokeMethod(worker_, std::move(work), Qt::QueuedConnection);
+}
 
 void ScreenAudioPlayer::setOutputDevice(const QString& id) {
-    device_ = findAudioDevice(QMediaDevices::audioOutputs(), id, QMediaDevices::defaultAudioOutput());
-    format_ = supportedAudioFormat(device_);
+    const QAudioDevice device =
+        findAudioDevice(QMediaDevices::audioOutputs(), id, QMediaDevices::defaultAudioOutput());
+    const QAudioFormat format = supportedAudioFormat(device);
+    post([this, device, format] {
+        device_ = device;
+        format_ = format;
+        streams_.clear();
+    });
+}
+
+void ScreenAudioPlayer::setVolume(const QString& sharer, qreal volume) {
+    post([this, sharer, volume] {
+        volumes_[sharer] = volume;
+        if (const auto stream = streams_.find(sharer); stream != streams_.end()) {
+            stream->second.sink->setVolume(volume);
+        }
+    });
 }
 
 void ScreenAudioPlayer::play(const QString& sharer, const QByteArray& packet) {
-    auto stream = streams_.find(sharer);
-    if (stream == streams_.end()) {
-        if (!format_.isValid()) {
-            return;
+    post([this, sharer, packet] {
+        if (!streams_.contains(sharer)) {
+            start(sharer);
         }
-        Stream started;
-        started.decoder = std::make_unique<ScreenAudioDecoder>(format_);
-        started.buffer = std::make_unique<PlaybackBuffer>(format_.bytesForDuration(kPrefillUs),
-                                                          format_.bytesForDuration(kMaxDelayUs),
-                                                          format_.bytesPerFrame());
-        started.sink = std::make_unique<QAudioSink>(device_, format_);
-        started.sink->setBufferSize(format_.bytesForDuration(kSinkBufferUs));
-        started.sink->start(started.buffer.get());
-        if (started.sink->error() != QAudio::NoError) {
-            return;
+        if (const auto stream = streams_.find(sharer); stream != streams_.end()) {
+            stream->second.buffer->push(stream->second.decoder->decode(packet));
         }
-        stream = streams_.emplace(sharer, std::move(started)).first;
+    });
+}
+
+void ScreenAudioPlayer::start(const QString& sharer) {
+    if (!format_.isValid()) {
+        return;
     }
-    stream->second.buffer->push(stream->second.decoder->decode(packet));
+    Stream started;
+    started.decoder = std::make_unique<ScreenAudioDecoder>(format_);
+    started.buffer = std::make_unique<PlaybackBuffer>(
+        format_.bytesForDuration(kPrefillUs), format_.bytesForDuration(kMaxCushionUs),
+        format_.bytesForDuration(kSettleUs), format_.bytesPerFrame());
+    started.sink = std::make_unique<QAudioSink>(device_, format_);
+    started.sink->setBufferSize(format_.bytesForDuration(kSinkBufferUs));
+    if (const auto volume = volumes_.find(sharer); volume != volumes_.end()) {
+        started.sink->setVolume(volume->second);
+    }
+    started.sink->start(started.buffer.get());
+    if (started.sink->error() != QAudio::NoError) {
+        return;
+    }
+    streams_.emplace(sharer, std::move(started));
 }
 
 void ScreenAudioPlayer::remove(const QString& sharer) {
-    streams_.erase(sharer);
+    post([this, sharer] { streams_.erase(sharer); });
 }

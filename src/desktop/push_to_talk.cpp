@@ -70,9 +70,13 @@ PushToTalk::~PushToTalk() {
 #endif
 }
 
-void PushToTalk::start(quint32 key) {
+void PushToTalk::start(quint32 key, bool globally) {
     stop();
     key_ = key;
+    if (!globally) {
+        qApp->installEventFilter(this);
+        return;
+    }
 #if defined(Q_OS_WIN)
     global_ = true;
 #elif defined(Q_OS_MACOS)

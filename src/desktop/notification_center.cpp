@@ -49,6 +49,13 @@ void NotificationCenter::setSettings(const NotificationSettings& settings) {
     // What waits was let through by the old settings.
     pacer_.clear();
     pacerTimer_.stop();
+    if (settings_.muted) {
+        if (notified_) {
+            notified_ = false;
+            notifier_->withdrawAll();
+        }
+        setBadge({});
+    }
     const QSignalBlocker blocker(muteAction_);
     muteAction_->setChecked(settings_.muted);
     emit settingsChanged(settings_);
@@ -56,7 +63,8 @@ void NotificationCenter::setSettings(const NotificationSettings& settings) {
 
 void NotificationCenter::messageReceived(const QString& sender, const QString& text,
                                          Mentioned mentioned) {
-    if (windowInView()) return;
+    // Notifications are opt-in: no badge, title marker, or alert while muted.
+    if (settings_.muted || windowInView()) return;
     const MessageAttention attention = attentionFor(settings_, mentioned);
     UnreadBadge badge = badge_;
     badge.unread = true;

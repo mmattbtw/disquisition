@@ -13,34 +13,46 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux-x64
+          - os: ubuntu-22.04
+            platform: linux-x64-ubuntu22.04
           - os: macos-latest
             platform: macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install SQLite on Linux
+      # Exercise the same distro Qt packages used on a headless Ubuntu VPS.
+      - name: Install Linux relay dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev
+          sudo apt-get install -y build-essential cmake qt6-base-dev libssl-dev
 
-      - name: Install SQLite on macOS
+      - name: Install OpenSSL on macOS
         if: runner.os == 'macOS'
-        run: brew install sqlite
+        run: brew install openssl@3
+
+      - name: Install Qt for communities
+        if: runner.os == 'macOS'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          cache: true
 
       - name: Configure
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_DESKTOP_APP=OFF
-          -DBUILD_LEGACY_TARGETS=ON
+          -DBUILD_RELAY=ON
           -DBUILD_TESTING=OFF
 
-      - name: Build relay
-        run: cmake --build build --target relay --parallel
+      - name: Build and smoke-test relay
+        run: |
+          cmake --build build --target relay --parallel
+          ./build/relay --help
 
       - name: Prepare relay download
         run: cp build/relay build/disquisition-relay-${{ matrix.platform }}

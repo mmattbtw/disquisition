@@ -21,7 +21,7 @@ public:
     // `out` may stay empty while the encoder buffers. Returns false when no
     // encoder can be opened.
     bool encode(const QImage& image, const QSize& maxSize, int fps, qint64 ptsMs, QByteArray& out,
-                bool& keyframe);
+                bool& keyframe, bool requestKeyframe = false);
     // The FFmpeg encoder in use, such as "h264_nvenc".
     QString name() const;
 

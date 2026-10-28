@@ -6,6 +6,10 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QSlider>
+#include <QWidgetAction>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
@@ -54,13 +58,18 @@ void StreamView::mouseDoubleClickEvent(QMouseEvent*) {
         emit doubleClicked();
 }
 
-StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
+void StreamView::contextMenuEvent(QContextMenuEvent* event) {
+    emit menuRequested(event->globalPos());
+}
+
+StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QString& label)
     : QFrame(parent), name_(name), own_(own) {
     setObjectName("streamTile");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    auto* title = new QLabel(own ? name + " (you)" : name, this);
-    title->setObjectName("streamName");
+    title_ = new QLabel(this);
+    title_->setTextFormat(Qt::PlainText);
+    title_->setObjectName("streamName");
     auto* live = new QLabel("LIVE", this);
     live->setObjectName("live");
     stats_ = new QLabel(this);
@@ -74,7 +83,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
 
     auto* header = new QHBoxLayout;
     header->setSpacing(6);
-    header->addWidget(title);
+    header->addWidget(title_);
     header->addWidget(live);
     header->addWidget(stats_, 1);
     header->addWidget(focusButton_);
@@ -82,14 +91,16 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     header->addWidget(stopButton_);
 
     invitation_ = new QWidget(this);
-    auto* inviteText = new QLabel(name + " is sharing their screen", invitation_);
-    inviteText->setAlignment(Qt::AlignCenter);
-    inviteText->setWordWrap(true);
+    invitationText_ = new QLabel(invitation_);
+    invitationText_->setTextFormat(Qt::PlainText);
+    invitationText_->setAlignment(Qt::AlignCenter);
+    invitationText_->setWordWrap(true);
+    setDisplayName(label.isEmpty() ? name : label);
     auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
     auto* invitationLayout = new QVBoxLayout(invitation_);
     invitationLayout->addStretch();
-    invitationLayout->addWidget(inviteText);
+    invitationLayout->addWidget(invitationText_);
     invitationLayout->addWidget(watchButton, 0, Qt::AlignHCenter);
     invitationLayout->addStretch();
 
@@ -113,14 +124,22 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     connect(focusButton_, &QPushButton::clicked, this, &StreamTile::focusClicked);
     connect(fullscreenButton_, &QPushButton::clicked, this, &StreamTile::fullscreenClicked);
     connect(view_, &StreamView::doubleClicked, this, &StreamTile::fullscreenClicked);
+    connect(view_, &StreamView::menuRequested, this, &StreamTile::showVolumeMenu);
 
     setWatching(own);
+}
+
+void StreamTile::setDisplayName(const QString& label) {
+    label_ = label;
+    title_->setText(own_ ? label + " (you)" : label);
+    invitationText_->setText(label + " is sharing their screen");
 }
 
 void StreamTile::setWatching(bool watching) {
     body_->setCurrentWidget(watching ? static_cast<QWidget*>(view_) : invitation_);
     fullscreenButton_->setVisible(watching);
     stopButton_->setVisible(watching && !own_);
+    watching_ = watching;
     drawingControls_->setVisible(watching);
     if (!watching)
         drawing_->setState(false, 0);
@@ -129,6 +148,35 @@ void StreamTile::setWatching(bool watching) {
     statsClock_.invalidate();
     statsFrames_ = 0;
     statsBytes_ = 0;
+}
+
+void StreamTile::showVolumeMenu(const QPoint& globalPosition) {
+    // Your own share's sound is never played back to you.
+    if (own_ || !watching_)
+        return;
+    QMenu menu(this);
+    auto* row = new QWidget(&menu);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(10, 6, 10, 6);
+    auto* label = new QLabel(row);
+    label->setMinimumWidth(label->fontMetrics().horizontalAdvance("Volume 100%"));
+    auto* slider = new QSlider(Qt::Horizontal, row);
+    slider->setObjectName("streamVolume");
+    slider->setRange(0, 100);
+    slider->setFixedWidth(140);
+    slider->setValue(volume_);
+    label->setText(QString("Volume %1%").arg(volume_));
+    layout->addWidget(label);
+    layout->addWidget(slider);
+    auto* action = new QWidgetAction(&menu);
+    action->setDefaultWidget(row);
+    menu.addAction(action);
+    connect(slider, &QSlider::valueChanged, this, [this, label](int percent) {
+        volume_ = percent;
+        label->setText(QString("Volume %1%").arg(percent));
+        emit volumeChanged(percent);
+    });
+    menu.exec(globalPosition);
 }
 
 void StreamTile::setFocusState(bool available, bool focused) {
@@ -191,17 +239,19 @@ void ScreenStage::refreshEscapeShortcut() {
     escape_->setEnabled(active);
 }
 
-void ScreenStage::addStream(const QString& name, bool own) {
+void ScreenStage::addStream(const QString& name, bool own, const QString& label) {
     if (find(name)) {
         return;
     }
-    auto* tile = new StreamTile(name, own, this);
+    auto* tile = new StreamTile(name, own, this, label);
     connect(tile->drawing(), &ScreenDrawing::changed, this, &ScreenStage::refreshEscapeShortcut);
     connect(tile, &StreamTile::watchClicked, this, [this, name] { emit watchRequested(name); });
     connect(tile, &StreamTile::stopWatchingClicked, this,
             [this, name] { emit stopWatchingRequested(name); });
     connect(tile, &StreamTile::focusClicked, this, [this, name] { toggleFocus(name); });
     connect(tile, &StreamTile::fullscreenClicked, this, [this, name] { toggleFullscreen(name); });
+    connect(tile, &StreamTile::volumeChanged, this,
+            [this, name](int percent) { emit volumeChanged(name, percent); });
     // Your own share comes first, like in a call.
     if (own) {
         tiles_.prepend(tile);
@@ -236,10 +286,22 @@ void ScreenStage::setWatching(const QString& name, bool watching) {
     }
 }
 
+void ScreenStage::setVolume(const QString& name, int percent) {
+    if (auto* tile = find(name))
+        tile->setVolume(percent);
+}
+
 void ScreenStage::setDetail(const QString& name, const QString& detail) {
     if (StreamTile* tile = find(name)) {
         tile->setDetail(detail);
     }
+}
+
+void ScreenStage::setDisplayName(const QString& name, const QString& label) {
+    if (auto* tile = find(name))
+        tile->setDisplayName(label);
+    if (fullscreen_ && fullscreenName_ == name)
+        fullscreen_->window()->setWindowTitle(label + "'s screen");
 }
 
 void ScreenStage::showFrame(const QString& name, const QImage& image, qsizetype encodedBytes) {
@@ -280,7 +342,7 @@ void ScreenStage::toggleFullscreen(const QString& name) {
     // A child window, so it closes along with the app.
     auto* window = new QWidget(this, Qt::Window);
     window->setAttribute(Qt::WA_DeleteOnClose);
-    window->setWindowTitle(name + "'s screen");
+    window->setWindowTitle(tile->displayName() + "'s screen");
     auto* layout = new QVBoxLayout(window);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(new DrawingControls(tile->drawing(), tile->own(), window));
@@ -290,6 +352,7 @@ void ScreenStage::toggleFullscreen(const QString& name) {
     fullscreen_->setImage(tile->image());
     fullscreenName_ = name;
     connect(fullscreen_, &StreamView::doubleClicked, this, &ScreenStage::exitFullscreen);
+    connect(fullscreen_, &StreamView::menuRequested, tile, &StreamTile::showVolumeMenu);
     connect(fullscreen_, &QObject::destroyed, this, [this, view = fullscreen_.data()] {
         if (fullscreen_.isNull() || fullscreen_ == view) {
             fullscreen_.clear();

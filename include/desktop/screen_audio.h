@@ -8,7 +8,10 @@
 #include <QMutex>
 #include <QObject>
 #include <QString>
+#include <QThread>
 
+#include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 
@@ -50,19 +53,22 @@ private:
     std::unique_ptr<State> state_;
 };
 
-// What a sink plays from. Packets arrive unevenly, held up behind video, so
-// playback waits for a cushion of buffered sound, and plays silence rather
-// than running dry, which on Windows replays stale sound. The cushion starts
-// at `prefill` and grows by a quarter of it each time it runs dry, up to half
-// of `limit`, so it settles at what the connection needs. Beyond `limit` the
-// oldest sound is dropped, so the delay cannot grow without bound.
+// What a sink plays from. Packets arrive unevenly, so playback waits for a
+// cushion of buffered sound, and plays silence rather than running dry, which
+// on Windows replays stale sound. The cushion starts at `prefill`. Each time
+// it runs dry it grows by the length of the gap plus a step of a quarter of
+// `prefill`, up to `maxCushion`, so one gap is enough to cover the next like
+// it. After `settle` bytes of steady playback in which it never came within a
+// step of running out, it shrinks by a step, back towards `prefill`. More
+// than twice the cushion is cut back to the cushion, oldest sound first, so a
+// burst after a stall does not linger as delay.
 class PlaybackBuffer final : public QIODevice {
 public:
-    PlaybackBuffer(qsizetype prefill, qsizetype limit, int bytesPerFrame);
+    PlaybackBuffer(qsizetype prefill, qsizetype maxCushion, qsizetype settle, int bytesPerFrame);
     void push(const QByteArray& pcm);
     bool isSequential() const override { return true; }
     // Never empty: a gap is filled with silence.
-    qint64 bytesAvailable() const override { return limit_; }
+    qint64 bytesAvailable() const override { return 2 * maxCushion_; }
 
 protected:
     // The sink may read on its own thread.
@@ -72,32 +78,53 @@ protected:
 private:
     mutable QMutex mutex_;
     QByteArray pending_;
+    const qsizetype prefill_;
     qsizetype cushion_;
     const qsizetype growth_;
-    const qsizetype limit_;
+    const qsizetype maxCushion_;
+    const qsizetype settle_;
     const int bytesPerFrame_;
+    qsizetype steady_ = 0;
+    // The least sound buffered during the current stretch of steady playback.
+    static constexpr qsizetype kUnmeasured = std::numeric_limits<qsizetype>::max();
+    qsizetype lowest_ = kUnmeasured;
+    // Silence played since running dry, until sound arrives again.
+    qsizetype starved_ = 0;
+    bool starving_ = false;
     bool playing_ = false;
 };
 
 // Plays the sound of the shares being watched, each through its own sink.
+// A sink pulls its sound on the thread that made it, and the UI thread stalls
+// while it decodes and paints video, so playback has a thread of its own. The
+// methods are called from the UI thread and hand their work over.
 class ScreenAudioPlayer final : public QObject {
     Q_OBJECT
 public:
     explicit ScreenAudioPlayer(QObject* parent = nullptr);
     ~ScreenAudioPlayer() override;
-    // Applies to shares that start playing afterwards.
+    // Shares already playing restart on the new device.
     void setOutputDevice(const QString& id);
+    // Linear, from 0 to 1. Kept when the sharer's stream restarts.
+    void setVolume(const QString& sharer, qreal volume);
     void play(const QString& sharer, const QByteArray& packet);
     void remove(const QString& sharer);
 
 private:
+    void post(std::function<void()> work);
+    void start(const QString& sharer);
+
     // The sink is declared last so it stops before its buffer goes.
     struct Stream {
         std::unique_ptr<ScreenAudioDecoder> decoder;
         std::unique_ptr<PlaybackBuffer> buffer;
         std::unique_ptr<QAudioSink> sink;
     };
+    QThread thread_;
+    // Lives on thread_. Everything below it is used only there.
+    QObject* worker_ = nullptr;
     QAudioDevice device_;
     QAudioFormat format_;
     std::map<QString, Stream> streams_;
+    std::map<QString, qreal> volumes_;
 };

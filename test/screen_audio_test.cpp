@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "check.h"
-#include "common/protocol.h"
+#include "common/media_limits.h"
 #include "desktop/screen_audio.h"
 #include "desktop/system_audio_capture.h"
 
@@ -118,8 +118,11 @@ QByteArray frames(int count, char first) {
     return pcm;
 }
 
+// Long enough that the cushion never shrinks during a test.
+constexpr qsizetype kNeverSettles = 1 << 20;
+
 void playbackWaitsForItsCushion() {
-    PlaybackBuffer buffer(8 * 4, 16 * 4, 4);
+    PlaybackBuffer buffer(8 * 4, 16 * 4, kNeverSettles, 4);
     buffer.push(frames(4, 1));
     // Short of the cushion: silence, and nothing is used up.
     CHECK(readFrom(buffer, 8) == QByteArray(8, 0));
@@ -127,19 +130,21 @@ void playbackWaitsForItsCushion() {
     CHECK(readFrom(buffer, 8 * 4) == frames(8, 1));
 }
 
-void runningDryPlaysSilenceAndGrowsTheCushion() {
-    PlaybackBuffer buffer(4 * 4, 16 * 4, 4);
+void runningDryGrowsTheCushionByTheGap() {
+    PlaybackBuffer buffer(4 * 4, 16 * 4, kNeverSettles, 4);
     buffer.push(frames(4, 1));
     CHECK(readFrom(buffer, 6 * 4) == frames(4, 1) + QByteArray(2 * 4, 0));
-    // The cushion is now a quarter bigger: 5 frames, not 4.
-    buffer.push(frames(4, 10));
     CHECK(readFrom(buffer, 4) == QByteArray(4, 0));
-    buffer.push(frames(1, 14));
-    CHECK(readFrom(buffer, 5 * 4) == frames(5, 10));
+    // Sound was missing for 3 frames, so the cushion grows by those and a
+    // step: 4 + 3 + 1 = 8 frames.
+    buffer.push(frames(7, 10));
+    CHECK(readFrom(buffer, 4) == QByteArray(4, 0));
+    buffer.push(frames(1, 17));
+    CHECK(readFrom(buffer, 8 * 4) == frames(8, 10));
 }
 
-void theCushionStopsGrowingAtHalfTheLimit() {
-    PlaybackBuffer buffer(4 * 4, 12 * 4, 4);
+void theCushionStopsGrowingAtItsMaximum() {
+    PlaybackBuffer buffer(4 * 4, 6 * 4, kNeverSettles, 4);
     for (int i = 0; i < 5; ++i) {
         buffer.push(frames(8, 1));
         readFrom(buffer, 9 * 4);
@@ -148,11 +153,41 @@ void theCushionStopsGrowingAtHalfTheLimit() {
     CHECK(readFrom(buffer, 6 * 4) == frames(6, 1));
 }
 
-void aBurstIsTrimmedToTheNewestSound() {
-    PlaybackBuffer buffer(4 * 4, 8 * 4, 4);
+void aBurstIsCutBackToTheCushion() {
+    PlaybackBuffer buffer(4 * 4, 8 * 4, kNeverSettles, 4);
     buffer.push(frames(10, 1));
-    // Over the limit, it keeps only a cushion's worth, in whole frames.
+    // More than twice the cushion keeps only a cushion's worth, in whole frames.
     CHECK(readFrom(buffer, 4 * 4) == frames(4, 7));
+}
+
+// Runs a buffer with a 4-frame cushion dry for one frame; the next push grows
+// the cushion to 6.
+void runDryForOneFrame(PlaybackBuffer& buffer) {
+    buffer.push(frames(4, 1));
+    readFrom(buffer, 5 * 4);
+}
+
+void theCushionShrinksWhenItHasRoomToSpare() {
+    PlaybackBuffer buffer(4 * 4, 16 * 4, 8 * 4, 4);
+    runDryForOneFrame(buffer);
+    buffer.push(frames(12, 1));
+    // 8 frames of steady playback never went below 4 buffered, so the cushion
+    // shrinks to 5.
+    readFrom(buffer, 4 * 4);
+    readFrom(buffer, 4 * 4);
+    // 11 frames is more than twice 5 but not twice 6, so it is cut back to 5.
+    buffer.push(frames(7, 30));
+    CHECK(readFrom(buffer, 5 * 4) == frames(5, 32));
+}
+
+void theCushionKeepsItsSizeWhenItIsNeeded() {
+    PlaybackBuffer buffer(4 * 4, 16 * 4, 8 * 4, 4);
+    runDryForOneFrame(buffer);
+    buffer.push(frames(8, 1));
+    // Steady playback that used up everything buffered leaves it at 6.
+    readFrom(buffer, 8 * 4);
+    buffer.push(frames(13, 30));
+    CHECK(readFrom(buffer, 6 * 4) == frames(6, 37));
 }
 
 } // namespace
@@ -162,8 +197,10 @@ int main() {
     decodesToTheDeviceFormat();
     ignoresDamagedPackets();
     playbackWaitsForItsCushion();
-    runningDryPlaysSilenceAndGrowsTheCushion();
-    theCushionStopsGrowingAtHalfTheLimit();
-    aBurstIsTrimmedToTheNewestSound();
+    runningDryGrowsTheCushionByTheGap();
+    theCushionStopsGrowingAtItsMaximum();
+    aBurstIsCutBackToTheCushion();
+    theCushionShrinksWhenItHasRoomToSpare();
+    theCushionKeepsItsSizeWhenItIsNeeded();
     return 0;
 }

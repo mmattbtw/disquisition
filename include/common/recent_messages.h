@@ -15,6 +15,10 @@ struct RecentMessage {
     std::string sender;
     std::string body;
     std::string color;
+    std::string communityId = {};
+    std::string channelId = {};
+    std::string messageId = {};
+    std::string senderId = {};
 };
 
 // Each append is committed before returning. An absent maximum keeps every
@@ -31,6 +35,8 @@ public:
 
     void append(const RecentMessage& message);
     std::vector<RecentMessage> recent(std::size_t limit = displayLimit) const;
+    std::vector<RecentMessage> recent(const std::string& communityId, const std::string& channelId,
+                                      std::size_t limit = displayLimit) const;
 
 private:
     void prune();

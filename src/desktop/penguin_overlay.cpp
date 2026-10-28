@@ -237,6 +237,10 @@ public:
         });
     }
 
+    void setDisplayNames(const QMap<QString, QString>& names) {
+        displayNames_ = names;
+        update();
+    }
     void setMembers(const QStringList& names) {
         scene_.setMembers(names);
         for (auto it = sprites_.begin(); it != sprites_.end();) {
@@ -327,7 +331,7 @@ protected:
                                         spriteSize.width(), spriteSize.height()), image);
                 painter.restore();
 
-                const QString name = metrics.elidedText(it.key(), Qt::ElideRight, 130);
+                const QString name = metrics.elidedText(displayNames_.value(it.key(), it.key()), Qt::ElideRight, 130);
                 const double labelWidth = metrics.horizontalAdvance(name) + 12;
                 const double labelX = qBound(2.0, penguin.x - labelWidth / 2,
                                              qMax(2.0, width() - labelWidth - 2));
@@ -375,6 +379,7 @@ protected:
 
 private:
     PenguinScene scene_;
+    QMap<QString, QString> displayNames_;
     std::array<QImage, 8> frames_;
     QMap<QString, QPair<QImage, QImage>> sprites_;
     QMap<QPair<QRgb, int>, QImage> tinted_;
@@ -419,6 +424,12 @@ void PenguinOverlay::setMembers(QStringList names) {
         else ++it;
     }
     syncScreens();
+}
+
+void PenguinOverlay::setDisplayNames(const QMap<QString, QString>& names) {
+    if (displayNames_ == names) return;
+    displayNames_ = names;
+    for (auto& [screen, window] : windows_) window->setDisplayNames(names);
 }
 
 void PenguinOverlay::setColor(const QString& name, const QColor& color) {
@@ -483,6 +494,7 @@ void PenguinOverlay::syncScreens() {
     for (QScreen* screen : screens) {
         auto& window = windows_[screen];
         if (!window) window = std::make_unique<PenguinOverlayWindow>(screen);
+        window->setDisplayNames(displayNames_);
         window->setWandering(wandering_);
         window->setMembers(visibleMembers_);
         for (auto it = sprites_.cbegin(); it != sprites_.cend(); ++it) {

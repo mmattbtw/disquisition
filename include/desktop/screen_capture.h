@@ -10,13 +10,13 @@
 #include <QSize>
 #include <QString>
 #include <QThreadPool>
-
+#include <QTimer>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
 
-#include "common/protocol.h"
+#include "common/media_limits.h"
 #include "desktop/screen_h264.h"
 #include "desktop/share_source.h"
 #include "desktop/system_audio_capture.h"
@@ -33,11 +33,10 @@ class ScreenAudioEncoder;
 // Requests macOS Screen Recording access when needed. Other platforms return true.
 bool requestScreenRecordingAccess();
 
-
-constexpr qsizetype kScreenChunkBytes = chat::kMaxFrameSize - 256;
-constexpr int kMaxScreenChunks = 64;
-// Frames are skipped while more than this is still queued on the socket, so
-// chat and voice never wait behind more than about 100 ms of video at 5 Mbps.
+constexpr qsizetype kScreenChunkBytes = chat::kScreenChunkBytes;
+constexpr int kMaxScreenChunks = chat::kMaxScreenChunks;
+// Skip the next frame above this backlog. A frame already started is queued in
+// full, so large keyframes cannot lose their remaining chunks halfway through.
 constexpr qint64 kMaxScreenBacklogBytes = 64 * 1024;
 
 // Screen sharing carried in framed TCP messages. Each captured frame is scaled
@@ -58,6 +57,8 @@ public:
     void setFrameRate(int fps) { frameIntervalMs_ = 1000 / qBound(1, fps, 60); }
     void setMaxSize(const QSize& size) { maxSize_ = size; }
     void setBacklogProbe(std::function<qint64()> probe) { backlog_ = std::move(probe); }
+    // A new/reconnecting viewer must be able to decode even a static screen.
+    void requestKeyframe();
 
 signals:
     // Frames depend on the ones before them; keyframes do not.
@@ -79,6 +80,9 @@ private:
     // was opened on and frames are encoded in order.
     QThreadPool encoder_;
     bool encoding_ = false;
+    bool keyframeRequested_ = false;
+    QImage latestImage_;
+    QTimer keyframeTimer_;
     quint64 generation_ = 0;
     // Set while sharing a screen whose frames leave out the mouse pointer.
     QPointer<QScreen> screen_;
@@ -98,7 +102,7 @@ private:
     std::shared_ptr<H264Encoder> h264_;
     QString encoderName_;
     qint64 frameIntervalMs_ = 1000 / 30;
-    QSize maxSize_ {1920, 1080};
+    QSize maxSize_{1920, 1080};
     quint32 nextFrameId_ = 0;
 };
 

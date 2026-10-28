@@ -26,11 +26,13 @@ public:
 
 signals:
     void doubleClicked();
+    void menuRequested(const QPoint& globalPosition);
 
 protected:
     QRectF drawingRect() const override;
     void paintEvent(QPaintEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     QImage image_;
@@ -42,11 +44,16 @@ private:
 class StreamTile final : public QFrame {
     Q_OBJECT
 public:
-    StreamTile(const QString& name, bool own, QWidget* parent = nullptr);
+    StreamTile(const QString& name, bool own, QWidget* parent = nullptr, const QString& label = {});
     QString name() const { return name_; }
     bool own() const { return own_; }
+    QString displayName() const { return label_; }
+    void setDisplayName(const QString& label);
     const QImage& image() const { return view_->image(); }
     void setWatching(bool watching);
+    // The stream's sound, from 0 to 100 percent, set from a menu on the video.
+    void setVolume(int percent) { volume_ = percent; }
+    void showVolumeMenu(const QPoint& globalPosition);
     // `available` is false while the tile is alone on the stage.
     void setFocusState(bool available, bool focused);
     // Shown before the frame statistics, such as the encoder in use.
@@ -59,9 +66,13 @@ signals:
     void stopWatchingClicked();
     void focusClicked();
     void fullscreenClicked();
+    void volumeChanged(int percent);
 
 private:
     QString name_;
+    QString label_;
+    QLabel* title_ = nullptr;
+    QLabel* invitationText_ = nullptr;
     bool own_ = false;
     QString detail_;
     QStackedWidget* body_ = nullptr;
@@ -73,6 +84,8 @@ private:
     QPushButton* focusButton_ = nullptr;
     QPushButton* fullscreenButton_ = nullptr;
     QPushButton* stopButton_ = nullptr;
+    int volume_ = 100;
+    bool watching_ = false;
     QElapsedTimer statsClock_;
     int statsFrames_ = 0;
     qint64 statsBytes_ = 0;
@@ -87,9 +100,11 @@ class ScreenStage final : public QWidget {
 public:
     explicit ScreenStage(QWidget* parent = nullptr);
     // `own` streams are this user's share: always shown, never "watched".
-    void addStream(const QString& name, bool own);
+    void addStream(const QString& name, bool own, const QString& label = {});
     void removeStream(const QString& name);
     void setWatching(const QString& name, bool watching);
+    void setDisplayName(const QString& name, const QString& label);
+    void setVolume(const QString& name, int percent);
     void setDetail(const QString& name, const QString& detail);
     void showFrame(const QString& name, const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing(const QString& name) const;
@@ -97,6 +112,7 @@ public:
 signals:
     void watchRequested(const QString& name);
     void stopWatchingRequested(const QString& name);
+    void volumeChanged(const QString& name, int percent);
     // The first share appeared on an empty, hidden stage.
     void opened();
 

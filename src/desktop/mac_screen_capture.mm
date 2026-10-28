@@ -97,7 +97,6 @@ QString toQString(NSString* text) {
     return QString::fromUtf8(text.UTF8String);
 }
 
-// Direct voice plays through a baresip child process.
 bool isThisAppOrChild(pid_t process) {
     const pid_t self = NSProcessInfo.processInfo.processIdentifier;
     if (process == self) return true;
@@ -165,12 +164,17 @@ QList<ShareSource> windowSources(SCShareableContent* content) {
     QList<ShareSource> sources;
     for (SCWindow* window in content.windows) {
         // Layer 0 holds ordinary windows, not menus, the Dock or overlays.
-        if (window.windowLayer != 0 || window.owningApplication.processID == self ||
+        // Our own windows are included so the app itself can be shared; the
+        // drawing panels are raised above layer 0 and stay out of the list.
+        if (window.windowLayer != 0 ||
             window.frame.size.width < 64 || window.frame.size.height < 64) {
             continue;
         }
         const QString application = toQString(window.owningApplication.applicationName);
         const QString title = toQString(window.title);
+        // Sharing the picker would close the window being captured.
+        if (window.owningApplication.processID == self && title == "Share your screen")
+            continue;
         if (title.isEmpty() && application.isEmpty()) continue;
         ShareSource source;
         source.kind = ShareSource::Kind::Window;
@@ -224,17 +228,25 @@ void MacScreenCapture::startDisplay(quint32 displayId) {
       for (SCDisplay* display in content.displays) {
           if (display.displayID == displayId) {
               *size = CGSizeMake(display.width, display.height);
-              // Exclude our windows, including annotation windows created
-              // after capture starts, so ink is never baked into the video,
-              // and our sound, so voice chat is not sent back to its members.
+              // Exclude our windows so the raised annotation panels are never
+              // baked into the video, but keep ordinary app windows visible in
+              // a full-screen share. Drawing panels live above layer 0. Child
+              // processes are excluded too, so their sound stays out.
+              const pid_t self = NSProcessInfo.processInfo.processIdentifier;
               NSMutableArray<SCRunningApplication*>* excluded = [NSMutableArray array];
               for (SCRunningApplication* application in content.applications) {
                   if (isThisAppOrChild(application.processID))
                       [excluded addObject:application];
               }
+              NSMutableArray<SCWindow*>* excepted = [NSMutableArray array];
+              for (SCWindow* window in content.windows) {
+                  if (window.owningApplication.processID == self && window.windowLayer == 0 &&
+                      window.frame.size.width >= 2 && window.frame.size.height >= 2)
+                      [excepted addObject:window];
+              }
               return [[SCContentFilter alloc] initWithDisplay:display
                                         excludingApplications:excluded
-                                             exceptingWindows:@[]];
+                                             exceptingWindows:excepted];
           }
       }
       return nil;
