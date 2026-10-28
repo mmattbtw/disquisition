@@ -103,11 +103,67 @@ void ignoresDamagedPackets() {
     CHECK(!pcm.isEmpty());
 }
 
+QByteArray readFrom(PlaybackBuffer& buffer, qint64 size) {
+    QByteArray data(size, '\x7f');
+    CHECK(buffer.read(data.data(), size) == size);
+    return data;
+}
+
+// Bytes of one sample frame; values are distinct so order can be checked.
+QByteArray frames(int count, char first) {
+    QByteArray pcm;
+    for (int i = 0; i < count; ++i) {
+        pcm += QByteArray(4, static_cast<char>(first + i));
+    }
+    return pcm;
+}
+
+void playbackWaitsForItsCushion() {
+    PlaybackBuffer buffer(8 * 4, 16 * 4, 4);
+    buffer.push(frames(4, 1));
+    // Short of the cushion: silence, and nothing is used up.
+    CHECK(readFrom(buffer, 8) == QByteArray(8, 0));
+    buffer.push(frames(4, 5));
+    CHECK(readFrom(buffer, 8 * 4) == frames(8, 1));
+}
+
+void runningDryPlaysSilenceAndGrowsTheCushion() {
+    PlaybackBuffer buffer(4 * 4, 16 * 4, 4);
+    buffer.push(frames(4, 1));
+    CHECK(readFrom(buffer, 6 * 4) == frames(4, 1) + QByteArray(2 * 4, 0));
+    // The cushion is now a quarter bigger: 5 frames, not 4.
+    buffer.push(frames(4, 10));
+    CHECK(readFrom(buffer, 4) == QByteArray(4, 0));
+    buffer.push(frames(1, 14));
+    CHECK(readFrom(buffer, 5 * 4) == frames(5, 10));
+}
+
+void theCushionStopsGrowingAtHalfTheLimit() {
+    PlaybackBuffer buffer(4 * 4, 12 * 4, 4);
+    for (int i = 0; i < 5; ++i) {
+        buffer.push(frames(8, 1));
+        readFrom(buffer, 9 * 4);
+    }
+    buffer.push(frames(6, 1));
+    CHECK(readFrom(buffer, 6 * 4) == frames(6, 1));
+}
+
+void aBurstIsTrimmedToTheNewestSound() {
+    PlaybackBuffer buffer(4 * 4, 8 * 4, 4);
+    buffer.push(frames(10, 1));
+    // Over the limit, it keeps only a cushion's worth, in whole frames.
+    CHECK(readFrom(buffer, 4 * 4) == frames(4, 7));
+}
+
 } // namespace
 
 int main() {
     packetsFitTheProtocol();
     decodesToTheDeviceFormat();
     ignoresDamagedPackets();
+    playbackWaitsForItsCushion();
+    runningDryPlaysSilenceAndGrowsTheCushion();
+    theCushionStopsGrowingAtHalfTheLimit();
+    aBurstIsTrimmedToTheNewestSound();
     return 0;
 }

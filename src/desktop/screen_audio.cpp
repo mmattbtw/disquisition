@@ -2,7 +2,9 @@
 
 #include <QAudioSink>
 #include <QMediaDevices>
+#include <QMutexLocker>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -20,9 +22,11 @@ namespace {
 constexpr const char* kEncoders[] = {"libopus", "opus"};
 // Keeps music clear while staying small next to the video.
 constexpr qint64 kBitrate = 128'000;
-// Long enough to ride out packets that video holds up on the connection,
-// short enough to stay in step with the picture.
-constexpr qint64 kPlaybackBufferUs = 200'000;
+// Enough to ride out packets that video holds up, little enough to stay in
+// step with the picture.
+constexpr qint64 kPrefillUs = 80'000;
+constexpr qint64 kMaxDelayUs = 400'000;
+constexpr qint64 kSinkBufferUs = 40'000;
 
 // Capture delivers interleaved floats, which libopus takes as they are.
 AVSampleFormat sampleFormatFor(const AVCodecContext* context, const AVCodec* codec) {
@@ -242,6 +246,41 @@ QByteArray ScreenAudioDecoder::decode(const QByteArray& packet) {
     return pcm;
 }
 
+PlaybackBuffer::PlaybackBuffer(qsizetype prefill, qsizetype limit, int bytesPerFrame)
+    : cushion_(prefill), growth_(prefill / 4 / bytesPerFrame * bytesPerFrame), limit_(limit),
+      bytesPerFrame_(bytesPerFrame) {
+    open(QIODevice::ReadOnly | QIODevice::Unbuffered);
+}
+
+void PlaybackBuffer::push(const QByteArray& pcm) {
+    QMutexLocker lock(&mutex_);
+    pending_ += pcm;
+    if (pending_.size() > limit_) {
+        const qsizetype excess = pending_.size() - cushion_;
+        pending_.remove(0, excess - excess % bytesPerFrame_);
+    }
+}
+
+qint64 PlaybackBuffer::readData(char* data, qint64 size) {
+    QMutexLocker lock(&mutex_);
+    if (!playing_ && pending_.size() >= cushion_) {
+        playing_ = true;
+    }
+    qsizetype copied = 0;
+    if (playing_) {
+        copied = std::min(static_cast<qsizetype>(size), pending_.size());
+        std::memcpy(data, pending_.constData(), static_cast<size_t>(copied));
+        pending_.remove(0, copied);
+        // Ran dry: wait for a bigger cushion to build up.
+        if (copied < size) {
+            playing_ = false;
+            cushion_ = std::min(cushion_ + growth_, limit_ / 2);
+        }
+    }
+    std::memset(data + copied, 0, static_cast<size_t>(size - copied));
+    return size;
+}
+
 ScreenAudioPlayer::ScreenAudioPlayer(QObject* parent) : QObject(parent) {
     setOutputDevice({});
 }
@@ -260,16 +299,19 @@ void ScreenAudioPlayer::play(const QString& sharer, const QByteArray& packet) {
             return;
         }
         Stream started;
+        started.decoder = std::make_unique<ScreenAudioDecoder>(format_);
+        started.buffer = std::make_unique<PlaybackBuffer>(format_.bytesForDuration(kPrefillUs),
+                                                          format_.bytesForDuration(kMaxDelayUs),
+                                                          format_.bytesPerFrame());
         started.sink = std::make_unique<QAudioSink>(device_, format_);
-        started.sink->setBufferSize(format_.bytesForDuration(kPlaybackBufferUs));
-        started.device = started.sink->start();
-        if (!started.device) {
+        started.sink->setBufferSize(format_.bytesForDuration(kSinkBufferUs));
+        started.sink->start(started.buffer.get());
+        if (started.sink->error() != QAudio::NoError) {
             return;
         }
-        started.decoder = std::make_unique<ScreenAudioDecoder>(format_);
         stream = streams_.emplace(sharer, std::move(started)).first;
     }
-    stream->second.device->write(stream->second.decoder->decode(packet));
+    stream->second.buffer->push(stream->second.decoder->decode(packet));
 }
 
 void ScreenAudioPlayer::remove(const QString& sharer) {
