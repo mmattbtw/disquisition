@@ -524,6 +524,14 @@ void CommunityPanel::buildUi() {
     joining_->hide();
     side->addWidget(joining_);
     side->addWidget(tree_, 1);
+    connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceChannelDoubleClicked, this,
+            [this](const QString& cid, const QString& channel) {
+                if (cid == voiceCid_ && channel == voiceChannel_)
+                    return;
+                selectedVoiceCid_ = cid;
+                selectedVoiceChannel_ = channel;
+                joinVoice();
+            });
     connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceMoveRequested, this,
             [this](const QString& cid, const QString& peer, const QString& channel) {
                 attempt([&] { node_->moveVoice(cid, peer, channel); });

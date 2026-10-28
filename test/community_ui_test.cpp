@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
@@ -278,6 +279,18 @@ int main(int argc, char** argv) {
     join->setFocus(Qt::MouseFocusReason);
     QApplication::processEvents();
     CHECK(join && join->isVisible());
+    // Double-clicking a voice channel joins it.
+    QTreeWidgetItem* lounge = nullptr;
+    for (QTreeWidgetItemIterator it(tree); *it; ++it)
+        if ((*it)->data(0, Qt::UserRole + 1).toString() == voiceChannel)
+            lounge = *it;
+    CHECK(lounge);
+    const QPoint loungeCentre = tree->visualItemRect(lounge).center();
+    QMouseEvent doubleClick(QEvent::MouseButtonDblClick, loungeCentre,
+                            tree->viewport()->mapToGlobal(loungeCentre), Qt::LeftButton,
+                            Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(tree->viewport(), &doubleClick);
+    CHECK(until([&] { return panel->findChild<QPushButton*>("communityMute")->isVisible(); }));
     // Exercise presence rendering without opening microphone or screen hardware.
     CHECK(node);
     node->setVoice(cid, voiceChannel, true, true);
