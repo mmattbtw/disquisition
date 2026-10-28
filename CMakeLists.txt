@@ -395,7 +395,11 @@ if(BUILD_TESTING AND TARGET disquisition-desktop)
   # Exercise the actual widgets and their wiring, including modal dialogs,
   # with isolated identity/settings directories and no audio hardware access.
   get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)
-  list(REMOVE_ITEM COMMUNITY_UI_SOURCES src/desktop/main.cpp resources/macos/disquisition.icns)
+  list(REMOVE_ITEM COMMUNITY_UI_SOURCES src/desktop/main.cpp resources/macos/disquisition.icns
+    src/desktop/relay_audio.cpp)
+  # Keep hardware capture/playback outside UI tests; control startup outcomes
+  # while exercising the real settings, presence, and failure handling.
+  list(APPEND COMMUNITY_UI_SOURCES test/fake_relay_audio.cpp)
   get_target_property(COMMUNITY_UI_LIBRARIES disquisition-desktop LINK_LIBRARIES)
   get_target_property(COMMUNITY_UI_DEFINITIONS disquisition-desktop COMPILE_DEFINITIONS)
   add_executable(community_ui_test test/community_ui_test.cpp ${COMMUNITY_UI_SOURCES})

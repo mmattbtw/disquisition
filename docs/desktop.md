@@ -134,6 +134,8 @@ another voice channel and choose **Switch to this channel** to move the call.
 
 Choose microphone and output devices in **User Settings** before joining, or
 change them during a call to reconnect audio in place.
+If the selected devices fail, the call falls back to the previous or default
+devices. If none can start, you leave voice and receive an error.
 Allow microphone access when the operating system asks. On macOS, enable
 microphone access for disquisition in System Settings > Privacy & Security.
 

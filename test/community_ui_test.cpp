@@ -47,6 +47,7 @@
 #include "desktop/push_to_talk.h"
 #include "desktop/penguin_sprites.h"
 #include "desktop/screen_stage.h"
+#include "fake_relay_audio.h"
 static bool until(const std::function<bool()>& test) {
     QDeadlineTimer deadline(6000);
     while (!deadline.hasExpired()) {
@@ -577,6 +578,13 @@ int main(int argc, char** argv) {
         return nullptr;
     };
     CHECK(until([&] { return speakingRow() != nullptr; }));
+    // A silent first packet must not start a speaking highlight. A following
+    // chat packet is a transport-order barrier proving the audio was processed.
+    CHECK(remote.sendPacket(cid, voiceChannel, "audio",
+                            {{"bytes", QString::fromLatin1(QByteArray(640, 0).toBase64())}}) == 1);
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "silent audio probe"}}) == 1);
+    CHECK(until([&] { return transcript->toPlainText().contains("silent audio probe"); }));
+    CHECK(speakingRow() && speakingRow()->styleSheet().isEmpty());
     QByteArray loud(640, 0);
     for (int index = 0; index < loud.size(); index += 2) {
         loud[index] = char(0xe8);
@@ -747,7 +755,42 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return node->presence(cid, node->peerId()).voiceChannel == quiet &&
                              panel->findChild<QLabel*>("communityVoiceStatus")->text().contains("Quiet"); }));
     CHECK(!stage->drawing(remote.peerId()));
-    panel->findChild<QPushButton*>("communityVoice")->click();
+    // A failed selection that restores the previous device must still publish
+    // the push-to-talk change applied by the same Save.
+    CHECK(!node->presence(cid, node->peerId()).muted);
+    testAudio::setStartResults({false, true});
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        auto* input = dialog->findChild<QComboBox*>("communityInputDevice");
+        input->addItem("Unavailable microphone", "disquisition-unavailable-device");
+        input->setCurrentIndex(input->count() - 1);
+        dialog->findChild<QCheckBox*>("communityPushToTalk")->setChecked(true);
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+        CHECK(dialog->findChild<QLabel*>("userSettingsError")->isVisible());
+        CHECK(node->presence(cid, node->peerId()).voiceChannel == quiet);
+        CHECK(node->presence(cid, node->peerId()).muted);
+        dialog->reject();
+    });
+    panel->showSettings();
+    CHECK(until([&] { return remote.presence(cid, node->peerId()).muted; }));
+    // With no working selected/previous/default devices, stop advertising a call.
+    testAudio::setStartResults({false, false, false});
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        auto* input = dialog->findChild<QComboBox*>("communityInputDevice");
+        input->addItem("Unavailable microphone", "disquisition-unavailable-device");
+        input->setCurrentIndex(input->count() - 1);
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+        auto* error = dialog->findChild<QLabel*>("userSettingsError");
+        CHECK(dialog->isVisible() && error->isVisible());
+        CHECK(error->text().contains("could not be restored"));
+        CHECK(node->presence(cid, node->peerId()).voiceChannel.isEmpty());
+        dialog->reject();
+    });
+    panel->showSettings();
+    CHECK(until([&] { return remote.presence(cid, node->peerId()).voiceChannel.isEmpty(); }));
     CHECK(!stage->drawing(remote.peerId()));
     window.show();
     QApplication::setActiveWindow(&window);

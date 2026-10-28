@@ -1040,22 +1040,19 @@ void CommunityPanel::settings() {
             const auto previousOutput = saved.value("community/output").toString();
             if (!voiceCid_.isEmpty() &&
                 (inputId != previousInput || outputId != previousOutput)) {
-                const bool silent = mute_->isChecked() || deafen_->isChecked() ||
-                                    (ptt->isChecked() && !pushToTalk_.held());
-                const bool deafened = deafen_->isChecked();
                 if (!audio_.start(inputId, outputId)) {
-                    if (!audio_.start(previousInput, previousOutput) && !audio_.start({}, {}))
+                    if (!audio_.start(previousInput, previousOutput) && !audio_.start({}, {})) {
+                        leaveVoice();
                         throw std::runtime_error(
                             "The selected audio devices are unavailable, and the call could not "
-                            "be restored.");
-                    audio_.setMuted(silent);
-                    audio_.setDeafened(deafened);
+                            "be restored. You have left voice; choose available devices and join "
+                            "again.");
+                    }
+                    voiceState();
                     throw std::runtime_error(
                         "The selected audio devices are unavailable. The call is using other "
                         "devices.");
                 }
-                audio_.setMuted(silent);
-                audio_.setDeafened(deafened);
             }
             voiceState();
             saved.setValue("community/relay", address);
@@ -2229,7 +2226,8 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
             }
             const bool loud = std::sqrt(sum / 320) > kVoiceActivityLevel;
             const int quiet =
-                loud ? 0 : std::min(quietAudioFrames_.value(peer) + 1, kVoiceActivityHoldFrames);
+                loud ? 0 : std::min(quietAudioFrames_.value(peer, kVoiceActivityHoldFrames) + 1,
+                                    kVoiceActivityHoldFrames);
             quietAudioFrames_[peer] = quiet;
             setSpeaking(peer, quiet < kVoiceActivityHoldFrames);
         }
