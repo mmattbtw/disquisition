@@ -1,12 +1,12 @@
 # disquisition
 
-Disquisition is a C++20 group chat app with a desktop client.
-The desktop app supports voice chat and screen sharing. A central server
-handles names and discovery; text messages travel between peers, directly or
-through an optional relay. The server does not store chat history.
+Disquisition is a C++20 desktop group chat app.
+Communities live on member devices, with text channels, channel voice and
+screen sharing, invite links and QR codes, and automatic hosting by online
+members. Desktop peers connect directly or through the relay; no discovery
+server is needed. Chat is live-only, with optional local saving.
 
-There is no encryption or authentication. Use it with people and networks you
-trust.
+Community connections use authenticated TLS and signed metadata.
 
 ## Download
 
@@ -16,49 +16,45 @@ Get the desktop app from the [latest release](https://github.com/mmattbtw/disqui
 - [Windows, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip)
 - [Linux, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
-Open the app, enter a name and choose Join. Fresh installs use the default
-server and relay. Linux downloads need a compatible Qt 6.8 runtime.
+Open the desktop app, enter a name and select Connect, then create a
+community or join with an invite. See the [community guide](docs/communities.md)
+for direct connections, relay setup, hosting, and permissions.
+Linux downloads need a compatible Qt 6.8 runtime.
 See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
 
-For Linux or macOS, install a C++20 compiler, CMake 3.16+ and SQLite 3.24+
-development headers. The first build also needs Git and network access.
+Install a C++20 compiler, CMake 3.16+, Qt 6.6+, OpenSSL 3+, SQLite 3.24+,
+FFmpeg development libraries, and pkg-config. The first desktop configure also
+needs Git and network access for the pinned QR-code library.
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite
-```
-
-Build and run the tests:
-
-```sh
+brew install cmake qt openssl@3 sqlite ffmpeg pkgconf
 make
 ctest --test-dir build --output-on-failure
 ```
 
-The desktop app also needs Qt and FFmpeg. See [building and packaging](docs/building.md)
-for desktop dependencies, Windows builds and macOS signing.
+See [building and packaging](docs/building.md) for relay-only builds, Windows
+setup, and macOS signing. The project builds the desktop app and `relay`.
 
-## Run a local chat
-
-Start the server:
+## Run a local relay
 
 ```sh
-./build/server --port 9000 --db chat.db
+./build/relay --listen 3333
 ```
 
-Open the desktop app and set the server address to `127.0.0.1`
-and server port to `9000` in Preferences.
-Leave the relay address blank to connect directly, enter a name and choose Join.
+In the desktop app's **Connection & saving**, set **Relay** to
+`127.0.0.1:3333`, connect, and create a community. Share an invite with another
+desktop client. The relay needs no discovery server or database.
 
 ## Documentation
 
 - [Building and packaging](docs/building.md)
 - [Desktop app](docs/desktop.md)
-- [Servers, peers and relays](docs/networking.md)
-- [Server and relay command-line reference](docs/command-line.md)
-- [C++ client library](docs/client-library.md)
+- [Communities, channels, invites and hosting](docs/communities.md)
+- [Peers, encrypted connections, and relay routing](docs/networking.md)
+- [Desktop and relay command-line reference](docs/command-line.md)
 - [Git crash course](docs/git_crash_course.md)
 
 ## Contributors

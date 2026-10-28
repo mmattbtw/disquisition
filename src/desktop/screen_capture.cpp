@@ -28,6 +28,7 @@ bool requestScreenRecordingAccess() {
 namespace {
 
 struct EncodedFrame {
+    QImage image;
     QList<QByteArray> chunks;
     bool keyframe = false;
     bool failed = false;
@@ -100,15 +101,17 @@ QList<QByteArray> splitChunks(const QByteArray& data) {
 
 // Runs on the encoding thread. Returns no chunks when there is nothing to send.
 EncodedFrame encodeFrame(QImage image, const QRect& geometry, const QPoint& cursor,
-                         H264Encoder& h264, const QSize& maxSize, int fps, qint64 ptsMs) {
+                         H264Encoder& h264, const QSize& maxSize, int fps, qint64 ptsMs,
+                         bool requestKeyframe) {
     EncodedFrame encoded;
     if (image.isNull()) {
         return encoded;
     }
+    encoded.image = image;
     drawCursor(image, geometry, cursor);
 
     QByteArray data;
-    if (!h264.encode(image, maxSize, fps, ptsMs, data, encoded.keyframe)) {
+    if (!h264.encode(image, maxSize, fps, ptsMs, data, encoded.keyframe, requestKeyframe)) {
         encoded.failed = true;
         return encoded;
     }
@@ -122,6 +125,11 @@ EncodedFrame encodeFrame(QImage image, const QRect& geometry, const QPoint& curs
 ScreenCapture::ScreenCapture(QObject* parent) : QObject(parent) {
     encoder_.setMaxThreadCount(1);
     encoder_.setExpiryTimeout(-1);
+    keyframeTimer_.setInterval(100);
+    connect(&keyframeTimer_, &QTimer::timeout, this, [this] {
+        if (keyframeRequested_ && running() && !latestImage_.isNull())
+            submitFrame([image = latestImage_] { return image; });
+    });
 }
 
 ScreenCapture::~ScreenCapture() {
@@ -196,6 +204,9 @@ bool ScreenCapture::start(const ShareSource& source) {
 
 void ScreenCapture::stop() {
     ++generation_;
+    keyframeTimer_.stop();
+    keyframeRequested_ = false;
+    latestImage_ = {};
 #if defined(Q_OS_MACOS)
     macCapture_.reset();
 #endif
@@ -239,12 +250,21 @@ void ScreenCapture::handleImage(QImage image) {
     submitFrame([image = std::move(image)] { return image; });
 }
 
+void ScreenCapture::requestKeyframe() {
+    if (!running())
+        return;
+    keyframeRequested_ = true;
+    keyframeTimer_.start();
+    if (!latestImage_.isNull())
+        submitFrame([image = latestImage_] { return image; });
+}
+
 void ScreenCapture::submitFrame(std::function<QImage()> image) {
     // The screen delivers frames at its own refresh rate. Keep one per
     // interval, scheduled from the previous deadline so the average rate holds
     // even though frames never land exactly on it.
     const qint64 now = clock_.elapsed();
-    if (now < nextDueMs_) {
+    if (!keyframeRequested_ && now < nextDueMs_) {
         return;
     }
     // A congested socket skips this frame; the next one tries again.
@@ -262,6 +282,9 @@ void ScreenCapture::submitFrame(std::function<QImage()> image) {
     }
 
     encoding_ = true;
+    const bool requestKeyframe = keyframeRequested_;
+    keyframeRequested_ = false;
+    keyframeTimer_.stop();
     QRect geometry;
     QPoint cursor;
     if (screen_) {
@@ -271,14 +294,16 @@ void ScreenCapture::submitFrame(std::function<QImage()> image) {
     const quint32 frameId = nextFrameId_++;
     const quint64 generation = generation_;
     const int fps = static_cast<int>(1000 / frameIntervalMs_);
-    encoder_.start([this, image = std::move(image), geometry, cursor, frameId, generation, h264 = h264_,
-                    maxSize = maxSize_, fps, now] {
-        EncodedFrame encoded = encodeFrame(image(), geometry, cursor, *h264, maxSize, fps, now);
+    encoder_.start([this, image = std::move(image), geometry, cursor, frameId, generation,
+                    h264 = h264_, maxSize = maxSize_, fps, now, requestKeyframe] {
+        EncodedFrame encoded = encodeFrame(image(), geometry, cursor, *h264, maxSize, fps, now,
+                                           requestKeyframe);
         QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation] {
             encoding_ = false;
             if (generation != generation_) {
                 return;
             }
+            latestImage_ = encoded.image;
             if (encoded.failed) {
                 emit errorOccurred(QStringLiteral("no H.264 encoder could be opened"));
                 return;

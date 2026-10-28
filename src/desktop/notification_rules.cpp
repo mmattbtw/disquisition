@@ -32,8 +32,10 @@ void NotificationSettings::save(QSettings& settings) const {
 
 MessageAttention attentionFor(const NotificationSettings& settings, Mentioned mentioned) {
     MessageAttention attention;
-    attention.mention = mentioned == Mentioned::ByName ||
-                        (mentioned == Mentioned::ViaEveryone && !settings.suppressEveryone);
+    // Muting hides every notification indicator, including badge counts.
+    attention.mention =
+        !settings.muted && (mentioned == Mentioned::ByName ||
+                            (mentioned == Mentioned::ViaEveryone && !settings.suppressEveryone));
     attention.notify =
         !settings.muted && (settings.level == NotifyLevel::AllMessages || attention.mention);
     attention.alert = !settings.muted && attention.mention;

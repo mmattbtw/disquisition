@@ -183,7 +183,7 @@ QString H264Encoder::name() const {
 }
 
 bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qint64 ptsMs,
-                         QByteArray& out, bool& keyframe) {
+                         QByteArray& out, bool& keyframe, bool requestKeyframe) {
     QSize target = image.size();
     if (target.width() > maxSize.width() || target.height() > maxSize.height()) {
         target.scale(maxSize, Qt::KeepAspectRatio);
@@ -199,7 +199,7 @@ bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qin
         source = source.convertToFormat(QImage::Format_RGB32);
         sourceFormat = AV_PIX_FMT_RGB32;
     }
-    bool forceKeyframe = false;
+    bool forceKeyframe = requestKeyframe;
     if (!state_ || state_->size != target || state_->fps != fps ||
         state_->sourceFormat != sourceFormat) {
         state_ = std::make_unique<State>();

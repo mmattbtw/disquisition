@@ -36,7 +36,7 @@ Desktop builds from [commit ${GITHUB_SHA:0:7}](${base_url}/commit/${GITHUB_SHA})
 | Windows, x64 | [Download ZIP](${base_url}/releases/download/${tag}/disquisition-desktop-windows-x64.zip) |
 | Linux, x64 | [Download tar.gz](${base_url}/releases/download/${tag}/disquisition-desktop-linux-x64.tar.gz) |
 
-The downloads bundle baresip. macOS and Windows also bundle Qt. Linux requires a compatible Qt 6.8 runtime.
+macOS and Windows bundle Qt. Linux requires a compatible Qt 6.8 runtime.
 
 Persistent links to the newest successful \`main\` build:
 

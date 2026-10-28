@@ -1,40 +1,66 @@
 # Desktop app
 
+The desktop app opens directly to communities. See the [community guide](communities.md)
+for ownership, invites, host recovery, and local message saving.
+
 Download the app from the [latest release](https://github.com/mmattbtw/disquisition/releases/latest).
 For a local build, see [building and packaging](building.md#desktop-app).
 
 ## Install
 
-The downloads include a bundled `baresip` executable with the voice modules the
-app uses. The macOS DMG and Windows archive include Qt. The Linux archive requires
-a compatible Qt 6.8 runtime.
+The macOS DMG and Windows archive include Qt. The Linux archive requires a
+compatible Qt 6.8 runtime. On macOS, open the DMG, drag disquisition into
+Applications, and eject the disk image.
 
-On macOS, open the `.dmg` and drag `disquisition` to the Applications folder
-in the installer window. Then open `disquisition` from Applications and eject
-the disk image.
+## Connect and join a community
 
-## Join text chat
+Enter a name and select **Connect**. Fresh installs use `relay.disquisition.app`
+on port 3333. Once your display name is saved, the app connects automatically
+at startup using your saved connection settings. Under **User Settings**, enter a
+relay hostname, optionally followed by a port. No `relay://` prefix is needed.
+Saved settings take precedence; clear the relay field to use direct connections
+and advertise a LAN address.
 
-Open the app, enter a name and choose Join.
+Select **Create** for a new community, or **Join** to paste an invite or open its
+QR image. **Invite** lets owners and admins copy an invite link or save a QR code.
+While an invite is being resolved, the sidebar shows a **Joining community**
+progress indicator; it disappears when the host admits you or rejects the invite.
+The relay forwards encrypted peer traffic. Community metadata lives on member
+devices, and community connections do not need the discovery server.
 
-Each time you open the app, it picks a random default message color from the
-presets: pink, mint, butter, periwinkle, lilac, aqua, or peach. Use `/color <value>`
-to change it. Your color stays the same when you reconnect.
+Select a text channel to chat. Images can be attached with **Image** or
+dropped into the chat. GIF search is available in builds configured with a search
+provider key. Messages are live-only. Optional local SQLite saving records only
+messages this device sends or receives.
 
-Fresh installs default to server `server.disquisition.app:9000` and relay
-`relay.disquisition.app:3333`, so they connect through the relay without changing
-Preferences. Saved connection settings take precedence over these defaults.
-For your own server, set the server address and port in Preferences. Use Cmd+,
-on macOS to open it. Set the relay address, or leave it blank to connect directly.
+## Your profile and settings
+
+Open **User Settings** to edit your profile. **User** contains your display name,
+profile picture, and bio. Pictures are cropped to a square and resized before
+sharing; bios can contain up to 500 characters. Save applies your profile to all
+communities on this identity, including while disconnected. Changes reach peers
+when you connect. Cancel discards the dialog's edits.
+
+Click a person's name or avatar in chat, the member list, or a voice channel to
+open their profile card. Profiles show the display name, picture, and bio. A
+person without a picture gets an initial avatar. Existing saved messages that
+predate sender identities retain their original names.
+
+The settings categories run down the left, with the selected page on the right.
+**Audio** contains devices and push-to-talk, **Notifications** contains message
+and activity alerts, **Connection** contains relay and direct addresses, and
+**Message History** controls local SQLite saving. Microphone and output devices
+can be changed during a call; audio reconnects in place without dropping you
+from the call. Disconnect before changing connection details.
 
 ## Desktop penguins
 
-Desktop penguins are off and hidden from Preferences and the menu until you
+Desktop penguins are off and hidden from User Settings and the menu until you
 type `/waddleon` in chat. This enables them and permanently unlocks their
 controls on your device. After unlocking, use **Desktop penguins** in the
-disquisition menu or Preferences to turn them on or off. Once enabled, joining
-the server puts a little Club Penguin character for you and every connected
-member along the bottom of each display. They wander above other
+disquisition menu or User Settings to turn them on or off. Once enabled, connecting
+to a community puts a little Club Penguin character for you and every connected
+member of the selected community along the bottom of each display. They wander above other
 applications, including when the chat window is minimized. Names appear below
 the penguins. Their colors match their text chat colors, including named shades
 and xterm-256 colors. Your `/color` command updates your penguin immediately;
@@ -45,103 +71,131 @@ to each desktop.
 New text messages appear in speech bubbles above their sender for 5 to 12 seconds.
 Penguins stop to speak, and a new message replaces that person's current bubble.
 Long messages show a shortened preview; the full message stays in chat. Saved
-history and system notices do not create bubbles. Leaving or losing the server
+history and system notices do not create bubbles. Leaving or losing the community
 connection clears the overlay until you reconnect.
 
 Penguins disappear after 10 minutes without a text or image message and return
 when that person sends another message. New arrivals get the same grace period.
-In Preferences, set **hide inactive penguins after** to a different number of
+In User Settings, set **hide inactive penguins after** to a different number of
 minutes, or **Never** to keep everyone visible. Voice activity, saved history,
 and color changes do not reset the timeout. Hiding and reopening the overlay
 does not reset it either.
 
 The overlay lets mouse clicks and keyboard input pass through to your apps.
-Toggle **Desktop penguins** in the disquisition menu, or use Preferences.
+Toggle **Desktop penguins** in the disquisition menu, or use User Settings.
 Uncheck **Let penguins wander** to keep characters still while retaining chat
 bubbles. macOS Reduce Motion and Windows animation settings also stop wandering.
 These choices are saved between launches. The sprites are included in the app.
 
-After unlocking, the **custom sprite** dropdown in Preferences lets you choose
+After unlocking, the **custom sprite** dropdown in User Settings lets you choose
 **Custom images** and upload two images: **Standing**, facing forward, and
 **Walking**, facing left. The walking image flips when moving right. Both images
-keep their original colors and represent you on everyone's desktop. Other members
+keep their original colors and represent you on other members' desktops. Other members
 use Club Penguin by default, or their own uploaded sprites. Your images are sent
-to the server and shared with current members and new arrivals while you are
-connected. Transparent PNGs work best; JPEG, WebP and GIF are
+over authenticated, encrypted community links to current members and new arrivals
+while you are connected. Transparent PNGs work best; JPEG, WebP and GIF are
 also accepted, using the first frame of animated images. Choose files under
 10 MB and no larger than 4096 by 4096 pixels. The app saves resized copies when
-you save Preferences, so you can move or delete the originals. Cancel discards
+you save User Settings, so you can move or delete the originals. Cancel discards
 changes. Choose **Off (Club Penguin)** to restore the bundled penguins without
 losing your uploaded images.
 
-Sprite synchronization requires a server and relay built from this version.
-The server associates uploads with your assigned name and forgets them when you
-leave. Your saved images are announced again when you reconnect. Turning custom
-sprites off restores your Club Penguin sprite for everyone.
+Sprite synchronization uses community peer connections and needs updated desktop
+clients. Sprites belong to each authenticated peer identity, including when members
+share a display name. Saved images are announced to new peers and again after
+reconnecting. Turning custom sprites off restores your Club Penguin sprite for
+everyone. Switching communities shows that community's online members.
 
 On macOS, the overlay joins Spaces and can appear over fullscreen applications.
 On Linux, always-on-top behavior depends on the window manager; Wayland
 compositors may restrict overlays above other applications.
 
-## Voice chat
+## Chat colors and linked media
 
-Voice stays off until you choose Join voice.
-Choose Leave voice to exit the call without leaving the server. Use a different
-voice SIP port in Preferences for each client running on the same machine. If
-peers cannot directly reach the address seen by the server, enter a reachable
-DNS name or IP as the public host and forward both the automatically chosen TCP
-chat port and the chosen SIP/RTP ports when connecting directly.
-For clients on the same LAN, select "Advertise local IP automatically" in
-Preferences to announce the local IPv4 address. This takes precedence over the
-saved public host while selected. It also applies during direct relay fallback.
+Each app session starts with a random pastel chat color. Use `/color pink`,
+`/color mint`, `/color butter`, `/color periwinkle`, `/color lilac`, `/color aqua`,
+or `/color peach` to change it. Numeric xterm colors from 0 to 255 also work,
+except reserved colors 1, 2 and 250. Your name uses the chosen color in chat and
+the member list; message text keeps its normal color. Messages carry the color to peers and local history, and the
+drawing tool's **chat color** follows it.
 
-## Relay and direct fallback
+In **User Settings > Message History**, turn **Show linked GIFs and images in
+chat** off to stop loading linked media automatically. Uploaded images still
+appear in chat. The setting is saved on this device.
 
-To keep your IP hidden from other users, keep a relay address and port in
-Preferences. The desktop app then connects only to the relay;
-it does not open a peer listener or a SIP/RTP socket. Relayed voice uses 16 kHz
-mono PCM frames over that TCP connection. The relay passes those frames to the
-chat server, which fans them out to the room. The desktop client converts
-between the relay format and each audio device's preferred format, including
-44.1 kHz and 48 kHz devices. Direct participants keep using baresip with other
-direct participants and send a second audio stream for
-relayed participants. This means relayed voice is not end-to-end encrypted and
-the relay and server can hear it. Use only a trusted relay and server.
+## Voice and screen sharing
 
-"Connect directly if relay fails (reveals your IP)" is off by default. If
-the relay is unavailable, the desktop client retries it every three seconds
-without connecting directly. If direct fallback is enabled, a lost relay
-connection uses the server address and port in Preferences. This reveals your
-address to the server and direct peers while fallback is active. The client
-checks the relay every three seconds without leaving the direct connection.
-It switches back only after the relay confirms it can reach the chat server.
-If you were in voice, it starts direct baresip voice during fallback and
-switches back to relayed voice after that check succeeds. This reveals your IP to other
-direct voice participants while fallback is active. Mute and deafen settings
-carry over both transitions. The desktop health check requires a relay built
-from the same version of this repository. Rebuild and restart both `server`
-and `relay` after updating voice support; older servers reject voice messages.
+Select a voice channel, then choose **Join voice** beneath its name. The current
+text channel stays open. Participants and their mute, deafen, and sharing status
+appear beneath the voice channel rather than in the member list. A participant's
+row lights up green while their microphone is active.
 
-## Voice details
+**Mute**, **Deafen**, **Share screen**, and **Leave voice** appear only after joining
+voice. You can join one voice channel at a time across all communities. Select
+another voice channel and choose **Switch to this channel** to move the call.
 
-For direct participants, the app uses the server roster to form one SIP call
-per pair of users. Baresip's `mixminus` module combines those calls locally.
-The name ordering rule makes only one side dial each pair, while the other
-side auto-answers.
+Choose microphone and output devices in **User Settings** before joining, or
+change them during a call to reconnect audio in place.
+If the selected devices fail, the call falls back to the previous or default
+devices. If none can start, you leave voice and receive an error.
+Allow microphone access when the operating system asks. On macOS, enable
+microphone access for disquisition in System Settings > Privacy & Security.
 
-The member list reports voice state from baresip itself. `·` means text-only,
-`○` means the SIP call is connected, and a green `●` means the microphone or
-that peer's received audio is above the speaking threshold. The `vumeter`
-module supplies audio levels and `ctrl_tcp` supplies call identity and state.
+Choose **Share screen** while in voice to select a screen or window. Other peers
+in that voice channel choose which streams to watch. macOS also requires Screen
+Recording permission. Use **Stop sharing** to end the stream or **Leave voice**
+to stop the call and share together. On macOS, full-screen shares include
+disquisition's own windows and the app is also listed as a window source;
+drawing and annotation overlays stay out of the capture.
 
-On macOS the app requests microphone access when you choose Join voice. Choose
-the microphone and speaker from the `mic` and `out` dropdowns before joining
-voice; the dropdowns refresh after permission is granted.
+Profile and community metadata updates keep the current call connected.
 
-Direct voice works best on a LAN or between publicly reachable hosts. The app
-does not coordinate ICE/TURN credentials or RTP port forwarding, and it has no
-authentication or media encryption. An internet deployment would need TURN and
-DTLS-SRTP before treating calls as private.
+Stream invitations and fullscreen titles use display names. Watching requests a
+fresh keyframe, including when the shared screen is static. If the first frame
+or subscription is missed, the viewer retries automatically.
+
+## Leave or delete a community
+
+Any member other than the owner can right-click the community in the sidebar
+and choose **Leave community**. This removes your membership;
+you need a new invite to rejoin. The owner can open **Manage > Community** and
+choose **Delete community** to permanently delete it for all members.
+Both actions ask for confirmation and work even while peers are synchronizing.
+Members who were offline learn about the change when they reconnect. Saved local message files are kept.
+
+Disconnecting keeps your memberships and owner or admin permissions. Owners and
+admins can manage saved community metadata while offline; updates synchronize
+when they reconnect. Metadata updates keep established peer and voice connections
+active.
+
+## Manage a community
+
+Owners and admins open **Manage**. Categories run down the left side, with their
+settings on the right:
+
+- Community name and icon
+- Text and voice channels, including names and topics
+- Members and administrator roles
+- Invite revocation
+- Host priority
+
+Changes save with the action button in each category. The owner assigns admins;
+any member can host without gaining administrative privileges.
+
+Owners and admins can drag a participant's name or avatar from one voice channel
+to another within the same community. The participant stays connected to audio
+with their mute and deafen settings. Screen sharing and watched streams from the
+previous channel stop. Members who are not in voice cannot be dragged into a call.
+
+## Connection problems
+
+If a desktop client's direct address is entered as a relay, the app explains
+that the address belongs to a client. Enter the relay's hostname instead, or
+clear Relay for direct mode. Repeated retries do not repeat the same error.
+A relay or client running an older protocol must be updated before it can
+connect to communities. The app keeps retrying known peers automatically.
+A lost relay connection retries automatically without pressing Connect again.
+Voice membership is retained, and watched streams resume when the peer returns.
 
 ## Screen sharing
 
@@ -151,10 +205,9 @@ the Screens tab. Choose Go Live to start. Sharing a single window keeps the
 rest of your desktop private, and lets you watch other shares fullscreen
 without the stream capturing itself.
 Shares appear on a stage above the chat, one tile per person sharing, and the
-member list marks each sharer `LIVE`. Your own tile shows what viewers
+voice channel lists each participant's sharing status. Your own tile shows what viewers
 receive. Other people's shares start as a "watch stream" button, so nobody
-downloads video they did not ask for. Choose it, or double-click the sharer in
-the member list, to start watching, and stop watching to close the video. Choose fullscreen
+downloads video they did not ask for. Choose it to start watching, and stop watching to close the video. Choose fullscreen
 or double-click a video to fill the screen with it; press Esc or double-click
 again to return. With more than one share on the stage, choose focus to
 enlarge one above the others.
@@ -179,7 +232,7 @@ While sharing, right-click a person in the chat sidebar and choose
 **Ban from drawing on my stream** to block their pen and eraser. The menu
 changes to **Unban from drawing on my stream** to restore access. A banned
 viewer can still watch and see other people's ink, and their existing ink
-stays until it is erased. Bans apply to that chat name for the current stream,
+stays until it is erased. Bans apply to that member's authenticated identity for the current stream,
 survive reconnects and clearing or toggling drawing, and end when the stream
 stops. The presenting client enforces them, so hiding the viewer's controls
 is not the only protection.
@@ -224,24 +277,12 @@ Windows excludes the overlay using capture exclusion on Windows 10 version
 2004 and newer. X11 display capture can include the overlay in the video.
 
 The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
-when it can. Frames travel over the existing server connection, directly or
-through the relay, and the server forwards each share only to its viewers.
-Like relayed voice, video is not encrypted, so the relay and server can see
-it. A viewer who falls behind skips frames and resumes at the next keyframe,
-which arrives every two seconds. New viewers wait for one the same way.
-Screen sharing needs a server and relay built from this version; older servers
-disconnect clients that start a share.
-Drawing needs updated desktop clients and, for relayed participants, a
-relay with the generic peer-data channel. Erasing, selection, chat colors and laser pointers
-need updated desktop clients on both ends; they require no further server
-or relay changes. A server that already supports screen sharing needs no
-drawing update. The sharing client owns drawing permissions and history,
-validates incoming strokes and sends the current drawing to new viewers.
-Choosing allow drawing takes effect locally immediately. Annotations travel
-over direct peer connections or the relay's generic peer-data channel,
-separately from video. The discovery server receives no annotation events
-and stores no drawing state. Peer data is not encrypted. Drawing history
-is kept only in the sharing client's memory for the current share.
+when it can. Video and drawing travel through authenticated, encrypted community
+peer links, directly or through a relay. Only peers in the same voice channel can
+exchange drawing events. The sharing client owns permissions and drawing history,
+validates incoming strokes, and sends the current ink to new viewers. Drawing
+history stays in memory for the current share. A viewer who falls behind skips
+video frames and resumes at the next keyframe, which arrives every two seconds.
 
 If the sharing client or relay does not support drawing, the viewer shows
 "drawing unavailable: update both apps and the relay" instead of silently
@@ -261,17 +302,51 @@ across local rebuilds.
 
 ## Save messages locally
 
-In Preferences, check "Save chat messages locally," choose a SQLite file and
-optionally set a maximum message count. You can also use `/save <path.db>` or
-`/save off`. Local saving is off by default. Leaving the maximum blank keeps
-every message. The app appends each new chat message as it arrives or is sent,
-and shows the 1,000 most recent saved messages when you connect. The stored
-history can grow beyond what the UI displays. `/clear` clears the message pane
-without deleting saved messages.
+In **User Settings**, enable local saving, choose a SQLite file, and
+optionally set a maximum message count. History stays on this device and is
+separate for each community and text channel.
 
-The SQLite `saved_messages` table has `timestamp` in Unix seconds, `sender`,
-`body`, and `color` columns. The app does not save system notices or send saved
-messages to the server.
+Local saving is off by default. Leaving the maximum blank keeps every saved
+message. The app loads the 1,000 most recent saved messages for the selected
+channel; the database can retain more than the UI displays.
+
+The SQLite `saved_messages` table stores `timestamp` in Unix seconds, `sender`,
+`body`, and `color`, with `community_id`, `channel_id`, and `message_id` identifying
+the message's scope. Saved history stays on this device and is not replayed to
+other members.
+
+## Notifications and mentions
+
+Desktop notifications, unread badges, and taskbar alerts apply to incoming
+community messages while the app is in the background. Type `@` to complete a
+member name. `@everyone` and `@here` mention the community. Mentions are highlighted
+in chat. Settings offer all messages or mentions only, suppression of group
+mentions, and join/share activity notifications. Use **Mute notifications** in the
+app menu or `/dnd` to toggle notification muting.
+
+## Chat commands
+
+Type `/help` for the command list and `/color` for the available color names and
+your current choice. `/users` lists online community members. `/voice` joins the
+selected voice channel; `/leavevoice` leaves the call. `/mute`, `/unmute`,
+`/deafen`, and `/undeafen` control your audio. `/gif [search]` opens the GIF picker,
+`/save` opens User Settings, `/dnd` toggles notifications, and `/clear` clears the
+current channel's local display without deleting saved messages. `/leave` asks to
+leave the current community. `/quit` and `/exit` close the app.
+
+Commands run locally and are not sent as chat. Mentions highlight `@name`,
+`@everyone`, and `@here`; a message mentioning you also has a highlighted background.
+A standalone GIF link shows the GIF without its URL while linked previews are
+enabled. Turning previews off keeps the URL visible.
+
+## Push to talk
+
+In **User Settings**, enable **Hold a key to talk** and choose a key.
+Voice transmits only while that key is held. Manual mute and deafen still take
+precedence. Windows and X11 support global keys. On macOS, allow Input Monitoring
+and restart the app to use the key while another application is focused.
+Wayland supports the key while Disquisition is focused. Leaving or switching
+voice channels releases the key and stops the previous voice session.
 
 ## Release builds
 

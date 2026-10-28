@@ -60,6 +60,7 @@ class PenguinOverlay final : public QObject {
 public:
     explicit PenguinOverlay(QObject* parent = nullptr, std::function<qint64()> now = {});
     ~PenguinOverlay() override;
+    void setDisplayNames(const QMap<QString, QString>& names);
     void setMembers(QStringList names);
     void setColor(const QString& name, const QColor& color);
     void setEnabled(bool enabled);
@@ -73,6 +74,7 @@ public:
 private:
     void syncScreens();
     QStringList members_;
+    QMap<QString, QString> displayNames_;
     QMap<QString, QColor> colors_;
     PenguinActivity activity_;
     std::function<qint64()> now_;

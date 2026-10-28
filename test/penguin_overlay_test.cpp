@@ -383,6 +383,7 @@ void customSpritesBelongToIndividualMembers() {
     PenguinOverlay overlay;
     overlay.setWandering(false);
     overlay.setMembers({"matt", "jesse"});
+    overlay.setDisplayNames({{"matt", "Same name"}, {"jesse", "Same name"}});
     auto capture = [] { return overlayWindows().first()->grab().toImage(); };
     const auto defaults = capture();
     overlay.setCustomSprites("matt", red, red);

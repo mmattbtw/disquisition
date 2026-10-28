@@ -161,7 +161,7 @@ PenguinSpriteEditor::PenguinSpriteEditor(PenguinSprites sprites, QWidget* parent
     auto* hint = new QLabel("Standing: face forward. Walking: face left.\n"
                            "Transparent images work best.\n"
                            "Animated images use the first frame.\n"
-                           "Your sprite is shared with everyone in the server.", images);
+                           "Your sprite is shared with members of your communities.", images);
     form->addRow(hint);
     layout->addWidget(images);
     images->setVisible(sprites_.enabled);
