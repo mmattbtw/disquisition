@@ -364,6 +364,7 @@ void Relay::handleServerMessage(User& user, const Message& message) {
         case MsgType::Speaking:
         case MsgType::ScreenShare:
         case MsgType::ScreenFrame:
+        case MsgType::ScreenAudio:
         case MsgType::PenguinSprite:
             sendToClient(user, message);
             break;
@@ -416,6 +417,13 @@ void Relay::handleClientMessage(User& user, const Message& message) {
             // A server reached after the client signed in may not take it.
             if (user.serverReady && !user.server.failed() &&
                 hasFeature(user.serverFeatures, kSpeakingFeature)) {
+                user.server.send(message);
+            }
+            break;
+
+        case MsgType::ScreenAudio:
+            if (user.serverReady && !user.server.failed() &&
+                hasFeature(user.serverFeatures, kScreenAudioFeature)) {
                 user.server.send(message);
             }
             break;

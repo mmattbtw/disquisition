@@ -243,12 +243,14 @@ void testVoiceAndRelayHealth(std::uint16_t serverPort, std::uint16_t relayPort) 
     const chat::Message directOk = direct.next(chat::MsgType::LoginOk);
     CHECK(directOk.fields.at(0) == "voice_direct");
     CHECK(chat::hasFeature(directOk.fields.at(2), chat::kSpeakingFeature));
+    CHECK(chat::hasFeature(directOk.fields.at(2), chat::kScreenAudioFeature));
 
     RawSession relayed(relayPort);
     CHECK(relayed.connection.send(chat::Message{chat::MsgType::Login, {"voice_relay", "0", ""}}));
     const chat::Message relayedOk = relayed.next(chat::MsgType::LoginOk);
     CHECK(relayedOk.fields.at(0) == "voice_relay");
     CHECK(chat::hasFeature(relayedOk.fields.at(2), chat::kSpeakingFeature));
+    CHECK(chat::hasFeature(relayedOk.fields.at(2), chat::kScreenAudioFeature));
 
     CHECK(direct.connection.send(chat::Message{chat::MsgType::VoicePort, {"5060"}}));
     CHECK(relayed.next(chat::MsgType::VoicePort).fields ==
@@ -485,11 +487,16 @@ void testScreenSharing(std::uint16_t serverPort, std::uint16_t relayPort) {
     }));
     CHECK(received.fields == (Fields{"screen_sharer", "7", "0", "1", "1", "h264 bytes"}));
 
+    // The share's sound follows the same path, now that the viewer is watching.
+    CHECK(sharer.connection.send(chat::Message{chat::MsgType::ScreenAudio, {"opus bytes"}}));
+    CHECK(viewer.next(chat::MsgType::ScreenAudio).fields == (Fields{"screen_sharer", "opus bytes"}));
+
     // Nobody receives a stream they did not ask to watch.
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     chat::Message message;
     while (bystander.connection.poll(message)) {
         CHECK(message.type != chat::MsgType::ScreenFrame);
+        CHECK(message.type != chat::MsgType::ScreenAudio);
     }
 
     CHECK(sharer.connection.send(chat::Message{chat::MsgType::ScreenShare, {"0"}}));

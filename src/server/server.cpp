@@ -287,6 +287,9 @@ bool Server::handleFrames(Client& client) {
             case MsgType::ScreenFrame:
                 handleScreenFrame(client, message);
                 break;
+            case MsgType::ScreenAudio:
+                handleScreenAudio(client, message);
+                break;
             case MsgType::PenguinSprite:
                 handlePenguinSprite(client, message);
                 break;
@@ -330,7 +333,8 @@ void Server::handleLogin(Client& client, const Message& message) {
     }
     client.authenticated = true;
     send(client, Message{MsgType::LoginOk,
-                         {client.name, "welcome, " + client.name, kSpeakingFeature}});
+                         {client.name, "welcome, " + client.name,
+                          std::string(kSpeakingFeature) + " " + kScreenAudioFeature}});
 
     // The newcomer learns the roster first, then everyone learns about it.
     for (const Client& other : clients_) {
@@ -512,6 +516,21 @@ void Server::handleScreenFrame(Client& client, const Message& message) {
     // A viewer that falls behind misses frames and resumes at the next keyframe.
     for (Client& viewer : clients_) {
         if (viewer.watching.count(client.name) != 0 && viewer.out.size() < kMaxScreenBacklog) {
+            viewer.out.append(encoded);
+        }
+    }
+}
+
+// Sound is light, so it gets the voice backlog: a viewer whose connection is
+// full of video still hears the share.
+void Server::handleScreenAudio(Client& client, const Message& message) {
+    if (!client.authenticated || !client.sharingScreen || message.fields.size() != 1 ||
+        message.fields[0].empty() || message.fields[0].size() > kMaxScreenAudioBytes) {
+        return;
+    }
+    const std::string encoded = encode(Message{MsgType::ScreenAudio, {client.name, message.fields[0]}});
+    for (Client& viewer : clients_) {
+        if (viewer.watching.count(client.name) != 0 && viewer.out.size() < kMaxVoiceBacklog) {
             viewer.out.append(encoded);
         }
     }

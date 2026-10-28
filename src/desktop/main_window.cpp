@@ -89,6 +89,10 @@ std::string s(const QString& value) {
     return std::string(bytes.constData(), static_cast<std::size_t>(bytes.size()));
 }
 
+QString selectedDevice(const QComboBox* combo) {
+    return combo->currentData().isValid() ? combo->currentData().toString() : combo->currentText();
+}
+
 QString safeHtml(const QString& value) {
     return value.toHtmlEscaped().replace("\n", "<br>");
 }
@@ -351,6 +355,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), voice_(this) {
     connect(members_, &QListWidget::customContextMenuRequested, this, &MainWindow::showMemberMenu);
     connect(members_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         watchStream(item->data(Qt::UserRole).toString());
+    });
+    connect(&screenCapture_, &ScreenCapture::audioReady, this, [this](const QByteArray& packet) {
+        if (sharingScreen_ && server_.state() == QAbstractSocket::ConnectedState) {
+            sendFrame(&server_, chat::Message {chat::MsgType::ScreenAudio,
+                                               {std::string(packet.constData(),
+                                                            static_cast<std::size_t>(packet.size()))}});
+        }
+    });
+    connect(&screenCapture_, &ScreenCapture::audioUnavailable, this, [this](const QString& reason) {
+        appendChat("Screen", "sharing without audio: " + reason, {}, true);
     });
     connect(&screenCapture_, &ScreenCapture::errorOccurred, this, [this](const QString& message) {
         appendChat("Screen", "capture failed: " + message, {}, true);
@@ -679,10 +693,6 @@ void MainWindow::joinVoice() {
             return;
         }
         refreshAudioDevices();
-        auto selectedDevice = [](QComboBox* combo) {
-            return combo->currentData().isValid() ? combo->currentData().toString()
-                                                  : combo->currentText();
-        };
         if (!relayAudio_.start(selectedDevice(inputDevice_), selectedDevice(outputDevice_))) {
             voiceLabel_->setText("voice: selected audio input or output is unavailable");
             return;
@@ -841,7 +851,11 @@ void MainWindow::startScreenShare() {
     if (!source || myName_.isEmpty() || server_.state() != QAbstractSocket::ConnectedState) {
         return;
     }
-    if (!screenCapture_.start(*source)) {
+    // Older servers disconnect anyone who sends sound.
+    if (picker.shareAudio() && !serverScreenAudio_) {
+        appendChat("Screen", "sharing without audio: the server does not support it yet", {}, true);
+    }
+    if (!screenCapture_.start(*source, picker.shareAudio() && serverScreenAudio_)) {
         appendChat("Screen", source->title + " can no longer be shared", {}, true);
         return;
     }
@@ -970,6 +984,15 @@ void MainWindow::receiveScreenFrame(const chat::Message& message) {
     }
 }
 
+void MainWindow::receiveScreenAudio(const chat::Message& message) {
+    const QString sender = q(message.fields[0]);
+    if (deafened_ || watchedStreams_.count(sender) == 0) {
+        return;
+    }
+    const std::string& packet = message.fields[1];
+    screenAudio_.play(sender, QByteArray(packet.data(), static_cast<qsizetype>(packet.size())));
+}
+
 void MainWindow::watchStream(const QString& name) {
     const auto peer = peers_.constFind(name);
     if (peer == peers_.cend() || !peer->sharingScreen || watchedStreams_.count(name) != 0 ||
@@ -977,6 +1000,7 @@ void MainWindow::watchStream(const QString& name) {
         return;
     }
     watchedStreams_.try_emplace(name);
+    screenAudio_.setOutputDevice(selectedDevice(outputDevice_));
     sendFrame(&server_, chat::Message {chat::MsgType::ScreenWatch, {s(name), "1"}});
     stage_->setWatching(name, true);
     startDrawingSession(name, false);
@@ -991,6 +1015,7 @@ void MainWindow::stopWatchingStream(const QString& name) {
         drawingSessions_.erase(session);
     }
     screenAssembler_.remove(name);
+    screenAudio_.remove(name);
     if (server_.state() == QAbstractSocket::ConnectedState) {
         sendFrame(&server_, chat::Message {chat::MsgType::ScreenWatch, {s(name), "0"}});
     }
@@ -1004,6 +1029,7 @@ void MainWindow::endRemoteStream(const QString& name) {
     stage_->removeStream(name);
     watchedStreams_.erase(name);
     screenAssembler_.remove(name);
+    screenAudio_.remove(name);
 }
 
 void MainWindow::endRemoteStreams() {
@@ -1592,6 +1618,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         penguins_->clearCustomSprites();
         serverSpeaking_ = message.fields.size() >= 3 &&
                           chat::hasFeature(message.fields[2], chat::kSpeakingFeature);
+        serverScreenAudio_ = message.fields.size() >= 3 &&
+                             chat::hasFeature(message.fields[2], chat::kScreenAudioFeature);
         connectionLabel_->setText("* connected to " +
                                   (usingRelay_ ? "relay " + relayHost_ + ":" + QString::number(relayPort_)
                                                : serverHost_ + ":" + QString::number(serverPort_)) +
@@ -1688,6 +1716,8 @@ void MainWindow::handleServerMessage(const chat::Message& message) {
         handleScreenShare(message);
     } else if (message.type == chat::MsgType::ScreenFrame && message.fields.size() == 6) {
         receiveScreenFrame(message);
+    } else if (message.type == chat::MsgType::ScreenAudio && message.fields.size() == 2) {
+        receiveScreenAudio(message);
     }
     else if (message.type == chat::MsgType::PeerData && usingRelay_) {
         receivePeerData(message);

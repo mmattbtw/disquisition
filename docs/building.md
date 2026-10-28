@@ -57,12 +57,14 @@ in the build directory; `make` selects development unless `BUILD_CHANNEL` is set
 
 The desktop target also needs Qt 6.6 or newer with Widgets, Network and
 Multimedia, plus pkg-config and FFmpeg development libraries. CMake checks for
-`libavcodec` version 60 or newer, `libavutil` and `libswscale`. It skips the
-desktop app if Qt or FFmpeg is missing.
+`libavcodec` version 60 or newer, `libavutil`, `libswresample` and
+`libswscale`. It skips the desktop app if Qt or FFmpeg is missing.
 On Linux, install the XCB development package, such as `libxcb1-dev` on
 Debian or Ubuntu, for the presenter drawing overlay on X11. CMake detects
 it through pkg-config. Without it, annotations remain available in the
-video preview and fullscreen viewer.
+video preview and fullscreen viewer. Install the PulseAudio development
+package, such as `libpulse-dev`, for sound in screen shares; it also works
+with PipeWire. Without it, Linux shares have no sound.
 
 ```sh
 cmake -S . -B build -DBUILD_DESKTOP_APP=ON

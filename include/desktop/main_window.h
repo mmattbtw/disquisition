@@ -19,6 +19,7 @@
 #include "desktop/image_transfer.h"
 #include "desktop/push_to_talk.h"
 #include "desktop/relay_audio.h"
+#include "desktop/screen_audio.h"
 #include "desktop/screen_capture.h"
 #include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
@@ -126,6 +127,7 @@ private:
     void sendScreenFrame(quint32 frameId, const QList<QByteArray>& chunks, bool keyframe);
     void handleScreenShare(const chat::Message& message);
     void receiveScreenFrame(const chat::Message& message);
+    void receiveScreenAudio(const chat::Message& message);
     void watchStream(const QString& name);
     void stopWatchingStream(const QString& name);
     void endRemoteStream(const QString& name);
@@ -209,6 +211,7 @@ private:
     bool showLinkedMedia_ = true;
     bool localSpeaking_ = false;
     bool serverSpeaking_ = false;
+    bool serverScreenAudio_ = false;
     bool muted_ = false;
     bool deafened_ = false;
     bool mutedBeforeDeafen_ = false;
@@ -232,6 +235,7 @@ private:
     quint64 screenShareGeneration_ = 0;
     ScreenFrameAssembler screenAssembler_;
     std::map<QString, ScreenStreamDecoder> watchedStreams_;
+    ScreenAudioPlayer screenAudio_;
     QTimer reconnectTimer_;
     QTimer relayProbeTimer_;
     QTimer loginTimer_;

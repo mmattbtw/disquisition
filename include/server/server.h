@@ -65,6 +65,7 @@ private:
     void handleScreenShare(Client& client, const Message& message);
     void handleScreenWatch(Client& client, const Message& message);
     void handleScreenFrame(Client& client, const Message& message);
+    void handleScreenAudio(Client& client, const Message& message);
     void handlePenguinSprite(Client& client, const Message& message);
     void endScreenShare(const Client& sharer);
     void reject(Client& client, const std::string& reason);

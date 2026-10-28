@@ -81,6 +81,11 @@ enum class MsgType : std::uint8_t {
     // server: [assigned sender, index, count, bytes]. Empty fields reset to
     // Club Penguin; the server's reset contains only the assigned sender.
     PenguinSprite = 35,
+
+    // The sound of a screen share, forwarded like ScreenFrame to its viewers.
+    // Each packet is 20 ms of 48 kHz stereo Opus. Servers that take it list
+    // kScreenAudioFeature. Client: [Opus packet]; server: [sharer, Opus packet].
+    ScreenAudio = 36,
 };
 
 struct Message {
@@ -100,6 +105,8 @@ constexpr std::uint32_t kMaxImageChunks =
 constexpr std::size_t kMaxSpriteBytes = 256 * 1024;
 constexpr std::uint32_t kMaxSpriteChunks =
     static_cast<std::uint32_t>((kMaxSpriteBytes + kImageChunkSize - 1) / kImageChunkSize);
+// A 20 ms packet at 128 kbps is about 320 bytes; this leaves headroom.
+constexpr std::size_t kMaxScreenAudioBytes = 1500;
 
 // TCP delivers chunks in order. Only a complete, bounded transfer replaces
 // the previous sprite. A new index 0 starts a replacement; a reset is complete.
@@ -127,6 +134,7 @@ constexpr std::size_t kColorCount = kColorNames.size();
 // beyond the original protocol. Older servers disconnect anyone who sends a
 // message they do not know, so clients check this list first.
 constexpr const char* kSpeakingFeature = "speaking";
+constexpr const char* kScreenAudioFeature = "screen-audio";
 bool hasFeature(const std::string& features, const std::string& feature);
 
 std::string encode(const Message& message);

@@ -159,6 +159,17 @@ or double-click a video to fill the screen with it; press Esc or double-click
 again to return. With more than one share on the stage, choose focus to
 enlarge one above the others.
 
+**Share audio**, on by default in the picker, sends the share's sound with
+the picture. A window share sends only that application's sound. A screen
+share sends everything the computer plays except Disquisition itself, so
+voice chat is never sent back to the people in it. Viewers hear a share only
+while watching it, through the output device chosen in Preferences, and
+deafening silences shares as well as voice. Sharing sound works on macOS, on
+Windows 10 version 2004 and newer, and on Linux with PulseAudio or PipeWire.
+A window share goes out without sound when its application cannot be
+identified, such as on Wayland or when two windows share a title; the chat
+says when a share has no sound and why.
+
 To annotate a share, the person sharing chooses **allow drawing** on their
 tile. Drawing starts off for every new share. Everyone watching can then
 choose **pen** and drag over the video. The default pen color matches the
@@ -229,8 +240,11 @@ through the relay, and the server forwards each share only to its viewers.
 Like relayed voice, video is not encrypted, so the relay and server can see
 it. A viewer who falls behind skips frames and resumes at the next keyframe,
 which arrives every two seconds. New viewers wait for one the same way.
+Sound travels the same way as 128 kbps Opus, and is kept for slow viewers
+longer than video, so it carries on when the picture skips.
 Screen sharing needs a server and relay built from this version; older servers
-disconnect clients that start a share.
+disconnect clients that start a share. Servers advertise sound support, and
+the app shares without sound on a server that lacks it.
 Drawing needs updated desktop clients and, for relayed participants, a
 relay with the generic peer-data channel. Erasing, selection, chat colors and laser pointers
 need updated desktop clients on both ends; they require no further server

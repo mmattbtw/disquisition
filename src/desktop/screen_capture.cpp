@@ -12,6 +12,8 @@
 #include <QVideoSink>
 #include <QWindowCapture>
 
+#include "desktop/screen_audio.h"
+
 #if defined(Q_OS_MACOS)
 #include "desktop/mac_screen_capture.h"
 #include <CoreGraphics/CGWindow.h>
@@ -130,7 +132,7 @@ ScreenCapture::~ScreenCapture() {
     encoder_.waitForDone();
 }
 
-bool ScreenCapture::start(const ShareSource& source) {
+bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
     stop();
 #if !defined(Q_OS_MACOS)
     if (source.kind == ShareSource::Kind::Screen ? !source.screen : !source.window.isValid()) {
@@ -142,6 +144,7 @@ bool ScreenCapture::start(const ShareSource& source) {
     encoderName_.clear();
     clock_.start();
     nextDueMs_ = 0;
+    const ShareAudioCallback audio = shareAudio ? audioEncoder() : ShareAudioCallback();
 
 #if defined(Q_OS_MACOS)
     // ScreenCaptureKit draws the mouse pointer itself.
@@ -159,7 +162,8 @@ bool ScreenCapture::start(const ShareSource& source) {
             QMetaObject::invokeMethod(QGuiApplication::instance(), [self, generation, error] {
                 if (self && self->generation_ == generation) self->errorOccurred(error);
             });
-        });
+        },
+        audio);
     if (source.kind == ShareSource::Kind::Screen) {
         macCapture_->startDisplay(source.nativeId);
     }
@@ -190,14 +194,37 @@ bool ScreenCapture::start(const ShareSource& source) {
                 [this](QWindowCapture::Error, const QString& message) { emit errorOccurred(message); });
         windowCapture_->start();
     }
+    QString audioError;
+    if (audio && !audioCapture_.start(source, audio, audioError)) {
+        emit audioUnavailable(audioError);
+    }
 #endif
     return true;
+}
+
+ShareAudioCallback ScreenCapture::audioEncoder() {
+    auto encoder = std::make_shared<ScreenAudioEncoder>();
+    if (!encoder->open()) {
+        emit audioUnavailable(QStringLiteral("no Opus encoder could be opened"));
+        return {};
+    }
+    QPointer<ScreenCapture> self(this);
+    const quint64 generation = generation_;
+    return [self, generation, encoder](const float* interleaved, int frames) {
+        for (const QByteArray& packet : encoder->encode(interleaved, frames)) {
+            QMetaObject::invokeMethod(QGuiApplication::instance(), [self, generation, packet] {
+                if (self && self->generation_ == generation) emit self->audioReady(packet);
+            });
+        }
+    };
 }
 
 void ScreenCapture::stop() {
     ++generation_;
 #if defined(Q_OS_MACOS)
     macCapture_.reset();
+#else
+    audioCapture_.stop();
 #endif
     if (screenCapture_) {
         screenCapture_->stop();
