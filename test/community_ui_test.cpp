@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSlider>
 #include <QSslSocket>
 #include <QStackedWidget>
 #include <QTcpServer>
@@ -653,6 +654,37 @@ int main(int argc, char** argv) {
     }));
     remote.setVoice(cid, voiceChannel, false, false, true);
     CHECK(until([&] { return !node->presence(cid, remote.peerId()).muted; }));
+    // Right-clicking someone in voice sets your own volume and mute for them.
+    const auto useVoiceMenu = [&](int volume, bool toggleMute) {
+        QTimer::singleShot(0, [&, volume, toggleMute] {
+            auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+            CHECK(menu);
+            auto* slider = menu->findChild<QSlider*>("streamVolume");
+            CHECK(slider);
+            slider->setValue(volume);
+            for (auto* action : menu->actions())
+                if (toggleMute && action->text() == "Mute")
+                    action->toggle();
+            menu->close();
+        });
+        emit speakingRow()->customContextMenuRequested(QPoint(4, 4));
+    };
+    const auto mutedByYou = [&] {
+        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole + 2).toString() == remote.peerId())
+                return (*it)->data(0, Qt::UserRole + 3).toStringList().contains("muted by you");
+        return false;
+    };
+    useVoiceMenu(40, true);
+    CHECK(QSettings().value("community/voiceVolume/" + remote.peerId()).toInt() == 40);
+    // The slider follows loudness as heard, so 40% plays well below 0.4.
+    CHECK(testAudio::peerVolume(remote.peerId()) < 0.2);
+    CHECK(testAudio::peerMuted(remote.peerId()));
+    CHECK(until(mutedByYou));
+    useVoiceMenu(100, true);
+    CHECK(testAudio::peerVolume(remote.peerId()) == 1.0);
+    CHECK(!testAudio::peerMuted(remote.peerId()));
+    CHECK(until([&] { return !mutedByYou(); }));
     // Audio devices stay editable while the call is connected.
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());

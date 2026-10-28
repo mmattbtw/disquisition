@@ -1,19 +1,19 @@
 #include "desktop/screen_stage.h"
 
+#include <QContextMenuEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
-#include <QContextMenuEvent>
-#include <QMenu>
-#include <QSlider>
-#include <QWidgetAction>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
 #include <cmath>
+
+#include "desktop/volume_menu.h"
 
 StreamView::StreamView(QWidget* parent) : DrawingCanvas(parent) {
     setMinimumSize(160, 90);
@@ -155,25 +155,8 @@ void StreamTile::showVolumeMenu(const QPoint& globalPosition) {
     if (own_ || !watching_)
         return;
     QMenu menu(this);
-    auto* row = new QWidget(&menu);
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(10, 6, 10, 6);
-    auto* label = new QLabel(row);
-    label->setMinimumWidth(label->fontMetrics().horizontalAdvance("Volume 100%"));
-    auto* slider = new QSlider(Qt::Horizontal, row);
-    slider->setObjectName("streamVolume");
-    slider->setRange(0, 100);
-    slider->setFixedWidth(140);
-    slider->setValue(volume_);
-    label->setText(QString("Volume %1%").arg(volume_));
-    layout->addWidget(label);
-    layout->addWidget(slider);
-    auto* action = new QWidgetAction(&menu);
-    action->setDefaultWidget(row);
-    menu.addAction(action);
-    connect(slider, &QSlider::valueChanged, this, [this, label](int percent) {
+    addVolumeSlider(menu, volume_, [this](int percent) {
         volume_ = percent;
-        label->setText(QString("Volume %1%").arg(percent));
         emit volumeChanged(percent);
     });
     menu.exec(globalPosition);

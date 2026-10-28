@@ -91,8 +91,9 @@ private:
     void share();
     void stopSharing();
     void watch(const QString& peer, bool enabled);
-    // `percent` is the slider position; hearing is roughly logarithmic.
     void setStreamVolume(const QString& peer, int percent);
+    void applyVoiceSettings(const QString& peer);
+    void showVoiceMemberMenu(const QString& peer, const QPoint& at);
     QString memberName(const QString& cid, const QString& peer) const;
     void attempt(const std::function<void()>& action);
     void note(const QString& text);

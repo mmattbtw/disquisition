@@ -230,10 +230,12 @@ if(BUILD_DESKTOP_APP)
       include/desktop/screen_drawing_session.h
       include/desktop/screen_stage.h
       include/desktop/share_source.h
+      include/desktop/volume_menu.h
       src/desktop/screen_drawing.cpp
       src/desktop/screen_drawing_session.cpp
       src/desktop/screen_stage.cpp
-      src/desktop/share_source.cpp)
+      src/desktop/share_source.cpp
+      src/desktop/volume_menu.cpp)
     set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
     target_link_libraries(desktop_screen PUBLIC chat_drawing Qt6::Widgets Qt6::Multimedia)
     if(UNIX AND NOT APPLE)

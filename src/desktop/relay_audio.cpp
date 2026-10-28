@@ -170,10 +170,13 @@ void RelayAudio::stop() {
 }
 
 void RelayAudio::receive(const QString& sender, const QByteArray& pcm) {
-    if (!running() || deafened_ || pcm.size() != relayFrameBytes) return;
+    if (!running() || deafened_ || mutedPeers_.contains(sender) ||
+        pcm.size() != relayFrameBytes)
+        return;
     if (!playback_.contains(sender)) {
         auto* sink = new QAudioSink(outputDevice_, outputFormat_, this);
         sink->setBufferSize(outputFormat_.bytesForDuration(200000));
+        sink->setVolume(peerVolumes_.value(sender, 1.0));
         QIODevice* device = sink->start();
         if (!device) {
             delete sink;
@@ -198,6 +201,21 @@ void RelayAudio::receive(const QString& sender, const QByteArray& pcm) {
         }
     }
     playback.device->write(output);
+}
+
+void RelayAudio::setPeerVolume(const QString& sender, qreal volume) {
+    peerVolumes_[sender] = volume;
+    if (playback_.contains(sender)) playback_[sender].sink->setVolume(volume);
+}
+
+void RelayAudio::setPeerMuted(const QString& sender, bool muted) {
+    if (!muted) {
+        mutedPeers_.remove(sender);
+        return;
+    }
+    mutedPeers_.insert(sender);
+    // Stop what is already buffered too.
+    remove(sender);
 }
 
 void RelayAudio::remove(const QString& sender) {
