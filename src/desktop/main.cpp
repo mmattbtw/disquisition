@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QCommandLineParser>
 #include <QFont>
 #include <QFontDatabase>
 
@@ -14,6 +15,13 @@ int main(int argc, char** argv) {
     if (startStagedUpdate(currentInstallation(), disquisition::kBuildNumber)) {
         return 0;
     }
+    QCommandLineParser parser;
+    parser.addHelpOption();
+    parser.addOption({"community-data", "Community identity and metadata directory", "directory"});
+    parser.addPositionalArgument("invite", "Optional disquisition://join/ invite link", "[invite]");
+    parser.process(app);
+    if (parser.isSet("community-data"))
+        app.setProperty("communityDataDirectory", parser.value("community-data"));
 
     // load font
     for (const char* font : {":/fonts/Inter-Regular.ttf", ":/fonts/Inter-SemiBold.ttf",
@@ -21,7 +29,7 @@ int main(int argc, char** argv) {
                              ":/fonts/JetBrainsMono-Regular.ttf"}) {
         QFontDatabase::addApplicationFont(font);
     }
-    
+
     // Stylesheets cannot set word spacing; the stylesheet keeps it when it sets the family.
     QFont buttonFont = QApplication::font();
     buttonFont.setWordSpacing(3);

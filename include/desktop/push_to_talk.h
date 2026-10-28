@@ -18,7 +18,8 @@ class PushToTalk final : public QObject {
 public:
     explicit PushToTalk(QObject* parent = nullptr);
     ~PushToTalk() override;
-    void start(quint32 key);
+    // Local monitoring is also useful when global input access is unavailable.
+    void start(quint32 key, bool globally = true);
     void stop();
     bool held() const { return held_; }
     static quint32 nativeKey(const QKeyEvent* event);

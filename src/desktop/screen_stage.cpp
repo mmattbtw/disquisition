@@ -54,13 +54,14 @@ void StreamView::mouseDoubleClickEvent(QMouseEvent*) {
         emit doubleClicked();
 }
 
-StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
+StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QString& label)
     : QFrame(parent), name_(name), own_(own) {
     setObjectName("streamTile");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    auto* title = new QLabel(own ? name + " (you)" : name, this);
-    title->setObjectName("streamName");
+    title_ = new QLabel(this);
+    title_->setTextFormat(Qt::PlainText);
+    title_->setObjectName("streamName");
     auto* live = new QLabel("LIVE", this);
     live->setObjectName("live");
     stats_ = new QLabel(this);
@@ -74,7 +75,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
 
     auto* header = new QHBoxLayout;
     header->setSpacing(6);
-    header->addWidget(title);
+    header->addWidget(title_);
     header->addWidget(live);
     header->addWidget(stats_, 1);
     header->addWidget(focusButton_);
@@ -82,14 +83,16 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     header->addWidget(stopButton_);
 
     invitation_ = new QWidget(this);
-    auto* inviteText = new QLabel(name + " is sharing their screen", invitation_);
-    inviteText->setAlignment(Qt::AlignCenter);
-    inviteText->setWordWrap(true);
+    invitationText_ = new QLabel(invitation_);
+    invitationText_->setTextFormat(Qt::PlainText);
+    invitationText_->setAlignment(Qt::AlignCenter);
+    invitationText_->setWordWrap(true);
+    setDisplayName(label.isEmpty() ? name : label);
     auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
     auto* invitationLayout = new QVBoxLayout(invitation_);
     invitationLayout->addStretch();
-    invitationLayout->addWidget(inviteText);
+    invitationLayout->addWidget(invitationText_);
     invitationLayout->addWidget(watchButton, 0, Qt::AlignHCenter);
     invitationLayout->addStretch();
 
@@ -115,6 +118,12 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent)
     connect(view_, &StreamView::doubleClicked, this, &StreamTile::fullscreenClicked);
 
     setWatching(own);
+}
+
+void StreamTile::setDisplayName(const QString& label) {
+    label_ = label;
+    title_->setText(own_ ? label + " (you)" : label);
+    invitationText_->setText(label + " is sharing their screen");
 }
 
 void StreamTile::setWatching(bool watching) {
@@ -191,11 +200,11 @@ void ScreenStage::refreshEscapeShortcut() {
     escape_->setEnabled(active);
 }
 
-void ScreenStage::addStream(const QString& name, bool own) {
+void ScreenStage::addStream(const QString& name, bool own, const QString& label) {
     if (find(name)) {
         return;
     }
-    auto* tile = new StreamTile(name, own, this);
+    auto* tile = new StreamTile(name, own, this, label);
     connect(tile->drawing(), &ScreenDrawing::changed, this, &ScreenStage::refreshEscapeShortcut);
     connect(tile, &StreamTile::watchClicked, this, [this, name] { emit watchRequested(name); });
     connect(tile, &StreamTile::stopWatchingClicked, this,
@@ -242,6 +251,13 @@ void ScreenStage::setDetail(const QString& name, const QString& detail) {
     }
 }
 
+void ScreenStage::setDisplayName(const QString& name, const QString& label) {
+    if (auto* tile = find(name))
+        tile->setDisplayName(label);
+    if (fullscreen_ && fullscreenName_ == name)
+        fullscreen_->window()->setWindowTitle(label + "'s screen");
+}
+
 void ScreenStage::showFrame(const QString& name, const QImage& image, qsizetype encodedBytes) {
     if (StreamTile* tile = find(name)) {
         tile->showFrame(image, encodedBytes);
@@ -280,7 +296,7 @@ void ScreenStage::toggleFullscreen(const QString& name) {
     // A child window, so it closes along with the app.
     auto* window = new QWidget(this, Qt::Window);
     window->setAttribute(Qt::WA_DeleteOnClose);
-    window->setWindowTitle(name + "'s screen");
+    window->setWindowTitle(tile->displayName() + "'s screen");
     auto* layout = new QVBoxLayout(window);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(new DrawingControls(tile->drawing(), tile->own(), window));

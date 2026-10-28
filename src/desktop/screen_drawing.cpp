@@ -665,7 +665,7 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
     }
     for (auto it = labels.cbegin(); it != labels.cend(); ++it) {
         const auto& labelData = it.value();
-        const QString name = painter.fontMetrics().elidedText(it.key(), Qt::ElideRight,
+        const QString name = painter.fontMetrics().elidedText(drawing_->authorName(it.key()), Qt::ElideRight,
                                                               qMax(20, qRound(qMin(180.0, area.width() - 12))));
         const QPointF endpoint = labelData.position;
         const qreal labelWidth = qMin(area.width(), painter.fontMetrics().horizontalAdvance(name) + 14.0);

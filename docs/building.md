@@ -4,29 +4,52 @@ Run commands from the repository root unless a section says otherwise.
 
 ## Requirements
 
-For the server, relay and C++ library on Linux or macOS:
+Both the desktop app and relay need a C++20 compiler, CMake 3.16+, and OpenSSL 3+
+Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.6+.
 
-- A C++20 compiler and CMake 3.16 or newer
-- SQLite 3.24 or newer, including development headers
-- POSIX sockets and `poll`
-- Git and network access on the first configure, to download spdlog
+The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
+and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, and `libswscale`.
+Git and network access are needed on the first desktop configure to fetch the
+pinned ZXing-C++ revision used for QR export and import. Voice uses Qt audio.
 
 On macOS with Homebrew:
 
 ```sh
-brew install cmake sqlite
+brew install cmake qt openssl@3 sqlite ffmpeg pkgconf
 ```
 
-CMake uses the Homebrew libraries when available.
+## Ubuntu VPS relay setup
 
-## Build and test
+On Ubuntu 22.04, 24.04, or newer, install the development packages and build:
 
 ```sh
-make
-ctest --test-dir build --output-on-failure
+sudo apt-get update
+sudo apt-get install -y build-essential cmake qt6-base-dev libssl-dev
+make relay
+./build-relay/relay --listen 3333
 ```
 
-Or use CMake directly:
+The relay uses Qt Core and Network without a GUI or display server. Ubuntu's
+`qt6-base-dev` package supplies `Qt6Config.cmake` and is sufficient for the relay;
+Qt Multimedia, SQLite, and FFmpeg are not needed. Use `make relay` on a VPS;
+plain `make` also configures the desktop and its newer Qt dependencies.
+
+If apt cannot find `qt6-base-dev`, enable Ubuntu's Universe repository:
+
+```sh
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository -y universe
+sudo apt-get update
+sudo apt-get install -y qt6-base-dev
+```
+
+If you already installed Qt outside the package manager, point CMake at it:
+
+```sh
+CMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 make relay
+```
+
+## Build and test
 
 ```sh
 cmake -S . -B build
@@ -34,8 +57,23 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The build creates `build/server`, `build/relay` and the static
-`disquisition::client` library. `make clean` removes the `build` directory.
+`make` runs the configure and build commands for the full project, including tests.
+Build just one application with:
+
+```sh
+make desktop  # Desktop client in build-desktop
+make relay    # Relay in build-relay
+```
+
+These targets use separate build directories, disable tests, and configure only
+the requested application. `make desktop BUILD_CHANNEL=staging` selects the staging
+client. Override `DESKTOP_BUILD_DIR` or `RELAY_BUILD_DIR` to choose another output
+directory. `make clean` removes all three build directories.
+
+The CMake application targets are
+`relay` and `disquisition-desktop`. CMake skips the desktop target when its
+Widgets/Multimedia or FFmpeg dependencies are unavailable. Core/Network and
+OpenSSL are required.
 
 ## Desktop app
 
@@ -55,43 +93,31 @@ CMake with `-DDISQUISITION_BUILD_CHANNEL=staging`. Valid channels are
 `development`, `staging` and `production`. CMake remembers the selected channel
 in the build directory; `make` selects development unless `BUILD_CHANNEL` is set.
 
-The desktop target also needs Qt 6.6 or newer with Widgets, Network and
-Multimedia, plus pkg-config and FFmpeg development libraries. CMake checks for
-`libavcodec` version 60 or newer, `libavutil` and `libswscale`. It skips the
-desktop app if Qt or FFmpeg is missing.
-On Linux, install the XCB development package, such as `libxcb1-dev` on
-Debian or Ubuntu, for the presenter drawing overlay on X11. CMake detects
-it through pkg-config. Without it, annotations remain available in the
-video preview and fullscreen viewer.
+On Linux, install `libxcb1-dev` for the X11 presenter overlay.
+
+To build only the desktop app, configure with `-DBUILD_RELAY=OFF`.
+For a relay-only build with no database or multimedia dependencies:
 
 ```sh
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON
-cmake --build build --target disquisition-desktop
+cmake -S . -B build-relay -DBUILD_DESKTOP_APP=OFF -DBUILD_TESTING=OFF
+cmake --build build-relay --target relay --parallel
+./build-relay/relay --listen 3333
 ```
 
-To build only the server, relay and library, configure with
-`-DBUILD_DESKTOP_APP=OFF`. To build only the desktop pieces, use
-`-DBUILD_LEGACY_TARGETS=OFF`.
-
-Local desktop builds need `baresip` on `PATH` for direct voice chat. Install a
-baresip build that includes `menu`, `mixminus`, `vumeter`, `ctrl_tcp`, `g711`
-and the platform audio module: `coreaudio`, `wasapi` or `alsa`.
-The app creates a small isolated baresip profile in the
-platform application-data directory.
+The relay uses the Qt Core/Network and OpenSSL runtime libraries. It does not
+need SQLite, FFmpeg, ncurses, or a separate discovery service.
 
 ### Windows
 
-Windows builds only the desktop pieces by default because the other targets
-use POSIX sockets. Install the desktop dependencies above, including SQLite
-headers and FFmpeg libraries that pkg-config can find. Run the server on Linux
-or macOS.
+Install the dependencies above, including FFmpeg development libraries that
+pkg-config can find. Build with a configured Qt and OpenSSL toolchain:
 
 ```powershell
-cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_LEGACY_TARGETS=OFF
+cmake -S . -B build -DBUILD_RELAY=OFF
 cmake --build build --config Release --target disquisition-desktop
 ```
 
-The [desktop workflow](../.github/workflows/desktop.yml) has the full dependency
+The [desktop workflow](../.github/workflows/desktop.yml) contains the dependency
 setup for all three platforms.
 
 ### Native macOS drawing test
@@ -134,11 +160,8 @@ certificate. Their permissions may need to be granted again after updates.
 
 ## Package a macOS build
 
-To package a local macOS build, use a baresip executable built with the static
-voice modules from `cmake/bundled-baresip`, as in the desktop workflow:
-
 ```sh
-scripts/package-macos.sh "build/disquisition development.app" build-baresip/output/baresip build/disquisition-development.dmg
+scripts/package-macos.sh "build/disquisition development.app" build/disquisition-development.dmg
 ```
 
 The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
@@ -156,15 +179,12 @@ uses a light background for readable Finder labels. Regenerate the artwork with
 ## Repository layout
 
 ```text
-include/client/client.h        Public C++ library API
-include/                       Headers, one folder per component below
-src/common/                    Wire protocol, socket helpers and command-line parsing
-src/server/                    Discovery server
-src/client/                    Client library, connection and peer mesh
-src/relay/                     Multi-user relay
-src/desktop/                   Qt desktop app
+include/                       Component headers
+src/common/                    Local message storage
+src/community/                 Identities, signed metadata, and encrypted peer connections
+src/relay/                     Community registration and encrypted tunnel routing
+src/desktop/                   Qt desktop app and media
 src/web/                       Project website
-test/                          Unit and end-to-end tests (run with ctest)
-examples/                      Standalone library example
-docs/                          Build, usage and contributor guides
+test/                          Model, network, persistence, media, and UI tests
+docs/                          Build, usage, and contributor guides
 ```

@@ -1,38 +1,48 @@
-# Server and relay command-line reference
+# Desktop and relay command-line reference
 
-For server and relay setup, see [networking](networking.md).
-
-## Command-line options
-
-### Server
+## Desktop
 
 ```text
--p, --port <port>       Listen port. Default: 9000
--d, --db <path>         SQLite file. Default: chat.db
--h, --help              Show help
+disquisition [--community-data <directory>] [invite]
 ```
 
-Passing port `0` asks the operating system to select a free server port.
+`--community-data` selects an isolated identity and metadata directory. Only one
+running client can use a directory at a time. The optional positional argument
+is a `disquisition://join/` invite link. The app also accepts invite links through
+the operating system's URL handler where registered.
 
-### Relay
+For example, on macOS:
+
+```sh
+./build/disquisition.app/Contents/MacOS/disquisition --community-data /tmp/second-community-client
+```
+
+On Linux and Windows, use `disquisition-desktop` or `disquisition-desktop.exe`.
+Use the desktop interface to create communities, join invites, and choose relay
+or direct connections. There is no terminal chat interface.
+
+## Relay
 
 ```text
--H, --host <host>       Chat server host. Default: 127.0.0.1
--p, --port <port>       Chat server port. Default: 9000
-    --advertise <host>  Public address announced for the relay
-    --listen <port>     Shared client and peer port. Default: 3333
--h, --help              Show help
+relay [--listen <port>]
 ```
 
-For normal remote use, set `--advertise` to the relay's public DNS name or IP address.
+`--listen` defaults to 3333. Port 0 asks the operating system to choose an
+available port, which the relay prints at startup. Invalid ports or unknown
+options cause startup to fail. `--help` lists supported options.
 
-### Logging
-
-The server and relay log to stdout, one timestamped line per event, for example:
-
-```text
-[2026-09-24 01:36:07.247] [server] [info] alice joined from 127.0.0.1
+```sh
+./build/relay --listen 3333
 ```
 
-The C++ library logs at debug level through spdlog's default logger, which is
-silent unless the host program enables debug output.
+The relay listens for community registrations and encrypted peer tunnels. It
+needs no upstream server address, advertised host, or database. Desktop clients
+enter the reachable relay hostname and optional port in **User Settings**.
+Stop it with Ctrl+C or SIGTERM on systems that provide that signal.
+
+## Local message saving
+
+**User Settings** controls optional SQLite storage, the database file,
+and message retention. Community identities and metadata are always saved,
+independently of chat saving. Messages remain live-only: reconnecting clients
+do not fetch missed messages from the relay or other peers.

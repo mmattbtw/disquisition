@@ -113,7 +113,13 @@ void testMentionQuery() {
 }
 
 void testAttention() {
+    // Notifications are opt-in: muting hides badge counts too.
     NotificationSettings settings;
+    CHECK(settings.muted);
+    MessageAttention muted = attentionFor(settings, Mentioned::ByName);
+    CHECK(!muted.mention && !muted.notify && !muted.alert);
+
+    settings.muted = false;
     MessageAttention attention = attentionFor(settings, Mentioned::No);
     CHECK(!attention.mention && attention.notify && !attention.alert);
     attention = attentionFor(settings, Mentioned::ByName);
@@ -137,15 +143,16 @@ void testAttention() {
     attention = attentionFor(settings, Mentioned::ViaEveryone);
     CHECK(!attention.mention && attention.notify && !attention.alert);
 
-    // Muting silences everything, but mentions still count toward the badge.
+    // Muting silences every indicator, including badge counts.
     settings = {};
     settings.muted = true;
     attention = attentionFor(settings, Mentioned::ByName);
-    CHECK(attention.mention && !attention.notify && !attention.alert);
+    CHECK(!attention.mention && !attention.notify && !attention.alert);
     attention = attentionFor(settings, Mentioned::No);
     CHECK(!attention.mention && !attention.notify && !attention.alert);
 
     settings = {};
+    settings.muted = false;
     CHECK(notifiesActivity(settings));
     settings.activity = false;
     CHECK(!notifiesActivity(settings));

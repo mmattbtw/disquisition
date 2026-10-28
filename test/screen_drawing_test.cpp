@@ -504,11 +504,13 @@ void testUndoFromPresenterToolbarAndTextEditing() {
     QApplication::processEvents();
     CHECK(editor->hasFocus());
     editor->selectAll();
-    editor->insert("#123456");
+    // Keep this edit incomplete: a valid color refreshes the source-less
+    // overlay and hides its toolbar, ending text editing on some platforms.
+    editor->insert("#12345");
     CHECK(editor->isUndoAvailable());
     QApplication::sendEvent(editor, &undo);
     CHECK(drawing.segments().size() == 1); // the editor's undo does not erase ink
-    CHECK(editor->text() != "#123456");
+    CHECK(editor->text() != "#12345");
     drawing.setTool(ScreenDrawing::Tool::Select);
     drawing.select({screenStrokeKey(drawing.segments().last())});
     editor->setText("#123456");
