@@ -42,7 +42,6 @@
 #include <QScreen>
 #include <QCameraDevice>
 #include <QMediaDevices>
-#include <QPermissions>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -3501,12 +3500,23 @@ void CommunityPanel::toggleCamera() {
     const auto request = ++cameraRequest_;
     const auto cid = voiceCid_, channel = voiceChannel_;
     refresh();
-    qApp->requestPermission(QCameraPermission{}, this, [this, request, cid, channel](const QPermission& permission) {
+    requestCameraAccess(this, [this, request, cid, channel](bool granted) {
         if (request != cameraRequest_) return;
-        if (permission.status() != Qt::PermissionStatus::Granted) {
+        if (!granted) {
             cameraPending_ = false;
             refresh();
-            noteError("Camera access was denied. Allow camera access in your system settings.");
+            QMessageBox dialog(QMessageBox::Warning, "Camera access",
+                               "Camera access is disabled. Allow camera access in your system settings, then try again.",
+                               QMessageBox::Cancel, this);
+            dialog.setObjectName("cameraPermissionDenied");
+#if defined(Q_OS_MACOS)
+            auto* settings = dialog.addButton("Open Camera Settings", QMessageBox::ActionRole);
+            dialog.exec();
+            if (dialog.clickedButton() == settings)
+                QDesktopServices::openUrl(QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"));
+#else
+            dialog.exec();
+#endif
             return;
         }
         const auto devices = QMediaDevices::videoInputs();

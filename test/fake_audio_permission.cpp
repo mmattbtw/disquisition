@@ -6,5 +6,9 @@
 void requestMicrophoneAccess(QObject* context, std::function<void(bool)> completion) {
     QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(true); });
 }
+// Camera denial exercises the recovery dialog without requesting OS access.
+void requestCameraAccess(QObject* context, std::function<void(bool)> completion) {
+    QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(false); });
+}
 QStringList availableAudioInputs() { return {"Test microphone"}; }
 QStringList availableAudioOutputs() { return {"Test speakers"}; }

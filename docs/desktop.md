@@ -212,7 +212,9 @@ stop sending video.
 
 Camera video uses the same encrypted peer connections as screen sharing,
 at up to 1280×720 and 30 fps. On macOS, camera access is under System Settings
-> Privacy & Security > Camera for the app's channel name.
+> Privacy & Security > Camera for the app's channel name. The first camera attempt
+shows the native permission prompt. If access was previously denied, choose
+**Open Camera Settings** in the access dialog to enable it.
 
 ## Screen sharing
 
