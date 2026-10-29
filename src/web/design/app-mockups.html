@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>disquisition app mockups</title>
+<style>
+  @font-face { font-family: Inter; src: url("../public/fonts/Inter-Regular.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: Inter; src: url("../public/fonts/Inter-SemiBold.woff2") format("woff2"); font-weight: 600; }
+  @font-face { font-family: Inter; src: url("../public/fonts/Inter-Bold.woff2") format("woff2"); font-weight: 700; }
+  @font-face { font-family: CalSans; src: url("../public/fonts/CalSans-Regular.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: JBMono; src: url("../public/fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; }
+
+  :root {
+    --app: #282c34;
+    --deep: #16181d;
+    --panel: #242830;
+    --panel-2: #1f232a;
+    --line: #3a404a;
+    --line-soft: #323841;
+    --text: #c5c8c6;
+    --text-strong: #e7eae8;
+    --muted: #8a9099;
+    --muted-2: #6f7780;
+    --accent: #9dccca;
+    --red: #ff3131;
+    --orange: #ff751f;
+    --yellow: #ffde59;
+    --green: #7ed957;
+    --cyan: #0cc0df;
+    --purple: #8c52ff;
+    --pink: #ff66c4;
+    --mint: #a5dfdc;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0e1014; }
+  body {
+    font-family: Inter, system-ui, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  .scene { display: none; }
+  .scene.active { display: block; }
+
+  /* ---------- window shell ---------- */
+  .window {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--app);
+    overflow: hidden;
+  }
+  .titlebar {
+    height: 38px;
+    flex: 0 0 38px;
+    display: grid;
+    grid-template-columns: 92px 1fr 92px;
+    align-items: center;
+    background: #1f232a;
+    border-bottom: 1px solid #2c313a;
+    padding: 0 14px;
+    user-select: none;
+  }
+  .lights { display: flex; gap: 8px; align-items: center; }
+  .light { width: 11px; height: 11px; border-radius: 50%; }
+  .light.r { background: #ff5f57; }
+  .light.y { background: #febc2e; }
+  .light.g { background: #28c840; }
+  .titlebar .title {
+    text-align: center;
+    font-size: 12px;
+    color: #9ba3ab;
+    letter-spacing: .01em;
+  }
+  .titlebar .title b { color: #d6dbd9; font-weight: 600; }
+  .tb-right { display: flex; justify-content: flex-end; gap: 10px; color: #7f8790; }
+  .tb-right svg { width: 14px; height: 14px; }
+
+  .connectbar {
+    height: 46px;
+    flex: 0 0 46px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line-soft);
+    background: #262a32;
+  }
+  .field {
+    height: 29px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid #545b66;
+    background: var(--app);
+    color: var(--text-strong);
+    font-size: 12.5px;
+    min-width: 180px;
+  }
+  .field .caret { width: 1px; height: 14px; background: var(--accent); opacity: .9; }
+  .btn {
+    height: 29px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 11px;
+    background: #333842;
+    border: 1px solid #777f89;
+    color: #d5d7d6;
+    font-family: CalSans, Inter, sans-serif;
+    font-size: 13.5px;
+    border-radius: 0;
+    white-space: nowrap;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #20262c; }
+  .btn.ghost { background: transparent; border-color: #4c545f; color: #b7bec6; }
+  .btn.tiny { height: 25px; font-size: 12px; padding: 0 9px; font-family: Inter, sans-serif; }
+  .btn svg { width: 13px; height: 13px; }
+  .spacer { flex: 1; }
+  .conn {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11.5px; color: #8fbfbc;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(126,217,87,.12); }
+
+  .shell { display: flex; flex: 1; min-height: 0; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    width: 258px;
+    flex: 0 0 258px;
+    background: var(--panel);
+    border-right: 1px solid var(--line-soft);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .side-actions { display: flex; gap: 6px; padding: 10px 10px 8px; }
+  .side-actions .btn { flex: 1; justify-content: center; height: 28px; font-size: 12.5px; }
+  .tree { padding: 4px 6px 10px; flex: 1; overflow: hidden; }
+  .tree-row {
+    display: flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 8px;
+    border-radius: 0;
+    color: #b9c0c7; font-size: 13px;
+  }
+  .tree-row svg { width: 14px; height: 14px; opacity: .85; flex: 0 0 auto; }
+  .tree-row .chev { width: 10px; opacity: .55; }
+  .tree-row.community { color: #e4e8e6; font-weight: 600; margin-top: 6px; }
+  .tree-row.community .badge {
+    margin-left: auto; font-size: 10px; color: #9aa2aa; font-weight: 500;
+  }
+  .tree-row.channel { padding-left: 30px; height: 28px; color: #99a2ab; }
+  .tree-row.channel.active { background: #39484b; color: #d5e9e6; }
+  .tree-row.channel .hash { width: 14px; text-align: center; color: #6f7983; font-size: 14px; }
+  .tree-row.channel.active .hash { color: var(--accent); }
+  .unread {
+    margin-left: auto; min-width: 17px; height: 17px; padding: 0 5px;
+    border-radius: 9px; background: var(--accent); color: #20262c;
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .tree-row.voice { padding-left: 30px; height: 29px; color: #9fb0b6; }
+  .tree-row.voice .vicon { color: var(--accent); width: 14px; display: flex; }
+  .tree-row.voice .live-pill {
+    margin-left: auto; font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
+    color: #20262c; background: var(--accent); padding: 1px 5px; font-weight: 700;
+  }
+  .voice-member {
+    display: flex; align-items: center; gap: 8px;
+    height: 28px; padding-left: 48px; font-size: 12.5px; color: #aeb7be;
+  }
+  .voice-member .mini-av { width: 20px; height: 20px; font-size: 9px; }
+  .speaking { box-shadow: 0 0 0 2px rgba(157,204,202,.65); }
+  .voice-member .mic { margin-left: auto; margin-right: 10px; opacity: .55; }
+  .voice-member .mic svg { width: 12px; height: 12px; }
+
+  .side-user {
+    border-top: 1px solid var(--line-soft);
+    padding: 9px 10px;
+    display: flex; align-items: center; gap: 9px;
+    background: #22262d;
+  }
+  .side-user .av { width: 30px; height: 30px; font-size: 12px; }
+  .side-user .who { min-width: 0; flex: 1; }
+  .side-user .who .n { font-size: 12.5px; color: #e2e6e4; font-weight: 600; white-space: nowrap; }
+  .side-user .who .s { font-size: 10.5px; color: var(--muted); }
+  .side-user .gear { color: #8d959e; }
+  .side-user .gear svg { width: 15px; height: 15px; }
+
+  /* ---------- avatars ---------- */
+  .av {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 8px;
+    font-size: 12px; font-weight: 700; color: #171a1f;
+    flex: 0 0 auto;
+    font-family: Inter, sans-serif;
+  }
+  .mini-av {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 5px;
+    font-size: 8px; font-weight: 700; color: #171a1f; flex: 0 0 auto;
+  }
+  .av.maya, .mini-av.maya { background: linear-gradient(140deg, #b7eee9, #7fd4cf); }
+  .av.theo, .mini-av.theo { background: linear-gradient(140deg, #ffe692, #f0c24a); }
+  .av.june, .mini-av.june { background: linear-gradient(140deg, #ffa6d9, #ff66c4); }
+  .av.kofi, .mini-av.kofi { background: linear-gradient(140deg, #b6ee9e, #7ed957); }
+  .av.priya, .mini-av.priya { background: linear-gradient(140deg, #c9b4ff, #8c52ff); color: #fff; }
+  .av.sam, .mini-av.sam { background: linear-gradient(140deg, #ffc09c, #ff751f); }
+  .av.noor, .mini-av.noor { background: linear-gradient(140deg, #a6e5f5, #0cc0df); }
+
+  /* ---------- main ---------- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--app); }
+  .chat-head {
+    height: 58px; flex: 0 0 58px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 16px; border-bottom: 1px solid var(--line-soft);
+  }
+  .chat-head .h { min-width: 0; }
+  .chat-head .h .name { font-size: 16px; font-weight: 700; color: #e9ecea; display: flex; align-items: center; gap: 7px; }
+  .chat-head .h .name .hash { color: var(--accent); font-weight: 400; }
+  .chat-head .h .topic { font-size: 11.5px; color: #8f99a2; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .chat-head .right .btn { height: 27px; font-size: 12.5px; }
+  .chat-head .right .live {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; color: #ffb3b3; background: #3b2529; border: 1px solid #6d3535; padding: 3px 7px;
+    font-weight: 700; letter-spacing: .04em;
+  }
+
+  .content { flex: 1; min-height: 0; display: flex; }
+
+  .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ---------- stage ---------- */
+  .stage {
+    position: relative;
+    flex: 0 0 auto;
+    background: var(--deep);
+    overflow: hidden;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .stage-canvas {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .art {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: #f4efe4;
+    overflow: hidden;
+    box-shadow: 0 18px 60px rgba(0,0,0,.38);
+  }
+  .art .blob { position: absolute; border-radius: 50%; filter: saturate(1.05); }
+  .art .b1 { width: 46%; aspect-ratio: 1; left: -10%; top: 12%; background: radial-gradient(circle at 35% 30%, #ff8a5c, #ff3131 62%, #d91f4a); border-radius: 46% 54% 60% 40% / 52% 44% 56% 48%; }
+  .art .b2 { width: 33%; aspect-ratio: 1; right: 5%; top: -9%; background: #8c52ff; border-radius: 60% 40% 52% 48% / 44% 58% 42% 56%; transform: rotate(18deg); }
+  .art .b3 { width: 26%; aspect-ratio: 1; right: 18%; bottom: -10%; background: #0cc0df; border-radius: 52% 48% 38% 62% / 56% 42% 58% 44%; }
+  .art .b4 { width: 13%; aspect-ratio: 1; left: 34%; bottom: 12%; background: #ffde59; border-radius: 50%; }
+  .art .grid { position: absolute; inset: 0; opacity: .16; background-image: linear-gradient(#1d2126 1px, transparent 1px), linear-gradient(90deg, #1d2126 1px, transparent 1px); background-size: 34px 34px; }
+  .art .word {
+    position: absolute; left: 7%; bottom: 6.5%;
+    font-family: CalSans, sans-serif;
+    color: #171a1f; line-height: .82; letter-spacing: -.02em;
+  }
+  .art .word .l1 { display: block; font-size: 74px; }
+  .art .word .l2 { display: block; font-size: 74px; margin-left: 34px; }
+  .art .tag { position: absolute; right: 7%; top: 7%; font-family: JBMono, monospace; font-size: 10px; letter-spacing: .16em; color: #4d4a44; text-align: right; line-height: 1.7; }
+  .art .ring { position: absolute; width: 20%; aspect-ratio: 1; right: 24%; top: 33%; border: 2px solid #171a1f; border-radius: 50%; opacity: .2; }
+  .art .note { position: absolute; right: 8%; bottom: 8%; font-family: CalSans, sans-serif; color: #171a1f; font-size: 13px; opacity: .7; }
+
+  .stage .scrim-top {
+    position: absolute; inset: 0 0 auto 0; height: 74px; pointer-events: none;
+    background: linear-gradient(rgba(10,12,15,.7), rgba(10,12,15,0));
+  }
+  .stage .scrim-bottom {
+    position: absolute; inset: auto 0 0 0; height: 86px; pointer-events: none;
+    background: linear-gradient(rgba(10,12,15,0), rgba(10,12,15,.65));
+  }
+  .stream-meta {
+    position: absolute; left: 14px; top: 12px;
+    display: flex; align-items: center; gap: 8px;
+    color: #e8ecea; font-size: 12px;
+    text-shadow: 0 1px 8px rgba(0,0,0,.5);
+  }
+  .stream-meta .live {
+    background: #e05252; color: #fff3f3; font-size: 9.5px; font-weight: 800;
+    letter-spacing: .09em; padding: 2px 5px;
+  }
+  .stream-meta .who { font-weight: 600; }
+  .stream-meta .sep { color: #8c959d; }
+  .stream-meta .watch { color: #c2c9ce; font-size: 11px; }
+  .stream-meta .watch b { color: #fff; font-weight: 600; }
+
+  .drawbar {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px;
+    background: #252830; border: 1px solid #535963; border-radius: 9px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    font-size: 11.5px;
+  }
+  .drawbar .tool {
+    height: 27px; display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 8px; border-radius: 4px; color: #dfe3e5;
+    border: 1px solid transparent; background: transparent;
+  }
+  .drawbar .tool svg { width: 13px; height: 13px; }
+  .drawbar .tool.on { background: #365e51; border-color: #67e8a5; color: #eafff5; }
+  .drawbar .vr { width: 1px; height: 20px; background: #414854; margin: 0 2px; }
+  .swatch { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.25); }
+  .swatch.on { box-shadow: 0 0 0 2px #252830, 0 0 0 3.5px #eafff5; }
+  .drawbar .clear { color: #ff9a9a; }
+
+  .stage-bottom {
+    position: absolute; left: 14px; right: 14px; bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11px; color: #b9c1c7;
+  }
+  .stage-bottom .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(21,24,29,.72); border: 1px solid rgba(122,132,142,.45);
+    padding: 4px 8px; border-radius: 4px;
+    backdrop-filter: blur(8px);
+  }
+  .stage-bottom .chip.green { color: #b9f0a4; border-color: rgba(126,217,87,.45); }
+  .stage-bottom .chip b { color: #fff; font-weight: 600; }
+  .stage-bottom .viewers { margin-left: auto; display: flex; align-items: center; gap: -4px; }
+  .stage-bottom .viewers .mini-av { border: 2px solid #16181d; margin-left: -5px; width: 20px; height: 20px; }
+  .stage-bottom .viewers .more { margin-left: 5px; color: #c3cbd0; font-size: 10.5px; }
+
+  /* cursors + ink */
+  .ink { position: absolute; inset: 0; pointer-events: none; }
+  .cursor {
+    position: absolute; z-index: 4;
+    display: flex; align-items: flex-start; gap: 0;
+    transform: translate(-2px, -2px);
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,.4));
+  }
+  .cursor svg { width: 17px; height: 22px; flex: 0 0 auto; margin-top: 1px; }
+  .cursor .tag {
+    font-size: 10.5px; font-weight: 700; color: #16181d;
+    padding: 2px 6px; border-radius: 4px; margin-top: 13px; margin-left: -1px;
+    white-space: nowrap;
+  }
+  .cursor.june .tag { background: var(--pink); }
+  .cursor.theo .tag { background: var(--yellow); }
+  .cursor.kofi .tag { background: var(--green); }
+  .cursor.maya .tag { background: var(--mint); }
+  .cursor.priya .tag { background: #c9b4ff; }
+
+  /* ---------- transcript ---------- */
+  .transcript {
+    flex: 1; min-height: 0;
+    padding: 12px 18px 6px;
+    overflow: hidden;
+    background: var(--app);
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .msg { display: flex; gap: 10px; padding: 7px 0; }
+  .msg .body { min-width: 0; }
+  .msg .line1 { display: flex; align-items: baseline; gap: 7px; }
+  .msg .who { font-size: 12.5px; font-weight: 700; }
+  .msg .time { font-size: 10px; color: #7f8891; font-family: JBMono, monospace; }
+  .msg .text { font-size: 13px; color: #c9cecc; line-height: 1.45; margin-top: 1px; }
+  .msg.maya .who { color: #4fd6e6; }
+  .msg.theo .who { color: var(--yellow); }
+  .msg.june .who { color: var(--pink); }
+  .msg.kofi .who { color: var(--green); }
+  .msg.priya .who { color: #b79cff; }
+  .mention { background: #3e4372; color: #c9cdfb; padding: 0 3px; }
+  .msg .edited { font-size: 10px; color: #7f8891; }
+  .attach {
+    margin-top: 7px; width: 288px; height: 118px; border-radius: 3px;
+    background: #f4efe4; border: 1px solid #3a4048; overflow: hidden; position: relative;
+  }
+  .attach .ab { position: absolute; border-radius: 50%; }
+  .attach .ab1 { width: 100px; height: 100px; left: 20px; top: 16px; background: #ff3131; border-radius: 46% 54% 60% 40%/52% 44% 56% 48%; }
+  .attach .ab2 { width: 70px; height: 70px; right: 30px; top: 10px; background: #8c52ff; border-radius: 62% 38% 48% 52%/40% 60% 40% 60%; }
+  .attach .ab3 { width: 46px; height: 46px; right: 64px; bottom: 14px; background: #0cc0df; border-radius: 50%; }
+  .attach .aw { position: absolute; left: 16px; bottom: 10px; font-family: CalSans; font-size: 20px; color: #171a1f; }
+  .attach .ap { position: absolute; left: 190px; top: 36px; width: 20px; height: 20px; background: #ffde59; border-radius: 50%; }
+  .attach .badge { position: absolute; right: 6px; bottom: 6px; background: rgba(22,24,29,.82); color: #cfd5d5; font-size: 9px; padding: 2px 5px; border-radius: 3px; }
+
+  .composer-wrap { padding: 6px 18px 12px; }
+  .composer {
+    display: flex; align-items: center; gap: 7px;
+    background: #282c34; border: 1px solid #545b66; padding: 4px 5px 4px 10px;
+    min-height: 38px;
+  }
+  .composer .ph { font-size: 12.5px; color: #7c858e; flex: 1; display: flex; align-items: center; gap: 7px; }
+  .composer .ph .hash { color: var(--accent); }
+  .composer .btn { height: 26px; font-size: 12px; font-family: Inter, sans-serif; padding: 0 8px; }
+  .composer .btn.send { background: var(--accent); border-color: var(--accent); color: #20262c; font-weight: 600; }
+
+  /* ---------- members ---------- */
+  .members {
+    width: 196px; flex: 0 0 196px;
+    border-left: 1px solid var(--line-soft);
+    background: #262a32;
+    padding: 12px 10px;
+    overflow: hidden;
+  }
+  .members .group {
+    font-size: 9.5px; letter-spacing: .12em; color: #818a93;
+    text-transform: uppercase; font-weight: 700; padding: 0 6px 6px;
+  }
+  .members .group span { color: #6e7780; font-weight: 500; letter-spacing: 0; }
+  .member {
+    display: flex; align-items: center; gap: 8px;
+    height: 38px; padding: 0 6px; border-radius: 3px;
+  }
+  .member .av { width: 27px; height: 27px; font-size: 10.5px; border-radius: 7px; }
+  .member .info { min-width: 0; flex: 1; }
+  .member .nn { font-size: 12px; color: #d7dcda; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+  .member .role { font-size: 8px; text-transform: uppercase; letter-spacing: .06em; color: #20262c; background: #b9c3c7; padding: 1px 3px; font-weight: 800; }
+  .member .role.owner { background: var(--accent); }
+  .member .role.mod { background: #d9c58a; }
+  .member .sub { font-size: 10px; color: #7f8891; white-space: nowrap; display: flex; align-items: center; gap: 4px; margin-top: 1px; }
+  .member .sub.sharing { color: #ffb3b3; }
+  .member .sub.voice { color: #9dccca; }
+  .member .state { color: #7b848d; display: flex; gap: 5px; }
+  .member .state svg { width: 12px; height: 12px; }
+
+  /* ---------- voice bar ---------- */
+  .voicebar {
+    height: 42px; flex: 0 0 42px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: #1e2a2c; border-top: 1px solid #324345;
+    font-size: 11.5px;
+  }
+  .voicebar .status { display: flex; align-items: center; gap: 8px; color: #c7d3d1; }
+  .voicebar .status .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(126,217,87,.1); }
+  .voicebar .status b { color: #e5eeec; font-weight: 600; }
+  .voicebar .status .sep { color: #5f7072; }
+  .voicebar .status .names { color: #92a6a4; }
+  .voicebar .btns { margin-left: auto; display: flex; gap: 5px; }
+  .voicebar .btn { height: 26px; font-size: 12px; font-family: Inter, sans-serif; background: #2b3638; border-color: #435557; }
+  .voicebar .btn.share { background: var(--accent); border-color: var(--accent); color: #20262c; font-weight: 600; }
+
+  /* ---------- small scenes ---------- */
+  .stage-only { position: relative; width: 100%; height: 100%; background: var(--deep); overflow: hidden; }
+  .stage-only .art { height: 100%; margin-top: 0; }
+  .stage-only .drawbar { top: 18px; }
+  .stage-only .stream-meta { top: 18px; left: 18px; }
+  .stage-only .stage-bottom { bottom: 18px; left: 18px; right: 18px; }
+
+  .modal-scene {
+    width: 100%; height: 100%;
+    background: radial-gradient(120% 120% at 20% 0%, #2c313a 0%, #1b1f25 55%, #14171c 100%);
+    display: flex; align-items: center; justify-content: center;
+    padding: 28px;
+  }
+  .dialog {
+    width: 100%; max-width: 660px;
+    background: #242830; border: 1px solid #5c6870;
+    box-shadow: 0 30px 90px rgba(0,0,0,.55);
+  }
+  .dialog-header { padding: 18px 22px 12px; border-bottom: 1px solid #353c45; }
+  .dialog-header .eyebrow { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  .dialog-header h2 { font-family: CalSans, sans-serif; font-weight: 400; font-size: 25px; color: #eef1ef; margin: 4px 0 3px; }
+  .dialog-header p { margin: 0; font-size: 12px; color: #97a1a8; }
+  .dialog-body { display: flex; gap: 22px; padding: 18px 22px; }
+  .dialog-body .left { flex: 1; min-width: 0; }
+  .label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #8d979f; font-weight: 700; margin-bottom: 6px; }
+  .linkrow { display: flex; gap: 6px; }
+  .linkrow .link {
+    flex: 1; min-width: 0; height: 34px; display: flex; align-items: center;
+    border: 1px solid #545b66; background: #1f232a; padding: 0 10px;
+    font-family: JBMono, monospace; font-size: 10.5px; color: #b9e4e1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .linkrow .btn { height: 34px; }
+  .hint { font-size: 11px; color: #8d979f; margin-top: 8px; line-height: 1.5; }
+  .perm { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; }
+  .checkbox {
+    width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px;
+    border: 1px solid #7c8791; background: #282c34;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .checkbox.on { background: var(--accent); border-color: var(--accent); color: #20262c; }
+  .checkbox svg { width: 10px; height: 10px; }
+  .perm .pt { font-size: 12px; color: #d3d8d6; }
+  .perm .ps { font-size: 10.5px; color: #8d979f; margin-top: 1px; line-height: 1.4; }
+  .qr-wrap { flex: 0 0 172px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .qr { width: 150px; height: 150px; background: #f2f4ef; padding: 9px; }
+  .qr-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(25, 1fr); grid-template-rows: repeat(25, 1fr); }
+  .qr-grid i { display: block; background: transparent; }
+  .qr-grid i.on { background: #171a1f; }
+  .qr-wrap .qs { font-size: 10px; color: #8d979f; text-align: center; }
+  .dialog-footer { display: flex; align-items: center; gap: 8px; padding: 13px 22px; border-top: 1px solid #353c45; background: #22262d; }
+  .dialog-footer .note { font-size: 10.5px; color: #828c94; margin-right: auto; }
+  .dialog-footer .btn { height: 30px; font-size: 13px; }
+
+  .chat-scene {
+    width: 100%; height: 100%; background: var(--app);
+    display: flex; flex-direction: column;
+  }
+  .chat-scene .chat-head { flex: 0 0 56px; }
+  .chat-scene .transcript { padding: 16px 24px 8px; }
+  .chat-scene .composer-wrap { padding: 8px 24px 16px; }
+  .chat-scene .msg .text { font-size: 13.5px; }
+</style>
+</head>
+<body>
+
+<!-- ============================= HERO ============================= -->
+<div class="scene" id="scene-hero" style="width:1440px;height:900px">
+  <div class="window" style="width:1440px;height:900px">
+    <div class="titlebar">
+      <div class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+      <div class="title"><b>disquisition</b> — The Studio</div>
+      <div class="tb-right">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c2 1.6 2 9.4 0 11M8 2.5c-2 1.6-2 9.4 0 11"/></svg>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><path d="M2.5 6.5h11"/></svg>
+      </div>
+    </div>
+    <div class="connectbar">
+      <div class="field">maya <span class="caret"></span></div>
+      <button class="btn primary">Connect</button>
+      <button class="btn ghost">User Settings</button>
+      <div class="spacer"></div>
+      <div class="conn"><span class="dot"></span> Connected <span style="color:#4f5c60">·</span> relay.disquisition.app</div>
+    </div>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="side-actions">
+          <button class="btn">Create</button>
+          <button class="btn">Join</button>
+        </div>
+        <div class="tree">
+          <div class="tree-row community">
+            <svg class="chev" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 3.5l3 3 3-3"/></svg>
+            <span class="pinwheel" data-size="18"></span>
+            The Studio
+            <span class="badge">6 online</span>
+          </div>
+          <div class="tree-row channel active"><span class="hash">#</span> general</div>
+          <div class="tree-row channel"><span class="hash">#</span> show-and-tell <span class="unread">4</span></div>
+          <div class="tree-row channel"><span class="hash">#</span> sound-design</div>
+          <div class="tree-row channel"><span class="hash">#</span> bugs</div>
+          <div class="tree-row voice">
+            <span class="vicon"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 2.5v9M9 4v6M2 5.5v3M12 5v4"/></svg></span>
+            Lounge
+            <span class="live-pill">live</span>
+          </div>
+          <div class="voice-member"><span class="mini-av maya">M</span> maya <span class="speaking" style="display:none"></span><span class="mic"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="1.5" width="4" height="7" rx="2"/><path d="M3 7a4 4 0 008 0M7 11v2"/></svg></span></div>
+          <div class="voice-member"><span class="mini-av theo">T</span> theo <span class="mic"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="1.5" width="4" height="7" rx="2"/><path d="M3 7a4 4 0 008 0M7 11v2"/></svg></span></div>
+          <div class="voice-member"><span class="mini-av june">J</span> june <span class="mic"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="1.5" width="4" height="7" rx="2"/><path d="M3 7a4 4 0 008 0M7 11v2"/></svg></span></div>
+          <div class="voice-member"><span class="mini-av kofi">K</span> kofi <span class="mic"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="1.5" width="4" height="7" rx="2"/><path d="M3 7a4 4 0 008 0M7 11v2"/></svg></span></div>
+
+          <div class="tree-row community">
+            <svg class="chev" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 3.5l3 3 3-3"/></svg>
+            <span class="pinwheel" data-size="18" data-colors="purple"></span>
+            Night Shift
+            <span class="badge">2 online</span>
+          </div>
+          <div class="tree-row community" style="margin-top:2px">
+            <svg class="chev" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 3.5l3 3 3-3"/></svg>
+            <span class="pinwheel" data-size="18" data-colors="green"></span>
+            Pixel Club
+            <span class="unread">9</span>
+          </div>
+        </div>
+        <div class="side-user">
+          <span class="av maya">M</span>
+          <div class="who"><div class="n">maya</div><div class="s">in voice · Lounge</div></div>
+          <span class="gear"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.6v1.6M8 12.8v1.6M1.6 8h1.6M12.8 8h1.6M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1"/></svg></span>
+        </div>
+      </aside>
+
+      <div class="main">
+        <div class="chat-head">
+          <div class="h">
+            <div class="name"><span class="hash">#</span> general</div>
+            <div class="topic">Cover v3 is up for review — screen share is open, pen is on.</div>
+          </div>
+          <div class="right">
+            <button class="btn">Invite</button>
+            <button class="btn ghost">Manage</button>
+          </div>
+        </div>
+
+        <div class="content">
+          <div class="center">
+            <div class="stage" style="height:392px">
+              <div class="stage-canvas">
+                <div class="art">
+                  <div class="grid"></div>
+                  <div class="blob b1"></div>
+                  <div class="blob b2"></div>
+                  <div class="blob b3"></div>
+                  <div class="blob b4"></div>
+                  <div class="ring"></div>
+                  <div class="tag">STUDIO<br>ISSUE 03<br>———<br>COVER</div>
+                  <div class="word"><span class="l1">make</span><span class="l2">noise</span></div>
+                  <div class="note">june</div>
+                  <svg class="ink" viewBox="0 0 1000 625" preserveAspectRatio="xMidYMid slice">
+                    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M624 190c38-27 90-17 102 20 13 40-34 75-82 79-50 4-98-18-101-53-3-43 48-70 96-63 45 7 71 33 65 61" stroke="#ff66c4" stroke-width="5.5"/>
+                      <path d="M255 367c58 17 112 10 159-18" stroke="#ffde59" stroke-width="5"/>
+                      <path d="M262 398l-31 7 18-29" stroke="#ffde59" stroke-width="5"/>
+                      <path d="M741 336c28 9 50 6 71-9 7-6 5-15-3-16-17-2-35 7-48 19-9 9-6 18 6 21 15 3 34-2 48-12" stroke="#7ed957" stroke-width="4.5"/>
+                    </g>
+                  </svg>
+                  <div class="cursor june" style="left:63%;top:24%">
+                    <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ff66c4" stroke="#16181d" stroke-width="1.4"/></svg>
+                    <span class="tag">june</span>
+                  </div>
+                  <div class="cursor theo" style="left:23%;top:56%">
+                    <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ffde59" stroke="#16181d" stroke-width="1.4"/></svg>
+                    <span class="tag">theo</span>
+                  </div>
+                  <div class="cursor kofi" style="left:74%;top:49%">
+                    <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#7ed957" stroke="#16181d" stroke-width="1.4"/></svg>
+                    <span class="tag">kofi</span>
+                  </div>
+                </div>
+              </div>
+              <div class="scrim-top"></div>
+              <div class="scrim-bottom"></div>
+              <div class="stream-meta">
+                <span class="live">LIVE</span>
+                <span class="who">june</span> <span class="sep">is sharing</span>
+                <span>“cover-v3.fig”</span>
+                <span class="sep">·</span>
+                <span class="watch"><b>5</b> watching</span>
+              </div>
+              <div class="drawbar">
+                <span class="tool on"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 12l1-4 7-7 3 3-7 7-4 1z"/><path d="M8.5 2.5l3 3"/></svg> pen</span>
+                <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 10l7-7 2 2-7 7H3z"/><path d="M2 12h10"/></svg></span>
+                <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 2l8 8M11 2l-8 8" stroke-dasharray="1 2"/><rect x="2" y="2" width="10" height="10" rx="1"/></svg></span>
+                <span class="vr"></span>
+                <span class="swatch on" style="background:#ff66c4"></span>
+                <span class="swatch" style="background:#ffde59"></span>
+                <span class="swatch" style="background:#7ed957"></span>
+                <span class="swatch" style="background:#0cc0df"></span>
+                <span class="swatch" style="background:#ffffff"></span>
+                <span class="vr"></span>
+                <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 7a4 4 0 104-4"/><path d="M7 0.8V3L5 1.9z"/></svg></span>
+                <span class="tool clear">clear all</span>
+              </div>
+              <div class="stage-bottom">
+                <span class="chip green"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 5.5l2.2 2.2 4.8-5.4"/></svg> drawing allowed</span>
+                <span class="chip">pen, eraser &amp; laser for everyone</span>
+                <span class="viewers">
+                  <span class="mini-av maya">M</span><span class="mini-av theo">T</span><span class="mini-av june">J</span><span class="mini-av kofi">K</span><span class="mini-av priya">P</span>
+                  <span class="more">+1</span>
+                </span>
+              </div>
+            </div>
+
+            <div class="transcript">
+              <div class="msg maya">
+                <span class="av maya">M</span>
+                <div class="body">
+                  <div class="line1"><span class="who">maya</span><span class="time">10:42</span></div>
+                  <div class="text">cover v3 is up — be brutal</div>
+                </div>
+              </div>
+              <div class="msg theo">
+                <span class="av theo">T</span>
+                <div class="body">
+                  <div class="line1"><span class="who">theo</span><span class="time">10:42</span></div>
+                  <div class="text">the gradient needs more chaos, honestly</div>
+                </div>
+              </div>
+              <div class="msg june">
+                <span class="av june">J</span>
+                <div class="body">
+                  <div class="line1"><span class="who">june</span><span class="time">10:43</span></div>
+                  <div class="text">one sec — drawing what I mean <span class="mention">@maya</span></div>
+                </div>
+              </div>
+              <div class="msg kofi">
+                <span class="av kofi">K</span>
+                <div class="body">
+                  <div class="line1"><span class="who">kofi</span><span class="time">10:43</span></div>
+                  <div class="text">circling the bit that works. pen is my love language</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="composer">
+                <span class="ph"><span class="hash">#</span> Message #general</span>
+                <button class="btn">Image</button>
+                <button class="btn">GIF</button>
+                <button class="btn send">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <aside class="members">
+            <div class="group">Online <span>— 6</span></div>
+            <div class="member"><span class="av maya">M</span><div class="info"><div class="nn">maya <span class="role owner">owner</span></div><div class="sub voice">in voice · hosting</div></div></div>
+            <div class="member"><span class="av june">J</span><div class="info"><div class="nn">june <span class="role mod">mod</span></div><div class="sub sharing">sharing screen · drawing</div></div></div>
+            <div class="member"><span class="av theo">T</span><div class="info"><div class="nn">theo</div><div class="sub voice">in voice</div></div><div class="state"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4" y="1" width="4" height="6" rx="2"/><path d="M2.5 5.5a3.5 3.5 0 007 0M6 9v2"/></svg></div></div>
+            <div class="member"><span class="av kofi">K</span><div class="info"><div class="nn">kofi</div><div class="sub voice">in voice</div></div></div>
+            <div class="member"><span class="av priya">P</span><div class="info"><div class="nn">priya</div><div class="sub">watching</div></div></div>
+            <div class="member"><span class="av sam">S</span><div class="info"><div class="nn">sam</div><div class="sub">watching</div></div></div>
+            <div class="group" style="margin-top:12px;padding-top:10px;border-top:1px solid #353c45">Offline <span>— 2</span></div>
+            <div class="member"><span class="av noor">N</span><div class="info"><div class="nn" style="color:#8d959e">noor</div><div class="sub">last seen yesterday</div></div></div>
+            <div class="member"><span class="av" style="background:#3a4048;color:#8d959e">A</span><div class="info"><div class="nn" style="color:#8d959e">ari</div><div class="sub">last seen 3d ago</div></div></div>
+          </aside>
+        </div>
+
+        <div class="voicebar">
+          <div class="status">
+            <span class="pulse"></span>
+            <b>Voice · Lounge</b>
+            <span class="sep">|</span>
+            <span class="names">maya, theo, june, kofi</span>
+            <span class="sep">|</span>
+            <span style="color:#7f9a97">june is sharing “cover-v3.fig”</span>
+          </div>
+          <div class="btns">
+            <button class="btn">Leave voice</button>
+            <button class="btn">Mute</button>
+            <button class="btn">Deafen</button>
+            <button class="btn share">Share screen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================== DRAWING ========================== -->
+<div class="scene" id="scene-drawing" style="width:1280px;height:800px">
+  <div class="stage-only">
+    <div class="art" style="height:88%;margin-top:3%">
+      <div class="grid"></div>
+      <div class="blob b1"></div>
+      <div class="blob b2"></div>
+      <div class="blob b3"></div>
+      <div class="blob b4"></div>
+      <div class="ring"></div>
+      <div class="tag">STUDIO<br>ISSUE 03<br>———<br>COVER</div>
+      <div class="word"><span class="l1">make</span><span class="l2">noise</span></div>
+      <div class="note">june</div>
+      <svg class="ink" viewBox="0 0 1000 625" preserveAspectRatio="xMidYMid slice">
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M622 190c38-27 90-17 102 20 13 40-34 75-82 79-50 4-98-18-101-53-3-43 48-70 96-63 45 7 71 33 65 61" stroke="#ff66c4" stroke-width="5.5"/>
+          <path d="M255 367c58 17 112 10 159-18" stroke="#ffde59" stroke-width="5"/>
+          <path d="M262 398l-31 7 18-29" stroke="#ffde59" stroke-width="5"/>
+          <path d="M741 336c28 9 50 6 71-9 7-6 5-15-3-16-17-2-35 7-48 19-9 9-6 18 6 21 15 3 34-2 48-12" stroke="#7ed957" stroke-width="4.5"/>
+          <path d="M320 238c26-22 62-20 78 2 13 19 2 43-21 52-24 9-53 1-60-18-6-16 4-32 20-38" stroke="#0cc0df" stroke-width="4.5"/>
+          <path d="M452 300c-10 26-8 51 4 72M441 318l-8-19 19 4" stroke="#a5dfdc" stroke-width="4.5"/>
+          <path d="M158 240c-14 30-12 61 6 83 15 19 43 21 60 6" stroke="#8c52ff" stroke-width="4.5" opacity=".95"/>
+        </g>
+      </svg>
+      <div class="cursor june" style="left:63%;top:24%">
+        <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ff66c4" stroke="#16181d" stroke-width="1.4"/></svg>
+        <span class="tag">june</span>
+      </div>
+      <div class="cursor theo" style="left:23%;top:56%">
+        <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ffde59" stroke="#16181d" stroke-width="1.4"/></svg>
+        <span class="tag">theo</span>
+      </div>
+      <div class="cursor kofi" style="left:74%;top:49%">
+        <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#7ed957" stroke="#16181d" stroke-width="1.4"/></svg>
+        <span class="tag">kofi</span>
+      </div>
+      <div class="cursor priya" style="left:43%;top:43%">
+        <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#c9b4ff" stroke="#16181d" stroke-width="1.4"/></svg>
+        <span class="tag">priya</span>
+      </div>
+      <div class="cursor maya" style="left:14%;top:37%">
+        <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#a5dfdc" stroke="#16181d" stroke-width="1.4"/></svg>
+        <span class="tag">maya</span>
+      </div>
+    </div>
+    <div class="scrim-top"></div>
+    <div class="scrim-bottom"></div>
+    <div class="stream-meta">
+      <span class="live">LIVE</span>
+      <span class="who">june</span> <span class="sep">is sharing</span>
+      <span>“cover-v3.fig”</span>
+      <span class="sep">·</span>
+      <span class="watch"><b>5</b> watching</span>
+    </div>
+    <div class="drawbar">
+      <span class="tool on"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 12l1-4 7-7 3 3-7 7-4 1z"/><path d="M8.5 2.5l3 3"/></svg> pen</span>
+      <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 10l7-7 2 2-7 7H3z"/><path d="M2 12h10"/></svg> eraser</span>
+      <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="10" height="10" rx="1"/><path d="M3 2l8 8" stroke-dasharray="1 2"/></svg> select</span>
+      <span class="vr"></span>
+      <span class="swatch" style="background:#ff66c4"></span>
+      <span class="swatch on" style="background:#ffde59"></span>
+      <span class="swatch" style="background:#7ed957"></span>
+      <span class="swatch" style="background:#0cc0df"></span>
+      <span class="swatch" style="background:#8c52ff"></span>
+      <span class="swatch" style="background:#ffffff"></span>
+      <span class="vr"></span>
+      <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3.5l4-2 4 2v5c0 2-2 3.5-4 4-2-.5-4-2-4-4z"/><path d="M5 7l1.5 1.5L9.5 5"/></svg> laser</span>
+      <span class="tool"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 7a4 4 0 104-4"/><path d="M7 0.8V3L5 1.9z"/></svg></span>
+      <span class="vr"></span>
+      <span class="tool clear">clear all</span>
+    </div>
+    <div class="stage-bottom">
+      <span class="chip green"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 5.5l2.2 2.2 4.8-5.4"/></svg> drawing allowed</span>
+      <span class="chip"><b>june</b> can erase anyone's strokes</span>
+      <span class="chip">laser trail · follows the pen</span>
+      <span class="viewers">
+        <span class="mini-av maya">M</span><span class="mini-av theo">T</span><span class="mini-av june">J</span><span class="mini-av kofi">K</span><span class="mini-av priya">P</span>
+        <span class="more">+1</span>
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- =========================== INVITE =========================== -->
+<div class="scene" id="scene-invite" style="width:820px;height:620px">
+  <div class="modal-scene">
+    <div class="dialog">
+      <div class="dialog-header">
+        <div class="eyebrow">The Studio</div>
+        <h2>Invite people in</h2>
+        <p>Share a link or a QR code. No server, no sign-up — the community comes with you.</p>
+      </div>
+      <div class="dialog-body">
+        <div class="left">
+          <div class="label">Invite link</div>
+          <div class="linkrow">
+            <div class="link">disquisition.app/i/7f3k-9maya-q2</div>
+            <button class="btn primary">Copy</button>
+          </div>
+          <div class="hint">Anyone with this link can join as a member while the community exists. Revoke it any time.</div>
+          <div class="perm">
+            <span class="checkbox on"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 5.2l2.2 2.2 4.8-5"/></svg></span>
+            <div><div class="pt">Let new members draw on screen shares</div><div class="ps">The sharer still controls it per stream.</div></div>
+          </div>
+          <div class="perm">
+            <span class="checkbox on"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 5.2l2.2 2.2 4.8-5"/></svg></span>
+            <div><div class="pt">Can join voice and share screen</div><div class="ps">Admins can mute, move, or remove people.</div></div>
+          </div>
+          <div class="perm">
+            <span class="checkbox"></span>
+            <div><div class="pt">Invite others</div><div class="ps">Members can create their own invite links.</div></div>
+          </div>
+        </div>
+        <div class="qr-wrap">
+          <div class="qr"><div class="qr-grid" id="qr"></div></div>
+          <div class="qs">Scan to join<br>expires with the community</div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <div class="note">Invites are signed with the community's key.</div>
+        <button class="btn ghost">Cancel</button>
+        <button class="btn primary">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ CHAT ============================ -->
+<div class="scene" id="scene-chat" style="width:900px;height:620px">
+  <div class="chat-scene">
+    <div class="chat-head">
+      <div class="h">
+        <div class="name"><span class="hash">#</span> show-and-tell</div>
+        <div class="topic">Post the thing. Half-finished counts.</div>
+      </div>
+      <div class="right">
+        <button class="btn">Invite</button>
+        <button class="btn ghost">Manage</button>
+      </div>
+    </div>
+    <div class="transcript">
+      <div class="msg priya">
+        <span class="av priya">P</span>
+        <div class="body">
+          <div class="line1"><span class="who">priya</span><span class="time">09:58</span></div>
+          <div class="text">cover explorations from this morning. the third one is the one.</div>
+          <div class="attach">
+            <div class="ab ab1"></div><div class="ab ab2"></div><div class="ab ab3"></div>
+            <div class="aw">make noise</div>
+            <div class="ap"></div>
+            <div class="badge">cover-v3.png · 1.2 MB</div>
+          </div>
+        </div>
+      </div>
+      <div class="msg theo">
+        <span class="av theo">T</span>
+        <div class="body">
+          <div class="line1"><span class="who">theo</span><span class="time">09:59</span></div>
+          <div class="text">ok that purple blob is doing exactly what it should</div>
+        </div>
+      </div>
+      <div class="msg maya">
+        <span class="av maya">M</span>
+        <div class="body">
+          <div class="line1"><span class="who">maya</span><span class="time">10:01</span></div>
+          <div class="text"><span class="mention">@priya</span> hop in Lounge? I want to draw on it</div>
+        </div>
+      </div>
+      <div class="msg june">
+        <span class="av june">J</span>
+        <div class="body">
+          <div class="line1"><span class="who">june</span><span class="time">10:02</span></div>
+          <div class="text">already there. bringing the pink pen</div>
+        </div>
+      </div>
+      <div class="msg kofi">
+        <span class="av kofi">K</span>
+        <div class="body">
+          <div class="line1"><span class="who">kofi</span><span class="time">10:02</span></div>
+          <div class="text">this is the most fun I've had reviewing a cover</div>
+        </div>
+      </div>
+    </div>
+    <div class="composer-wrap">
+      <div class="composer">
+        <span class="ph"><span class="hash">#</span> Message #show-and-tell</span>
+        <button class="btn">Image</button>
+        <button class="btn">GIF</button>
+        <button class="btn send">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // pinwheel marks
+  const COLORS = ["#ff3131","#ff751f","#ffde59","#7ed957","#0cc0df","#8c52ff","#ff66c4","#a5dfdc"];
+  const CUSTOM = {
+    purple: ["#8c52ff","#c9b4ff","#6d3fd4","#b79cff","#8c52ff","#c9b4ff","#6d3fd4","#b79cff"],
+    green: ["#7ed957","#a5dfdc","#0cc0df","#7ed957","#a5dfdc","#0cc0df","#7ed957","#a5dfdc"],
+  };
+  function pinwheel(size, colors, petals = 8) {
+    const c = colors || COLORS;
+    const cx = 50, cy = 50;
+    let paths = "";
+    for (let i = 0; i < petals; i++) {
+      const base = i * (360 / petals) - 90;
+      const a1 = (base - 23) * Math.PI / 180;
+      const a2 = (base + 23) * Math.PI / 180;
+      const ai = (base + 27) * Math.PI / 180;
+      const rOuter = 41, rInner = 12;
+      const p1 = [cx + Math.cos(a1) * rOuter, cy + Math.sin(a1) * rOuter];
+      const p2 = [cx + Math.cos(a2) * rOuter, cy + Math.sin(a2) * rOuter];
+      const pi = [cx + Math.cos(ai) * rInner, cy + Math.sin(ai) * rInner];
+      paths += `<path d="M${p1[0].toFixed(2)} ${p1[1].toFixed(2)} L${p2[0].toFixed(2)} ${p2[1].toFixed(2)} L${pi[0].toFixed(2)} ${pi[1].toFixed(2)} Z" fill="${c[i % c.length]}" stroke="${c[i % c.length]}" stroke-width="5" stroke-linejoin="round"/>`;
+    }
+    return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" style="flex:0 0 auto">${paths}</svg>`;
+  }
+  document.querySelectorAll(".pinwheel").forEach(el => {
+    const size = +el.dataset.size || 20;
+    const colors = CUSTOM[el.dataset.colors] || COLORS;
+    el.innerHTML = pinwheel(size, colors);
+    el.style.display = "inline-flex";
+  });
+
+  // fake QR
+  const qr = document.getElementById("qr");
+  if (qr) {
+    const N = 25;
+    const cells = [];
+    let seed = 1337;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const finder = (x, y) => (x < 7 && y < 7) || (x >= N - 7 && y < 7) || (x < 7 && y >= N - 7);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let on = false;
+      if (finder(x, y)) {
+        const fx = x >= N - 7 ? x - (N - 7) : x;
+        const fy = y >= N - 7 ? y - (N - 7) : y;
+        const ring = Math.min(fx, fy, 6 - Math.max(fx, fy));
+        on = ring !== 1 && ring !== 5;
+      } else {
+        on = rnd() > 0.56;
+      }
+      const cell = document.createElement("i");
+      if (on) cell.className = "on";
+      cells.push(cell);
+    }
+    cells.forEach(c => qr.appendChild(c));
+  }
+
+  // scene select
+  const scene = new URLSearchParams(location.search).get("s") || "hero";
+  const el = document.getElementById("scene-" + scene);
+  if (el) el.classList.add("active");
+  document.title = "scene:" + scene;
+</script>
+</body>
+</html>

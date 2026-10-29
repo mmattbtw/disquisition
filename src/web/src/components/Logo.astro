@@ -1,0 +1,24 @@
+---
+import { Image } from 'astro:assets';
+import mark from '../assets/brand/disquisition-mark.png';
+
+interface Props {
+	size?: number;
+	class?: string;
+	label?: string;
+}
+
+const { size = 32, class: className = '', label } = Astro.props;
+---
+
+<Image
+	src={mark}
+	width={size * 2}
+	height={size * 2}
+	alt={label ?? ''}
+	class={`logo-mark ${className}`}
+	style={`width:${size}px;height:${size}px`}
+	loading="eager"
+	decoding="async"
+	aria-hidden={label ? undefined : 'true'}
+/>
