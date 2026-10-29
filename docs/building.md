@@ -174,9 +174,22 @@ using the same automatic certificate selection as the build, with ad-hoc
 signing as a fallback. If you configured a specific signing identity, set
 `DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.
 The DMG is not notarized.
-The icon uses the desktop app's charcoal and mint colors, and the installer
-uses a light background for readable Finder labels. Regenerate the artwork with
-`swift scripts/generate-macos-artwork.swift`.
+The app icon source is `resources/icons/disquisition.icon`, an Icon Composer
+document. macOS bundles its compiled `Assets.car` for the layered icon and an
+ICNS fallback for older systems. Windows embeds the ICO in the executable;
+Windows and Linux also use the shared PNG for window and notification icons.
+The website uses dark PNG and ICO exports for contrast at small sizes.
+Desktop icons up to 64 pixels and notification icons also use the dark rendition.
+
+After editing the source in Icon Composer, regenerate all exports and the DMG
+background on a Mac with Xcode 26 or later selected via `xcode-select`:
+
+```sh
+swift scripts/generate-macos-artwork.swift
+```
+
+Commit the generated assets with the source. Normal builds on all platforms use
+the checked-in exports and do not need Icon Composer.
 
 ## Repository layout
 

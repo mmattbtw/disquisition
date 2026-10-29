@@ -1,0 +1,2 @@
+// Keep the application icon first for Explorer and taskbar shortcuts.
+IDI_ICON1 ICON "disquisition.ico"
