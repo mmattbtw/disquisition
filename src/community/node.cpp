@@ -776,6 +776,11 @@ void Node::handle(Link* link, const QJsonObject& message) {
                 link->allowed.remove(cid);
                 link->synchronizing.remove(cid);
             }
+            else if (models_.contains(cid) && models_[cid].isMember(peerId())) {
+                // We may have missed this peer's admission while offline.
+                // Request its signed history without granting it access to ours.
+                send(link, {{"type", "state-request"}, {"community", cid}});
+            }
             return;
         }
         link->allowed.insert(cid);
@@ -790,6 +795,11 @@ void Node::handle(Link* link, const QJsonObject& message) {
         else
             sendState(link, cid);
         emit changed();
+        return;
+    }
+    if (type == "state-request") {
+        if (writable(link, cid))
+            sendState(link, cid);
         return;
     }
     if (type == "state-begin") {

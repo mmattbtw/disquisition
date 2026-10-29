@@ -835,6 +835,33 @@ void preferredHostCoordinatesAdmissions() {
     CHECK(coordinated);
 }
 
+void returningMemberLearnsAdmissionsFromANewMember() {
+    QTemporaryDir ad, bd, cd;
+    Node a(ad.path()), b(bd.path()), c(cd.path());
+    diagnostics(a);
+    diagnostics(b);
+    diagnostics(c);
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1") &&
+          c.start("carol", "127.0.0.1"));
+    const auto cid = a.createCommunity("offline member list");
+    const auto invite = a.invite(cid);
+    b.joinCommunity(invite);
+    CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    b.stop();
+    CHECK(until([&] { return a.online(cid).size() == 1; }));
+    c.joinCommunity(invite);
+    CHECK(until([&] { return a.online(cid).size() == 2 && c.online(cid).size() == 2; }));
+    CHECK(!b.communities()[cid].isMember(c.peerId()));
+    a.stop(); // Only the newly admitted member can supply the missing history.
+    CHECK(until([&] { return c.online(cid).size() == 1; }));
+    CHECK(b.start("bob", "127.0.0.1"));
+    CHECK(until([&] {
+        return b.communities()[cid].isMember(c.peerId()) && b.online(cid).size() == 2 &&
+               c.online(cid).size() == 2 &&
+               b.communities()[cid].revision() == c.communities()[cid].revision();
+    }));
+}
+
 void allOfflineRestoresMetadataAndNeverReplaysMissedChat() {
     QTemporaryDir ad, bd;
     QString cid;
@@ -901,6 +928,7 @@ int main(int argc, char** argv) {
     relayHostMigrationAndReconnection();
     returningHostSynchronizesBeforeAcceptingInvites();
     preferredHostCoordinatesAdmissions();
+    returningMemberLearnsAdmissionsFromANewMember();
     allOfflineRestoresMetadataAndNeverReplaysMissedChat();
     std::puts("community_network_test: ok");
 }
