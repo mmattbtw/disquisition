@@ -1,0 +1,38 @@
+name: Desktop build downloads
+
+on:
+  workflow_run:
+    workflows: [desktop]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Serialize the lookup and write so overlapping builds cannot post twice.
+    # This short job shares a queue across PRs, including fork PRs.
+    concurrency:
+      group: desktop-download-comments
+      cancel-in-progress: false
+      queue: max
+    steps:
+      # workflow_run uses the default branch. Never check out or execute PR code
+      # or downloaded artifacts in this job, which has a write token.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Post or update desktop downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          BUILD_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BUILD_RESULT: ${{ github.event.workflow_run.conclusion }}
+        run: bash .github/scripts/comment-desktop-build.sh
