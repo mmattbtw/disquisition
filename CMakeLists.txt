@@ -475,10 +475,10 @@ if(BUILD_TESTING AND TARGET disquisition-desktop)
   get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)
   list(REMOVE_ITEM COMMUNITY_UI_SOURCES src/desktop/main.cpp resources/macos/disquisition.icns
     resources/macos/Assets.car resources/windows/disquisition.rc
-    src/desktop/relay_audio.cpp)
+    src/desktop/relay_audio.cpp src/desktop/audio_permission.cpp)
   # Keep hardware capture/playback outside UI tests; control startup outcomes
   # while exercising the real settings, presence, and failure handling.
-  list(APPEND COMMUNITY_UI_SOURCES test/fake_relay_audio.cpp)
+  list(APPEND COMMUNITY_UI_SOURCES test/fake_relay_audio.cpp test/fake_audio_permission.cpp)
   get_target_property(COMMUNITY_UI_LIBRARIES disquisition-desktop LINK_LIBRARIES)
   get_target_property(COMMUNITY_UI_DEFINITIONS disquisition-desktop COMPILE_DEFINITIONS)
   add_executable(community_ui_test test/community_ui_test.cpp ${COMMUNITY_UI_SOURCES})

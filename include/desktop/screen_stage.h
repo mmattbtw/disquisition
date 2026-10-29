@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QFrame>
 #include <QImage>
 #include <QList>
@@ -128,7 +129,8 @@ struct StageParticipant {
     bool sharing = false;
 };
 
-// A person in the call as a 16:9 tile. It glows green while they talk.
+// A person in the call as a 16:9 tile, showing their camera when it is on. It
+// glows green while they talk.
 class ParticipantTile final : public QWidget {
     Q_OBJECT
 public:
@@ -137,6 +139,9 @@ public:
     const StageParticipant& participant() const { return person_; }
     void setSpeaking(bool speaking);
     bool speaking() const { return speaking_; }
+    // The newest camera frame, or a null image to show their picture instead.
+    void setVideo(const QImage& image);
+    const QImage& video() const { return video_; }
 
 signals:
     void clicked(const QPoint& globalPosition);
@@ -148,6 +153,7 @@ protected:
 private:
     StageParticipant person_;
     bool speaking_ = false;
+    QImage video_;
 };
 
 // The call, laid out like a video call. Screen shares and people share one
@@ -173,6 +179,9 @@ public:
     void setAudience(const QString& name, const QList<QPixmap>& avatars, const QStringList& names);
     void setParticipants(const QList<StageParticipant>& people);
     void setSpeaking(const QString& id, bool speaking);
+    // Shows someone's camera in their tile; a null image ends it.
+    void setCameraFrame(const QString& id, const QImage& image);
+    QImage cameraFrame(const QString& id) const { return cameras_.value(id); }
     QString focused() const { return focused_; }
     void setFocused(const QString& name);
 
@@ -197,6 +206,7 @@ private:
     QList<StreamTile*> tiles_;
     QList<ParticipantTile*> people_;
     QSet<QString> speaking_;
+    QHash<QString, QImage> cameras_;
     QString focused_;
     bool stripHidden_ = false;
     QPushButton* stripToggle_ = nullptr;

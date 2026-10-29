@@ -1,5 +1,7 @@
 #include "desktop/screen_capture.h"
 
+#include <QCamera>
+#include <QCameraDevice>
 #include <QCursor>
 #include <QGuiApplication>
 #include <QMediaCaptureSession>
@@ -210,6 +212,29 @@ bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
     return true;
 }
 
+bool ScreenCapture::startCamera(const QCameraDevice& device) {
+    stop();
+    if (device.isNull()) return false;
+    h264_ = std::make_shared<H264Encoder>();
+    encoderName_.clear();
+    clock_.start();
+    nextDueMs_ = 0;
+    session_ = new QMediaCaptureSession(this);
+    sink_ = new QVideoSink(this);
+    camera_ = new QCamera(device, this);
+    session_->setCamera(camera_);
+    session_->setVideoSink(sink_);
+    connect(sink_, &QVideoSink::videoFrameChanged, this, &ScreenCapture::handleFrame);
+    const auto generation = generation_;
+    connect(camera_, &QCamera::errorOccurred, this,
+            [this, generation](QCamera::Error, const QString& message) {
+                if (generation == generation_) emit errorOccurred(message);
+            },
+            Qt::QueuedConnection);
+    camera_->start();
+    return true;
+}
+
 ShareAudioCallback ScreenCapture::audioEncoder() {
     auto encoder = std::make_shared<ScreenAudioEncoder>();
     if (!encoder->open()) {
@@ -237,6 +262,13 @@ void ScreenCapture::stop() {
 #else
     audioCapture_.stop();
 #endif
+    if (camera_) {
+        camera_->disconnect(this);
+        camera_->stop();
+        session_->setCamera(nullptr);
+        delete camera_;
+        camera_ = nullptr;
+    }
     if (screenCapture_) {
         screenCapture_->stop();
         screenCapture_->disconnect(this);
@@ -260,6 +292,7 @@ void ScreenCapture::stop() {
 }
 
 bool ScreenCapture::running() const {
+    if (camera_) return true;
 #if defined(Q_OS_MACOS)
     return macCapture_ && macCapture_->running();
 #else
@@ -269,7 +302,9 @@ bool ScreenCapture::running() const {
 }
 
 void ScreenCapture::handleFrame(const QVideoFrame& frame) {
-    submitFrame([frame] { return frameImage(frame); });
+    // toImage applies camera rotation and mirroring metadata as well.
+    if (camera_) submitFrame([frame] { return frame.toImage(); });
+    else submitFrame([frame] { return frameImage(frame); });
 }
 
 void ScreenCapture::handleImage(QImage image) {

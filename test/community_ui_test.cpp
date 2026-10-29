@@ -388,6 +388,7 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return panel->findChild<QPushButton*>("communityMute")->isVisible(); }));
     CHECK(panel->findChild<QPushButton*>("communityDeafen")->isVisible());
     CHECK(panel->findChild<QPushButton*>("communityShare")->isVisible());
+    CHECK(panel->findChild<QPushButton*>("communityCamera")->isVisible());
     bool selfUnderChannel = false;
     for (QTreeWidgetItemIterator item(tree); *item; ++item)
         if ((*item)->data(0, Qt::UserRole + 2).toString() == node->peerId() && (*item)->parent() &&
@@ -894,6 +895,37 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return !tile->image().isNull(); }));
     CHECK(tile->image().size() == source.size());
     CHECK(tile->image().pixelColor(100, 100).red() > 150);
+    // Camera feeds subscribe automatically and play in the person's call
+    // tile. Identical frame ids must go through separate assemblers and decoders.
+    int cameraRequests = 0;
+    const auto cameraConnection = QObject::connect(&remote, &community::Node::packetReceived,
+        [&](const QString&, const QString&, const QString&, const QString& kind, const QJsonObject& data) {
+            if (kind == "watch-camera" && data.value("enabled").toBool()) ++cameraRequests;
+        });
+    const auto cameraOf = [&](const QString& peer) {
+        for (auto* person : stage->findChildren<ParticipantTile*>())
+            if (person->participant().id == peer) return person->video();
+        return QImage();
+    };
+    remote.setVoice(cid, voiceChannel, false, false, true, true);
+    CHECK(until([&] { return cameraRequests > 0; }));
+    CHECK(remote.sendScreenFrame(cid, voiceChannel, node->peerId(), 1, {video}, true, true));
+    CHECK(until([&] { return !cameraOf(remote.peerId()).isNull(); }));
+    CHECK(cameraOf(remote.peerId()).size() == source.size());
+    CHECK(tile->image().pixelColor(100, 100).red() > 150);
+    // Stopping the screen subscription leaves the camera subscribed.
+    stage->stopWatchingRequested(remote.peerId());
+    H264Encoder faceEncoder;
+    QImage face(320, 180, QImage::Format_RGB32);
+    face.fill(QColor("#3a78d8"));
+    QByteArray faceVideo;
+    bool faceKeyframe = false;
+    CHECK(faceEncoder.encode(face, face.size(), 30, 0, faceVideo, faceKeyframe) && faceKeyframe);
+    CHECK(remote.sendScreenFrame(cid, voiceChannel, node->peerId(), 2, {faceVideo}, true, true));
+    CHECK(until([&] { return cameraOf(remote.peerId()).pixelColor(100, 100).blue() > 150; }));
+    stage->watchRequested(remote.peerId());
+    CHECK(remote.sendScreenFrame(cid, voiceChannel, node->peerId(), 2, {video}, true));
+    CHECK(until([&] { return tile->image().pixelColor(100, 100).red() > 150; }));
     window.show();
     QApplication::processEvents();
     CHECK(window.grab().save("community-screen-share.png"));
@@ -909,6 +941,12 @@ int main(int argc, char** argv) {
     pip->findChild<QPushButton*>("streamPipClose")->click();
     CHECK(pip->isHidden());
     window.hide();
+    // Turning the camera off returns the tile to their picture and leaves the share.
+    remote.setVoice(cid, voiceChannel, false, false, true, false);
+    CHECK(until([&] { return stage->cameraFrame(remote.peerId()).isNull(); }));
+    CHECK(cameraOf(remote.peerId()).isNull());
+    CHECK(stage->drawing(remote.peerId()) != nullptr);
+    QObject::disconnect(cameraConnection);
     // A viewer joining a static screen needs an immediately requested keyframe.
     video.clear();
     keyframe = false;

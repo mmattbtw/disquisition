@@ -138,6 +138,38 @@ void testDragAndStopWatching() {
     CHECK(!tile.drawing()->enabled() && !tile.drawing()->penActive());
 }
 
+void testCameraPlaysInPersonTile() {
+    ScreenStage stage;
+    stage.addStream("alice", true, "Alice");
+    StageParticipant alice;
+    alice.id = "alice";
+    alice.name = "Alice";
+    stage.setParticipants({alice});
+    QImage screen(32, 18, QImage::Format_RGB32), face(16, 9, QImage::Format_RGB32);
+    screen.fill(Qt::red);
+    face.fill(Qt::blue);
+    stage.showFrame("alice", screen, 10);
+    stage.setCameraFrame("alice", face);
+    const auto people = stage.findChildren<ParticipantTile*>();
+    CHECK(people.size() == 1 && people[0]->video() == face);
+    CHECK(stage.image("alice") == screen);
+    // A camera arriving before the call's people is shown once they are.
+    stage.setCameraFrame("bob", face);
+    StageParticipant bob;
+    bob.id = "bob";
+    bob.name = "Bob";
+    stage.setParticipants({alice, bob});
+    CHECK(stage.findChildren<ParticipantTile*>().size() == 2);
+    for (auto* person : stage.findChildren<ParticipantTile*>())
+        CHECK(person->video() == face);
+    // Screen removal leaves the camera live; ending the camera leaves the person.
+    stage.removeStream("alice");
+    stage.setCameraFrame("alice", screen);
+    CHECK(people[0]->video() == screen);
+    stage.setCameraFrame("alice", {});
+    CHECK(people[0]->video().isNull() && stage.cameraFrame("alice").isNull());
+}
+
 void testAccessibleControls() {
     ScreenDrawing drawing;
     ScreenDrawingSession session("alice", "alice", &drawing, true);
@@ -873,6 +905,7 @@ int main(int argc, char** argv) {
     testLetterboxingAndResize();
     testDragAndStopWatching();
     testAccessibleControls();
+    testCameraPlaysInPersonTile();
     testEscapeFromAnotherControl();
     testEscapeFromPresenterWindows();
     testClosingFullscreenRestoresEscape();
