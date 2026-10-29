@@ -1,5 +1,6 @@
 #include "desktop/share_picker.h"
 
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QListWidget>
 #include <QPushButton>
@@ -31,6 +32,11 @@ SharePicker::SharePicker(QWidget* parent) : QDialog(parent) {
     showNotice(windows_, "loading...");
     showNotice(screens_, "loading...");
 
+    shareAudio_ = new QCheckBox("Share audio", this);
+    shareAudio_->setChecked(true);
+    shareAudio_->setToolTip("A window shares its application's sound. A screen shares everything "
+                            "you hear except voice chat.");
+
     auto* buttons = new QDialogButtonBox(this);
     goLive_ = buttons->addButton("Go Live", QDialogButtonBox::AcceptRole);
     goLive_->setObjectName("primary");
@@ -38,6 +44,7 @@ SharePicker::SharePicker(QWidget* parent) : QDialog(parent) {
 
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(tabs_, 1);
+    layout->addWidget(shareAudio_);
     layout->addWidget(buttons);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -91,6 +98,10 @@ std::optional<ShareSource> SharePicker::chosen() const {
         return std::nullopt;
     }
     return sources_.at(item->data(kSourceIndexRole).toInt());
+}
+
+bool SharePicker::shareAudio() const {
+    return shareAudio_->isChecked();
 }
 
 QListWidget* SharePicker::currentList() const {

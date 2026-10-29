@@ -8,7 +8,8 @@ Both the desktop app and relay need a C++20 compiler, CMake 3.16+, and OpenSSL 3
 Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.6+.
 
 The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
-and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, and `libswscale`.
+and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, `libswresample`,
+and `libswscale`.
 Git and network access are needed on the first desktop configure to fetch the
 pinned ZXing-C++ revision used for QR export and import. Voice uses Qt audio.
 
@@ -93,7 +94,8 @@ CMake with `-DDISQUISITION_BUILD_CHANNEL=staging`. Valid channels are
 `development`, `staging` and `production`. CMake remembers the selected channel
 in the build directory; `make` selects development unless `BUILD_CHANNEL` is set.
 
-On Linux, install `libxcb1-dev` for the X11 presenter overlay.
+On Linux, install `libxcb1-dev` for the X11 presenter overlay, and
+`libpulse-dev` for sound in screen shares, which also works with PipeWire.
 
 To build only the desktop app, configure with `-DBUILD_RELAY=OFF`.
 For a relay-only build with no database or multimedia dependencies:

@@ -19,6 +19,7 @@
 #include "common/media_limits.h"
 #include "desktop/screen_h264.h"
 #include "desktop/share_source.h"
+#include "desktop/system_audio_capture.h"
 
 class QMediaCaptureSession;
 class QScreen;
@@ -27,6 +28,7 @@ class QVideoFrame;
 class QVideoSink;
 class QWindowCapture;
 class MacScreenCapture;
+class ScreenAudioEncoder;
 
 // Requests macOS Screen Recording access when needed. Other platforms return true.
 bool requestScreenRecordingAccess();
@@ -40,13 +42,14 @@ constexpr qint64 kMaxScreenBacklogBytes = 64 * 1024;
 // Screen sharing carried in framed TCP messages. Each captured frame is scaled
 // down, encoded as H.264 and split into chunks that each fit one protocol
 // frame. Encoding runs on a worker thread; frames that arrive while it is busy
-// are dropped, so the frame rate falls instead of the UI stalling.
+// are dropped, so the frame rate falls instead of the UI stalling. The
+// share's sound, when asked for, is encoded as Opus on its capture thread.
 class ScreenCapture final : public QObject {
     Q_OBJECT
 public:
     explicit ScreenCapture(QObject* parent = nullptr);
     ~ScreenCapture() override;
-    bool start(const ShareSource& source);
+    bool start(const ShareSource& source, bool shareAudio);
     void stop();
     bool running() const;
     // The encoder in use, such as "h264_nvenc".
@@ -60,12 +63,18 @@ public:
 signals:
     // Frames depend on the ones before them; keyframes do not.
     void frameReady(quint32 frameId, const QList<QByteArray>& chunks, bool keyframe);
+    // One Opus packet of the share's sound.
+    void audioReady(const QByteArray& packet);
+    // The share goes on without sound.
+    void audioUnavailable(const QString& reason);
     void errorOccurred(const QString& message);
 
 private:
     void handleFrame(const QVideoFrame& frame);
     void handleImage(QImage image);
     void submitFrame(std::function<QImage()> image);
+    // Encodes captured sound and posts each packet back to this object.
+    ShareAudioCallback audioEncoder();
 
     // One thread, never retired, so the encoder always runs on the thread it
     // was opened on and frames are encoded in order.
@@ -83,6 +92,8 @@ private:
     QVideoSink* sink_ = nullptr;
 #if defined(Q_OS_MACOS)
     std::unique_ptr<MacScreenCapture> macCapture_;
+#else
+    SystemAudioCapture audioCapture_;
 #endif
     std::function<qint64()> backlog_;
     QElapsedTimer clock_;

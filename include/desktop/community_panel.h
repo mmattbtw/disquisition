@@ -10,6 +10,7 @@
 #include "desktop/image_transfer.h"
 #include "desktop/relay_audio.h"
 #include "desktop/push_to_talk.h"
+#include "desktop/screen_audio.h"
 #include "desktop/screen_drawing_session.h"
 #include "desktop/screen_capture.h"
 
@@ -90,6 +91,9 @@ private:
     void share();
     void stopSharing();
     void watch(const QString& peer, bool enabled);
+    void setStreamVolume(const QString& peer, int percent);
+    void applyVoiceSettings(const QString& peer);
+    void showVoiceMemberMenu(const QString& peer, const QPoint& at);
     QString memberName(const QString& cid, const QString& peer) const;
     void attempt(const std::function<void()>& action);
     void note(const QString& text);
@@ -166,6 +170,7 @@ private:
     std::unique_ptr<PresenterOverlay> presenterOverlay_;
     RelayAudio audio_;
     ScreenCapture capture_;
+    ScreenAudioPlayer screenAudio_;
     ImageAssembler images_;
     ScreenFrameAssembler frames_;
     std::map<QString, ScreenStreamDecoder> decoders_;

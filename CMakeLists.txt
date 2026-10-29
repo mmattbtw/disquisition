@@ -132,10 +132,11 @@ if(BUILD_DESKTOP_APP)
   endif()
   # Linux desktop notifications go over D-Bus when Qt has it.
   find_package(Qt6 6.6 COMPONENTS Widgets Network Multimedia OPTIONAL_COMPONENTS DBus QUIET)
-  # Screen sharing encodes and decodes H.264 with FFmpeg.
+  # Screen sharing encodes and decodes H.264 video and Opus sound with FFmpeg.
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
-    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec>=60 libavutil libswscale)
+    pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET
+      libavcodec>=60 libavutil libswresample libswscale)
   endif()
   if(Qt6_FOUND AND FFMPEG_FOUND)
     # Keep the barcode dependency static without changing the app's other
@@ -149,6 +150,20 @@ if(BUILD_DESKTOP_APP)
         GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
         GIT_TAG d6068bcebeb8fd9f0d35a99b00d202be86a14dbe)
       FetchContent_MakeAvailable(community_zxing)
+      # ZXing builds some files with -Os, where GCC calls std::string's move
+      # constructor instead of inlining it, and MinGW's libstdc++ does not
+      # export it. Build them like the rest.
+      if(MINGW)
+        get_target_property(zxing_sources ZXing SOURCES)
+        foreach(source IN LISTS zxing_sources)
+          get_source_file_property(flags "${community_zxing_SOURCE_DIR}/core/${source}"
+            DIRECTORY "${community_zxing_SOURCE_DIR}/core" COMPILE_FLAGS)
+          if(flags STREQUAL "-Os")
+            set_source_files_properties("${community_zxing_SOURCE_DIR}/core/${source}"
+              DIRECTORY "${community_zxing_SOURCE_DIR}/core" PROPERTIES COMPILE_FLAGS "")
+          endif()
+        endforeach()
+      endif()
     endfunction()
     configure_community_qr()
     add_library(community_qr STATIC src/community/qr.cpp)
@@ -226,10 +241,12 @@ if(BUILD_DESKTOP_APP)
       include/desktop/screen_drawing_session.h
       include/desktop/screen_stage.h
       include/desktop/share_source.h
+      include/desktop/volume_menu.h
       src/desktop/screen_drawing.cpp
       src/desktop/screen_drawing_session.cpp
       src/desktop/screen_stage.cpp
-      src/desktop/share_source.cpp)
+      src/desktop/share_source.cpp
+      src/desktop/volume_menu.cpp)
     set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
     target_link_libraries(desktop_screen PUBLIC chat_drawing Qt6::Widgets Qt6::Multimedia)
     if(UNIX AND NOT APPLE)
@@ -244,6 +261,16 @@ if(BUILD_DESKTOP_APP)
     endif()
 
     # The headers are listed so AUTOMOC finds the Q_OBJECT classes in them.
+    # Opus sound for screen shares, and the device helpers it shares with voice.
+    add_library(desktop_audio STATIC
+      include/desktop/audio_device.h
+      include/desktop/screen_audio.h
+      src/desktop/audio_device.cpp
+      src/desktop/screen_audio.cpp)
+    set_target_properties(desktop_audio PROPERTIES AUTOMOC ON)
+    target_include_directories(desktop_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_audio PUBLIC Qt6::Multimedia PRIVATE PkgConfig::FFMPEG)
+
     add_executable(disquisition-desktop MACOSX_BUNDLE
       include/desktop/audio_permission.h
       include/desktop/chat_media.h
@@ -257,6 +284,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/screen_capture.h
       include/desktop/screen_h264.h
       include/desktop/share_picker.h
+      include/desktop/system_audio_capture.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
       src/desktop/desktop_notifier.cpp
@@ -269,7 +297,8 @@ if(BUILD_DESKTOP_APP)
       src/desktop/relay_audio.cpp
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
-      src/desktop/share_picker.cpp)
+      src/desktop/share_picker.cpp
+      src/desktop/system_audio_capture.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     # No console window in release builds; dev and staging keep it for logs.
     if(DISQUISITION_BUILD_CHANNEL STREQUAL "production")
@@ -282,7 +311,8 @@ if(BUILD_DESKTOP_APP)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
-      chat_recent_messages desktop_media desktop_penguins desktop_notifications desktop_screen desktop_update
+      chat_recent_messages desktop_audio desktop_media desktop_penguins desktop_notifications
+      desktop_screen desktop_update
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -321,8 +351,19 @@ if(BUILD_DESKTOP_APP)
       target_link_libraries(disquisition-desktop PRIVATE PkgConfig::XCB)
       target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_XCB)
     endif()
+    # Linux shares sound through PulseAudio, or PipeWire's PulseAudio server.
+    if(UNIX AND NOT APPLE)
+      pkg_check_modules(PULSE QUIET IMPORTED_TARGET libpulse)
+      if(PULSE_FOUND)
+        target_link_libraries(disquisition-desktop PRIVATE PkgConfig::PULSE)
+        target_compile_definitions(disquisition-desktop PRIVATE DISQUISITION_HAVE_PULSE)
+      else()
+        message(STATUS "libpulse not found; Linux screen shares will have no sound")
+      endif()
+    endif()
     if(WIN32)
-      target_link_libraries(disquisition-desktop PRIVATE user32)
+      # Shared sound is captured with WASAPI process loopback.
+      target_link_libraries(disquisition-desktop PRIVATE user32 ole32 mmdevapi)
     endif()
     if(APPLE)
       set(DISQUISITION_CODESIGN_IDENTITY "AUTO" CACHE STRING
@@ -387,7 +428,7 @@ if(BUILD_DESKTOP_APP)
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
   else()
-    message(STATUS "FFmpeg (libavcodec, libavutil, libswscale) not found; skipping disquisition-desktop")
+    message(STATUS "FFmpeg (libavcodec, libavutil, libswresample, libswscale) not found; skipping disquisition-desktop")
   endif()
 endif()
 
@@ -396,6 +437,12 @@ if(BUILD_TESTING AND TARGET desktop_media)
   target_link_libraries(desktop_media_test PRIVATE desktop_media)
   add_test(NAME desktop_media_test COMMAND desktop_media_test)
   set_tests_properties(desktop_media_test PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_audio)
+  add_executable(screen_audio_test test/screen_audio_test.cpp)
+  target_link_libraries(screen_audio_test PRIVATE desktop_audio)
+  add_test(NAME screen_audio_test COMMAND screen_audio_test)
 endif()
 
 if(BUILD_TESTING AND TARGET disquisition-desktop)

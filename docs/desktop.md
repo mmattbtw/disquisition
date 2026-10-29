@@ -212,6 +212,19 @@ or double-click a video to fill the screen with it; press Esc or double-click
 again to return. With more than one share on the stage, choose focus to
 enlarge one above the others.
 
+**Share audio**, on by default in the picker, sends the share's sound with
+the picture. A window share sends only that application's sound. A screen
+share sends everything the computer plays except Disquisition itself, so
+voice chat is never sent back to the people in it. Viewers hear a share only
+while watching it, through the output device chosen in User Settings, and
+deafening silences shares as well as voice. Right-click a stream you are
+watching, in its tile or fullscreen, to set its volume without changing voice
+chat. The app remembers it for each person who shares. Sharing sound works on macOS, on
+Windows 10 version 2004 and newer, and on Linux with PulseAudio or PipeWire.
+A window share goes out without sound when its application cannot be
+identified, such as on Wayland or when two windows share a title; the chat
+says when a share has no sound and why.
+
 To annotate a share, the person sharing chooses **allow drawing** on their
 tile. Drawing starts off for every new share. Everyone watching can then
 choose **pen** and drag over the video. The default pen color matches the
@@ -277,12 +290,15 @@ Windows excludes the overlay using capture exclusion on Windows 10 version
 2004 and newer. X11 display capture can include the overlay in the video.
 
 The app encodes H.264 at up to 1920×1080 and 30 fps, about 5 Mbps, on the GPU
-when it can. Video and drawing travel through authenticated, encrypted community
-peer links, directly or through a relay. Only peers in the same voice channel can
-exchange drawing events. The sharing client owns permissions and drawing history,
-validates incoming strokes, and sends the current ink to new viewers. Drawing
-history stays in memory for the current share. A viewer who falls behind skips
-video frames and resumes at the next keyframe, which arrives every two seconds.
+when it can. Video, sound and drawing travel through authenticated, encrypted
+community peer links, directly or through a relay. Only peers in the same voice
+channel can exchange drawing events. The sharing client owns permissions and
+drawing history, validates incoming strokes, and sends the current ink to new
+viewers. Drawing history stays in memory for the current share. A viewer who
+falls behind skips video frames and resumes at the next keyframe, which arrives
+every two seconds. Sound is 128 kbps Opus. Video goes to each connection a chunk
+at a time, so sound and voice are not held up behind a large frame, and sound
+carries on when the picture skips.
 
 If the sharing client or relay does not support drawing, the viewer shows
 "drawing unavailable: update both apps and the relay" instead of silently

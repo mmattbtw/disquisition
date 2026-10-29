@@ -12,5 +12,8 @@ constexpr std::uint32_t kMaxImageChunks = static_cast<std::uint32_t>(
     (kMaxImageBytes + kImageChunkSize - 1) / kImageChunkSize);
 constexpr std::size_t kScreenChunkBytes = 16 * 1024 - 256;
 constexpr int kMaxScreenChunks = 64;
+// A 20 ms Opus packet of a share's sound at 128 kbps is about 320 bytes; this
+// leaves headroom.
+constexpr std::size_t kMaxScreenAudioBytes = 1500;
 
 } // namespace chat

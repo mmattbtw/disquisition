@@ -85,6 +85,9 @@ private:
     void read(Link* link);
     void handle(Link* link, const QJsonObject& message);
     void send(Link* link, QJsonObject message);
+    static qint64 writeBacklog(const Link* link);
+    void queueVideo(Link* link, const QJsonObject& message);
+    void pumpVideo(Link* link);
     void sendState(Link* link, const QString& community);
     void offer(Link* link);
     void authorize(Link* link, const QString& community);

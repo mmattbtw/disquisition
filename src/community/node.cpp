@@ -79,6 +79,9 @@ struct Node::Link {
     qint64 started = now();
     qint64 touched = now();
     QByteArray buffer;
+    // Framed video waiting for the socket; see pumpVideo().
+    QList<QByteArray> video;
+    qint64 videoBytes = 0;
     QSet<QString> claimed;
     QSet<QString> allowed;
     QSet<QString> ready;
@@ -367,6 +370,7 @@ Node::Link* Node::makeLink(bool outgoing, const QString& expected) {
     configuration.setPeerVerifyMode(QSslSocket::VerifyPeer);
     socket->setSslConfiguration(configuration);
     links_.append(link);
+    connect(socket, &QSslSocket::encryptedBytesWritten, this, [this, link] { pumpVideo(link); });
     connect(socket, &QSslSocket::sslErrors, this, [socket](const QList<QSslError>& errors) {
         if (Identity::certificatePeer(socket->peerCertificate().toDer()).isEmpty()) {
             socket->abort();
@@ -514,10 +518,38 @@ void Node::encrypted(Link* link) {
                 {"communities", communities}});
 }
 
+qint64 Node::writeBacklog(const Link* link) {
+    // Written data waits unencrypted only until the next event loop pass; most
+    // of the backlog is already encrypted.
+    return link->socket->bytesToWrite() + link->socket->encryptedBytesToWrite();
+}
+
+void Node::queueVideo(Link* link, const QJsonObject& message) {
+    if (!links_.contains(link) || !link->tls)
+        return;
+    link->video.append(frame(message));
+    link->videoBytes += link->video.last().size();
+    pumpVideo(link);
+}
+
+void Node::pumpVideo(Link* link) {
+    // A whole frame written at once would hold back the sound and voice sent
+    // after it until it had all gone. Feeding it in a chunk at a time lets them
+    // go out in between.
+    constexpr qint64 kVideoPaceBytes = 16 * 1024;
+    if (!links_.contains(link))
+        return;
+    while (!link->video.isEmpty() && writeBacklog(link) < kVideoPaceBytes) {
+        const auto bytes = link->video.takeFirst();
+        link->videoBytes -= bytes.size();
+        link->socket->write(bytes);
+    }
+}
+
 void Node::send(Link* link, QJsonObject message) {
     if (!links_.contains(link) || !link->tls)
         return;
-    if (link->socket->bytesToWrite() > 2 * kMaxMetadataBytes)
+    if (writeBacklog(link) > 2 * kMaxMetadataBytes)
         throw std::runtime_error("community connection is backlogged");
     link->socket->write(frame(message));
 }
@@ -981,7 +1013,7 @@ qsizetype Node::connectionCount() const {
 qint64 Node::mediaBacklog() const {
     qint64 result = 0;
     for (auto* link : peers_)
-        result = std::max(result, link->socket->bytesToWrite());
+        result = std::max(result, writeBacklog(link) + link->videoBytes);
     return result;
 }
 
@@ -1066,6 +1098,11 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
         return target == peerId() && canonical(data).size() <= 24 * 1024;
     if (type == "screen")
         return remote.sharing && canonical(data).size() <= 24 * 1024;
+    if (type == "screen-audio") {
+        const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
+        return remote.sharing && !local.deafened && target == peerId() && !bytes.isEmpty() &&
+               bytes.size() <= qsizetype(chat::kMaxScreenAudioBytes);
+    }
     return false;
 }
 
@@ -1125,9 +1162,15 @@ int Node::sendPacketImpl(const QString& cid, const QString& channel, const QStri
         if (channelType == "voice" && (mine_.value(cid).voiceChannel != channel ||
                                        presence_[cid].value(link->peer).voiceChannel != channel))
             continue;
-        if ((type == "audio" || (type == "screen" && checkScreenBacklog)) &&
-            link->socket->bytesToWrite() > 64 * 1024)
+        if ((type == "audio" || type == "screen-audio") && writeBacklog(link) > 64 * 1024)
             continue;
+        if (type == "screen") {
+            if (checkScreenBacklog && writeBacklog(link) + link->videoBytes > 64 * 1024)
+                continue;
+            queueVideo(link, packet);
+            ++recipients;
+            continue;
+        }
         send(link, packet);
         ++recipients;
     }

@@ -12,6 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  desktop-comment:
+    name: Desktop comment regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 .github/scripts/tests/test_comment_desktop_build.py
+
   test:
     name: test (${{ matrix.os }})
     strategy:

@@ -227,6 +227,68 @@ void largeScreenFrameDelivers(Node& a, Node& b, const QString& cid, const QStrin
     QObject::disconnect(receive);
 }
 
+// Expects `a` sharing to `b` in `voice`, as largeScreenFrameDelivers leaves them.
+void shareSoundOvertakesLargeFrames(Node& a, Node& b, const QString& cid, const QString& voice) {
+    int videoChunks = 0, chunksBeforeSound = -1;
+    const auto receive = QObject::connect(&b, &Node::packetReceived,
+                                          [&](const QString&, const QString&, const QString&,
+                                              const QString& kind, const QJsonObject&) {
+                                              if (kind == "screen")
+                                                  ++videoChunks;
+                                              if (kind == "screen-audio")
+                                                  chunksBeforeSound = videoChunks;
+                                          });
+    const QByteArray chunk(16 * 1024 - 256, 'v');
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 9, QList<QByteArray>(32, chunk), true));
+    CHECK(a.sendPacket(cid, voice, "screen-audio",
+                       {{"target", b.peerId()}, {"bytes", QString::fromLatin1("c291bmQ=")}}) == 1);
+    CHECK(until([&] { return videoChunks == 32 && chunksBeforeSound >= 0; }));
+    // Video is fed to the socket a chunk at a time, so the sound goes out
+    // next to the start of the frame rather than after all of it.
+    CHECK(chunksBeforeSound <= 2);
+    QObject::disconnect(receive);
+}
+
+void shareSoundReachesOnlyListeningWatchers(Node& a, Node& b, const QString& cid,
+                                            const QString& voice) {
+    QList<QByteArray> heard;
+    const auto receive = QObject::connect(&b, &Node::packetReceived,
+                                          [&](const QString&, const QString&, const QString&,
+                                              const QString& kind, const QJsonObject& data) {
+                                              if (kind == "screen-audio")
+                                                  heard += QByteArray::fromBase64(
+                                                      data.value("bytes").toString().toLatin1());
+                                          });
+    const auto send = [&](const QByteArray& bytes, bool targeted = true) {
+        QJsonObject data{{"bytes", QString::fromLatin1(bytes.toBase64())}};
+        if (targeted)
+            data["target"] = b.peerId();
+        a.sendPacket(cid, voice, "screen-audio", data);
+    };
+    // Packets on a link arrive in order, so a valid one after the rejected
+    // ones shows that they were dropped.
+    send({});
+    send(QByteArray(1501, 'x'));
+    send("untargeted", false);
+    send("first");
+    CHECK(until([&] { return !heard.isEmpty(); }));
+    CHECK(heard == QList<QByteArray>{"first"});
+
+    b.setVoice(cid, voice, false, true);
+    send("while deafened");
+    a.setVoice(cid, voice);
+    // The end of the share arrives after the packet sent while deafened.
+    CHECK(until([&] { return !b.presence(cid, a.peerId()).sharing; }));
+    b.setVoice(cid, voice);
+    send("after the share");
+    a.setVoice(cid, voice, false, false, true);
+    CHECK(until([&] { return b.presence(cid, a.peerId()).sharing; }));
+    send("last");
+    CHECK(until([&] { return heard.size() == 2; }));
+    CHECK(heard == (QList<QByteArray>{"first", "last"}));
+    QObject::disconnect(receive);
+}
+
 void spritesUseAuthenticatedCommunityLinks(Node& a, Node& b, const QString& cid) {
     QList<QJsonObject> received;
     const auto connection = QObject::connect(&b, &Node::packetReceived,
@@ -361,6 +423,8 @@ void directAdmissionIsolationAndConnectionReuse() {
     CHECK(until([&] { return bobAudio == 1; }));
     CHECK(carolAudio == 0);
     largeScreenFrameDelivers(a, b, cid, voice);
+    shareSoundOvertakesLargeFrames(a, b, cid, voice);
+    shareSoundReachesOnlyListeningWatchers(a, b, cid, voice);
 }
 
 void stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever() {
@@ -659,6 +723,8 @@ void relayHostMigrationAndReconnection() {
                        {{"body", "community through relay"}}) == 1);
     CHECK(until([&] { return chatReceived; }));
     largeScreenFrameDelivers(a, b, cid, channel(a.communities()[cid], "voice"));
+    shareSoundOvertakesLargeFrames(a, b, cid, channel(a.communities()[cid], "voice"));
+    shareSoundReachesOnlyListeningWatchers(a, b, cid, channel(a.communities()[cid], "voice"));
     a.stop();
     CHECK(a.communities()[cid].canAdmin(a.peerId()));
     CHECK(until([&] { return b.online(cid).size() == 1; }));

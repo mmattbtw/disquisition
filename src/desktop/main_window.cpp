@@ -118,6 +118,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QLabel#streamName { font-family: "Cal Sans", Inter, sans-serif; font-size: 15px; }
         QLabel#live { background: #e05252; color: #fff3f3; font-size: 11px; font-weight: 700; padding: 1px 5px; }
         QLabel#streamStats { color: #8a9099; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+        QSlider#streamVolume::groove:horizontal { background: #333842; height: 4px; }
+        QSlider#streamVolume::sub-page:horizontal { background: #9dccca; }
+        QSlider#streamVolume::handle:horizontal { background: #d5d7d6; width: 10px; margin: -5px 0; }
+        QSlider#streamVolume::handle:horizontal:hover { background: #9dccca; }
         QScrollBar:vertical { background: #282c34; width: 10px; }
         QScrollBar::handle:vertical { background: #68717c; min-height: 24px; }
         QFrame#gifPicker { border: 1px solid #777f89; }

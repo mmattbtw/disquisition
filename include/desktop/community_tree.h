@@ -31,12 +31,14 @@ public:
 signals:
     void voiceMoveRequested(const QString& community, const QString& peer,
                             const QString& destinationChannel);
+    void voiceChannelDoubleClicked(const QString& community, const QString& channel);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
