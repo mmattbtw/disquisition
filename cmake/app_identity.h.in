@@ -3,4 +3,6 @@
 namespace disquisition {
 inline constexpr char kAppName[] = "@DISQUISITION_APP_NAME@";
 inline constexpr char kSettingsName[] = "@DISQUISITION_SETTINGS_NAME@";
+inline constexpr int kBuildNumber = @DISQUISITION_BUILD_NUMBER@;
+inline constexpr char kUpdateRepository[] = "@DISQUISITION_UPDATE_REPOSITORY@";
 }  // namespace disquisition

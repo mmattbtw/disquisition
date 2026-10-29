@@ -1,11 +1,21 @@
 #include "desktop/main_window.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QDesktopServices>
+#include <QLabel>
 #include <QMenuBar>
+#include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QProgressBar>
+#include <QPushButton>
+#include <QSettings>
+#include <QStatusBar>
 
-#include "desktop/community_panel.h"
 #include "desktop/app_identity.h"
+#include "desktop/community_panel.h"
 #include "desktop/notification_center.h"
+#include "desktop/updater.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QString::fromUtf8(disquisition::kAppName));
@@ -23,6 +33,46 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(notifications, &NotificationCenter::badgeChanged, this, [this](const UnreadBadge& badge) {
         setWindowTitle(badgedTitle(QString::fromUtf8(disquisition::kAppName), badge));
     });
+    auto* network = new QNetworkAccessManager(this);
+    updater_ = new Updater(network, QString::fromUtf8(disquisition::kUpdateRepository),
+                           disquisition::kBuildNumber, this);
+    updateLabel_ = new QLabel(this);
+    updateLabel_->setObjectName("updateStatus");
+    updateLabel_->hide();
+    updateProgress_ = new QProgressBar(this);
+    updateProgress_->setObjectName("updateProgress");
+    updateProgress_->setTextVisible(false);
+    updateProgress_->setFixedSize(120, 6);
+    updateProgress_->hide();
+    updateButton_ = new QPushButton(this);
+    updateButton_->setObjectName("update");
+    updateButton_->hide();
+    if (updater_->enabled()) {
+        auto* checkForUpdatesAction = appMenu->addAction("Check for Updates…");
+        checkForUpdatesAction->setMenuRole(QAction::ApplicationSpecificRole);
+        connect(checkForUpdatesAction, &QAction::triggered, this, &MainWindow::checkForUpdates);
+        auto* automaticUpdates = appMenu->addAction("Update automatically");
+        automaticUpdates->setCheckable(true);
+        automaticUpdates->setChecked(QSettings().value("updates/automatic", true).toBool());
+        connect(automaticUpdates, &QAction::toggled, this, [this](bool automatic) {
+            QSettings().setValue("updates/automatic", automatic);
+            updater_->setAutomatic(automatic);
+        });
+        statusBar()->addPermanentWidget(updateLabel_);
+        statusBar()->addPermanentWidget(updateProgress_);
+        statusBar()->addPermanentWidget(updateButton_);
+    }
+    connect(updater_, &Updater::stateChanged, this, &MainWindow::showUpdateState);
+    connect(updater_, &Updater::downloadProgress, updateProgress_, &QProgressBar::setValue);
+    connect(updater_, &Updater::aboutToRelaunch, communities, &CommunityPanel::releaseStore);
+    connect(updateButton_, &QPushButton::clicked, this, [this] {
+        if (updater_->state() == Updater::State::ManualInstall) {
+            QDesktopServices::openUrl(updater_->releasePage());
+        } else {
+            offerUpdateRestart();
+        }
+    });
+    updater_->setAutomatic(QSettings().value("updates/automatic", true).toBool());
     setStyleSheet(R"(
         QWidget { background: #282c34; color: #c5c8c6; font-family: Inter, "Segoe UI", "Helvetica Neue", sans-serif; font-size: 14px; }
         QLabel#title { background: #9dccca; color: #20262c; font-family: "Cal Sans", Inter, sans-serif; font-size: 17px; font-weight: 400; padding: 3px 5px; }
@@ -59,6 +109,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QProgressBar#communityJoiningProgress { background: #333842; border: 0; border-radius: 2px; }
         QProgressBar#communityJoiningProgress::chunk { background: #9dccca; border-radius: 2px; }
         QPushButton#communityJoinVoice { color: #9dccca; border-color: #596f70; padding: 4px 8px; }
+        QPushButton#update { background: #9dccca; color: #20262c; border-color: #9dccca; padding: 1px 8px; font-size: 13px; }
+        QLabel#updateStatus { color: #8a9099; font-size: 13px; }
+        QProgressBar#updateProgress { background: #333842; border: 0; }
+        QProgressBar#updateProgress::chunk { background: #9dccca; }
         QSplitter::handle { width: 1px; background: #545b66; }
         QSplitter::handle:vertical { height: 1px; }
         QFrame#streamTile { border: 1px solid #545b66; }
@@ -77,4 +131,80 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QLabel#gifStatus, QLabel#gifAttribution { color: #8a9099; font-size: 12px; }
         QLabel#dropOverlay { background: rgba(32, 38, 44, 225); color: #9dccca; border: 2px dashed #9dccca; font-size: 16px; font-weight: 700; }
     )");
+}
+
+void MainWindow::checkForUpdates() {
+    updateCheckRequested_ = true;
+    updater_->check();
+    showUpdateState();
+}
+
+void MainWindow::showUpdateState() {
+    using State = Updater::State;
+    const State state = updater_->state();
+    const QString build = "Build " + QString::number(updater_->availableBuild());
+    const QString nextStart =
+        " installs the next time you open " + QApplication::applicationDisplayName() + ".";
+    const bool working = state == State::Downloading || state == State::Extracting;
+    updateLabel_->setVisible(working);
+    updateProgress_->setVisible(working);
+    if (working) {
+        updateLabel_->setText(state == State::Downloading ? "downloading update"
+                                                          : "preparing update");
+        updateLabel_->setToolTip(build + nextStart);
+        updateProgress_->setValue(state == State::Downloading ? 0 : 100);
+    }
+    updateButton_->setVisible(state == State::Ready || state == State::ManualInstall);
+    if (state == State::Ready) {
+        updateButton_->setText("Update Ready");
+        updateButton_->setToolTip(build + nextStart + " Click to restart now.");
+    } else if (state == State::ManualInstall) {
+        updateButton_->setText("Download Update");
+        updateButton_->setToolTip(build + " cannot be installed in this folder.");
+    }
+
+    if (!updateCheckRequested_ || state == State::Idle || state == State::Checking) {
+        return;
+    }
+    updateCheckRequested_ = false;
+    const QString title = "Check for Updates";
+    switch (state) {
+    case State::UpToDate:
+        QMessageBox::information(this, title,
+                                 "You have the latest build (" +
+                                     QString::number(updater_->currentBuild()) + ").");
+        break;
+    case State::Downloading:
+        QMessageBox::information(this, title, build + " is downloading. It" + nextStart);
+        break;
+    case State::Ready:
+        offerUpdateRestart();
+        break;
+    case State::ManualInstall:
+        if (QMessageBox::question(this, title,
+                                  build + " is available, but the app cannot update itself in "
+                                          "the folder it is in. Download it from GitHub?") ==
+            QMessageBox::Yes) {
+            QDesktopServices::openUrl(updater_->releasePage());
+        }
+        break;
+    case State::Installed:
+        QMessageBox::information(this, title, build + " is installed and starts next time.");
+        break;
+    case State::Failed:
+        QMessageBox::warning(this, title, updater_->error());
+        break;
+    default:
+        break;
+    }
+}
+
+void MainWindow::offerUpdateRestart() {
+    const QString question = "Build " + QString::number(updater_->availableBuild()) +
+                             " installs the next time you open " +
+                             QApplication::applicationDisplayName() + ". Restart now?";
+    if (QMessageBox::question(this, "Update Ready", question) == QMessageBox::Yes &&
+        !updater_->restart()) {
+        QMessageBox::warning(this, "Update", updater_->error());
+    }
 }

@@ -437,6 +437,13 @@ CommunityPanel::~CommunityPanel() {
     leaveVoice();
 }
 
+void CommunityPanel::releaseStore() {
+    // leaveVoice first: capture/audio threads reference node_.
+    leaveVoice();
+    node_.reset();
+    online_ = false;
+}
+
 void CommunityPanel::attempt(const std::function<void()>& action) {
     try {
         action();
