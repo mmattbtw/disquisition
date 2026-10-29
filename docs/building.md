@@ -178,7 +178,8 @@ The app icon source is `resources/icons/disquisition.icon`, an Icon Composer
 document. macOS bundles its compiled `Assets.car` for the layered icon and an
 ICNS fallback for older systems. Windows embeds the ICO in the executable;
 Windows and Linux also use the shared PNG for window and notification icons.
-The website uses PNG and ICO exports of the same artwork.
+The website uses dark PNG and ICO exports for contrast at small sizes.
+Desktop icons up to 64 pixels and notification icons also use the dark rendition.
 
 After editing the source in Icon Composer, regenerate all exports and the DMG
 background on a Mac with Xcode 26 or later selected via `xcode-select`:

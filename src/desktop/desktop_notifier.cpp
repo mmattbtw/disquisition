@@ -24,13 +24,14 @@ DesktopNotifier::DesktopNotifier(const QList<QAction*>& trayActions, QObject* pa
 #else
     constexpr int kIconSizes[] = {16, 20, 24, 32, 40, 48, 64, 96, 128, 256};
     const QImage icon(QStringLiteral(":/disquisition.png"));
+    const QImage smallIcon(QStringLiteral(":/disquisition-dark.png"));
     for (const int size : kIconSizes) {
-        iconImages_.append(icon.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        iconImages_.append((size <= 64 ? smallIcon : icon).scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
         appIcon_.addPixmap(QPixmap::fromImage(iconImages_.last()));
     }
     updateIcons();
 #    if defined(Q_OS_WIN)
-    windows_ = new WindowsNotifications(icon, this);
+    windows_ = new WindowsNotifications(smallIcon, this);
     if (windows_->isAvailable()) {
         connect(windows_, &WindowsNotifications::activated, this, &DesktopNotifier::activated);
     } else {
@@ -41,7 +42,7 @@ DesktopNotifier::DesktopNotifier(const QList<QAction*>& trayActions, QObject* pa
 #    elif defined(DISQUISITION_DBUS_NOTIFICATIONS)
     constexpr int kNotificationIconSize = 64;
     freedesktop_ = new FreedesktopNotifications(
-        icon.scaled(kNotificationIconSize, kNotificationIconSize, Qt::KeepAspectRatio,
+        smallIcon.scaled(kNotificationIconSize, kNotificationIconSize, Qt::KeepAspectRatio,
                     Qt::SmoothTransformation),
         this);
     connect(freedesktop_, &FreedesktopNotifications::activated, this,

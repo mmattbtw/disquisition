@@ -314,7 +314,7 @@ if(BUILD_DESKTOP_APP)
       qt_add_resources(disquisition-desktop app_icon
         PREFIX /
         BASE resources/icons
-        FILES resources/icons/disquisition.png)
+        FILES resources/icons/disquisition.png resources/icons/disquisition-dark.png)
     endif()
     if(WIN32)
       enable_language(RC)

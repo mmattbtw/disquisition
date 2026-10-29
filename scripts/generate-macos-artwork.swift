@@ -67,18 +67,23 @@ for name in ["Assets.car", "disquisition.icns"] {
     try Data(contentsOf: temporary.appendingPathComponent(name)).write(to: assets.appendingPathComponent(name))
 }
 
+try run(ictool.path, [source.path, "--export-image", "--output-file",
+    icons.appendingPathComponent("disquisition-dark.png").path, "--platform", "macOS",
+    "--rendition", "Dark", "--width", "1024", "--height", "1024", "--scale", "1",
+    "--design-generation", "26"])
 let image = NSImage(contentsOf: icons.appendingPathComponent("disquisition.png"))!
-func resizedPNG(_ size: Int) -> Data {
+let darkImage = NSImage(contentsOf: icons.appendingPathComponent("disquisition-dark.png"))!
+func resizedPNG(_ size: Int, dark: Bool = true) -> Data {
     bitmap(width: size, height: size) {
         NSGraphicsContext.current?.imageInterpolation = .high
-        image.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+        (dark ? darkImage : image).draw(in: NSRect(x: 0, y: 0, width: size, height: size),
                    from: .zero, operation: .copy, fraction: 1)
     }.representation(using: .png, properties: [:])!
 }
 
 // ICO supports PNG frames, including alpha, on every supported Windows version.
-func ico(_ sizes: [Int]) -> Data {
-    let frames = sizes.map(resizedPNG)
+func ico(_ sizes: [Int], allDark: Bool = false) -> Data {
+    let frames = sizes.map { resizedPNG($0, dark: allDark || $0 <= 64) }
     var data = Data()
     func word(_ value: UInt16) {
         var value = value.littleEndian
@@ -101,7 +106,7 @@ func ico(_ sizes: [Int]) -> Data {
 }
 try ico([16, 20, 24, 32, 40, 48, 64, 96, 128, 256])
     .write(to: windows.appendingPathComponent("disquisition.ico"))
-try ico([16, 32, 48]).write(to: web.appendingPathComponent("favicon.ico"))
+try ico([16, 32, 48], allDark: true).write(to: web.appendingPathComponent("favicon.ico"))
 try resizedPNG(64).write(to: web.appendingPathComponent("favicon.png"))
 try resizedPNG(180).write(to: web.appendingPathComponent("apple-touch-icon.png"))
 
