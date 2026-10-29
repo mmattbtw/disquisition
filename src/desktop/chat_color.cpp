@@ -1,6 +1,7 @@
 #include "desktop/chat_color.h"
 
 #include <QHash>
+#include <QRegularExpression>
 
 namespace {
 
@@ -23,6 +24,7 @@ QColor xtermColor(int index) {
 }  // namespace
 
 QColor chatColor(const QString& value) {
+    if (QRegularExpression("^#[0-9a-fA-F]{6}$").match(value).hasMatch()) return QColor(value);
     static const QHash<QString, int> named {
         {"pink", 211}, {"mint", 121}, {"butter", 229}, {"periwinkle", 111},
         {"lilac", 183}, {"aqua", 159}, {"peach", 216}};

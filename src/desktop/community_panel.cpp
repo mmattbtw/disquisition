@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QColorDialog>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
@@ -83,6 +84,7 @@ const QString kDefaultRelay = QStringLiteral("relay.disquisition.app");
 const QStringList kChatColors{"pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 bool validChatColor(const QString& value) {
     if (kChatColors.contains(value)) return true;
+    if (QRegularExpression("^#[0-9a-fA-F]{6}$").match(value).hasMatch()) return true;
     if (value.isEmpty() || value.size() > 3) return false;
     for (const auto character : value)
         if (character < QLatin1Char('0') || character > QLatin1Char('9')) return false;
@@ -1320,10 +1322,43 @@ void CommunityPanel::settings() {
         return form;
     };
     auto* userForm = page("User", "Your profile is shared with members of your communities.");
-    auto* color = new QLineEdit(messageColor_, &dialog);
+    auto* color = new QComboBox(&dialog);
     color->setObjectName("userChatColor");
-    color->setToolTip("pink, mint, butter, periwinkle, lilac, aqua, peach, or an allowed 0-255 color");
+    color->setAccessibleName("Chat color");
+    for (const auto& name : kChatColors) {
+        QPixmap swatch(12, 12);
+        swatch.fill(chatColor(name));
+        color->addItem(QIcon(swatch), name, name);
+    }
+    color->addItem("Custom…", QString());
+    const auto presetIndex = color->findData(messageColor_);
+    color->setCurrentIndex(presetIndex >= 0 ? presetIndex : color->count() - 1);
     userForm->addRow("Chat color", color);
+    auto* customColor = new QWidget(&dialog);
+    auto* customLayout = new QHBoxLayout(customColor);
+    customLayout->setContentsMargins(0, 0, 0, 0);
+    auto* hexColor = new QLineEdit(chatColor(messageColor_).name(QColor::HexRgb).toUpper(), customColor);
+    hexColor->setObjectName("userChatColorHex");
+    hexColor->setAccessibleName("Hex chat color");
+    hexColor->setPlaceholderText("#RRGGBB");
+    hexColor->setToolTip("Enter a color as #RRGGBB.");
+    auto* pickColor = new QPushButton("Pick color…", customColor);
+    pickColor->setObjectName("userChatColorPicker");
+    customLayout->addWidget(hexColor, 1);
+    customLayout->addWidget(pickColor);
+    userForm->addRow("Custom color", customColor);
+    const auto updateCustomColor = [=] {
+        userForm->setRowVisible(customColor, color->currentData().toString().isEmpty());
+    };
+    connect(color, &QComboBox::currentIndexChanged, &dialog, updateCustomColor);
+    updateCustomColor();
+    connect(pickColor, &QPushButton::clicked, &dialog, [&] {
+        const auto current = hexColor->text().trimmed();
+        const auto selected = QColorDialog::getColor(
+            validChatColor(current) ? chatColor(current) : chatColor(messageColor_),
+            &dialog, "Chat color", QColorDialog::DontUseNativeDialog);
+        if (selected.isValid()) hexColor->setText(selected.name(QColor::HexRgb).toUpper());
+    });
     auto* showPenguins = new QCheckBox("Show desktop penguins for this community", &dialog);
     showPenguins->setObjectName("communityShowPenguins");
     showPenguins->setChecked(penguinsAction_->isChecked());
@@ -1575,8 +1610,12 @@ void CommunityPanel::settings() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
-            if (!validChatColor(color->text().trimmed().toLower()))
-                throw std::runtime_error("Choose a valid chat color. Use /color for available colors.");
+            const auto chosenColor = color->currentData().toString().isEmpty()
+                                         ? hexColor->text().trimmed().toLower()
+                                         : color->currentData().toString();
+            if (color->currentData().toString().isEmpty() &&
+                !QRegularExpression("^#[0-9a-f]{6}$").match(chosenColor).hasMatch())
+                throw std::runtime_error("Enter a valid HEX color in the form #RRGGBB.");
             const auto sprites = spriteEditor->sprites();
             if (unlocked && sprites.enabled && !sprites.complete())
                 throw std::runtime_error("Upload both a standing and walking image, or turn custom sprites off.");
@@ -1604,7 +1643,7 @@ void CommunityPanel::settings() {
             node_->setProfile(profile);
             name_->setText(profile.name);
             saved.setValue("community/name", profile.name);
-            runCommand("/color " + color->text().trimmed());
+            runCommand("/color " + chosenColor);
             saved.setValue("voice/pushToTalk", ptt->isChecked());
             if (pttKey->key()) {
                 saved.setValue("voice/pushToTalkKey", *pttKey->key());
@@ -3685,7 +3724,7 @@ void CommunityPanel::runCommand(const QString& command) {
     if (name == "/color") {
         if (argument.isEmpty()) {
             commandReply("Color", "Current color: " + messageColor_ +
-                "\nColors: pink, mint, butter, periwinkle, lilac, aqua, peach. Use /color <name or 0-255>.");
+                "\nColors: pink, mint, butter, periwinkle, lilac, aqua, peach. Use /color <name, #RRGGBB, or 0-255>.");
         } else if (!validChatColor(argument.toLower())) {
             commandReply("Color", "Unknown or reserved color: " + argument + ". Try /color for available colors.");
             return;
@@ -3698,7 +3737,7 @@ void CommunityPanel::runCommand(const QString& command) {
             refresh();
         }
     } else if (name == "/help") {
-        commandReply("Help", "/users  list online members\n/color <name or 0-255>  set your name color\n"
+        commandReply("Help", "/users  list online members\n/color <name, #RRGGBB, or 0-255>  set your name color\n"
             "/voice  join the selected voice channel\n/leavevoice  leave voice\n"
             "/mute, /unmute, /deafen, /undeafen  control voice\n/gif [search]  choose a GIF\n"
             "/clear  clear this channel on this device\n/save  open User Settings\n"

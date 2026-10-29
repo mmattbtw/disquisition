@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QCompleter>
 #include <QComboBox>
+#include <QColorDialog>
 #include <QDeadlineTimer>
 #include <QDesktopServices>
 #include <QDialog>
@@ -209,6 +210,62 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return manage->isEnabled(); }));
     auto* node = panel->findChild<community::Node*>();
     CHECK(node && node->profile().name == "Alice");
+    // Presets save by name; custom HEX colors survive picker cancellation and reopening.
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
+        auto* hex = dialog->findChild<QLineEdit*>("userChatColorHex");
+        CHECK(colors && colors->count() == 8 && !colors->isEditable());
+        CHECK(colors->currentData().toString() == QSettings().value("community/color").toString());
+        CHECK(!hex->isVisible());
+        colors->setCurrentIndex(colors->findData("peach"));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(QSettings().value("community/color").toString() == "peach");
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
+        auto* hex = dialog->findChild<QLineEdit*>("userChatColorHex");
+        CHECK(colors->currentData().toString() == "peach");
+        colors->setCurrentIndex(colors->count() - 1);
+        CHECK(hex->isVisible());
+        hex->setText("#xyz123");
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+        CHECK(dialog->isVisible());
+        CHECK(dialog->findChild<QLabel*>("userSettingsError")->text().contains("#RRGGBB"));
+        hex->setText("#12ABEF");
+        QTimer::singleShot(0, [&] {
+            auto* picker = qobject_cast<QColorDialog*>(QApplication::activeModalWidget());
+            CHECK(picker && picker->testOption(QColorDialog::DontUseNativeDialog));
+            CHECK(picker->currentColor() == QColor("#12abef"));
+            picker->reject();
+        });
+        dialog->findChild<QPushButton*>("userChatColorPicker")->click();
+        CHECK(hex->text() == "#12ABEF");
+        QTimer::singleShot(0, [&] {
+            auto* picker = qobject_cast<QColorDialog*>(QApplication::activeModalWidget());
+            CHECK(picker);
+            picker->setCurrentColor(QColor("#A1B2C3"));
+            picker->accept();
+        });
+        dialog->findChild<QPushButton*>("userChatColorPicker")->click();
+        CHECK(hex->text() == "#A1B2C3");
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(QSettings().value("community/color").toString() == "#a1b2c3");
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
+        CHECK(colors->currentIndex() == colors->count() - 1);
+        CHECK(dialog->findChild<QLineEdit*>("userChatColorHex")->text() == "#A1B2C3");
+        CHECK(dialog->grab().save("community-custom-color-settings.png"));
+        colors->setCurrentIndex(colors->findData("pink"));
+        dialog->reject();
+    });
+    panel->findChild<QPushButton*>("communitySettings")->click();
+    CHECK(QSettings().value("community/color").toString() == "#a1b2c3");
     QImage picture(160, 100, QImage::Format_RGB32);
     picture.fill(QColor("#ba7493"));
     const auto picturePath = directory.path() + "/avatar.png";
@@ -559,6 +616,17 @@ int main(int argc, char** argv) {
         [&](const QString&, const QString&, const QString&, const QString& type, const QJsonObject& data) {
             if (type == "chat") sentColor = data.value("color").toString();
         });
+    composer->setText("A custom color message");
+    panel->findChild<QPushButton*>("communitySend")->click();
+    CHECK(until([&] { return sentColor == "#a1b2c3"; }));
+    const auto customMessage = transcript->document()->find("A custom color message");
+    CHECK(transcript->document()->find("Alice", customMessage.position(), QTextDocument::FindBackward)
+              .charFormat().foreground().color() == QColor("#a1b2c3"));
+    CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Custom remote color"}, {"color", "#12ABEF"}}) == 1);
+    CHECK(until([&] { return transcript->toPlainText().contains("Custom remote color"); }));
+    const auto remoteCustom = transcript->document()->find("Custom remote color");
+    CHECK(transcript->document()->find("Bob", remoteCustom.position(), QTextDocument::FindBackward)
+              .charFormat().foreground().color() == QColor("#12abef"));
     composer->setText("/color pink");
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(composer->text().isEmpty());
