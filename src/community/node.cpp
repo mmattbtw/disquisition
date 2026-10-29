@@ -842,11 +842,14 @@ void Node::handle(Link* link, const QJsonObject& message) {
         if (!candidate.isMember(link->peer) && !link->allowed.contains(cid))
             throw std::runtime_error("snapshot sender is not a member");
         const bool joining = pending_.contains(cid);
-        if (joining && !candidate.isMember(peerId()))
+        const bool admitted = candidate.isMember(peerId());
+        // A retained community can receive an older snapshot while rejoining.
+        // Merge its history, but keep the join pending until membership is proven.
+        if (joining && !admitted && !models_.contains(cid))
             throw std::runtime_error("admission proof was not accepted");
         if (hasChanges)
             save(std::move(candidate));
-        if (joining) {
+        if (joining && admitted) {
             pending_.remove(cid);
             joining_.remove(cid);
             joinStarted_.remove(cid);
