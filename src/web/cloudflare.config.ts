@@ -4,6 +4,7 @@ export default defineConfig(({ isPreview }) => ({
 	worker: {
 		name: "disquisition",
 		previewUrls: true,
+		workersDev: isPreview,
 		compatibilityDate: "2026-10-08",
 		domains: isPreview ? undefined : ["disquisition.app"],
 		assets: {
