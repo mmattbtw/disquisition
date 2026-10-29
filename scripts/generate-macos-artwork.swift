@@ -1,11 +1,11 @@
 #!/usr/bin/env swift
-// Regenerate the checked-in artwork on macOS. No build-time graphics tools are needed.
+// Export the Icon Composer source and installer artwork on macOS with Xcode 26+.
+// Generated files are checked in, so normal builds need no graphics tools.
 import AppKit
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 let assets = root.appendingPathComponent("resources/macos")
 let background = NSColor(srgbRed: 40 / 255, green: 44 / 255, blue: 52 / 255, alpha: 1)
-let mint = NSColor(srgbRed: 157 / 255, green: 204 / 255, blue: 202 / 255, alpha: 1)
 try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
 
 func bitmap(width: Int, height: Int, draw: () -> Void) -> NSBitmapImageRep {
@@ -19,58 +19,91 @@ func bitmap(width: Int, height: Int, draw: () -> Void) -> NSBitmapImageRep {
     return bitmap
 }
 
-func png(_ url: URL, width: Int, height: Int, draw: () -> Void) throws {
-    try bitmap(width: width, height: height, draw: draw)
-        .representation(using: .png, properties: [:])!.write(to: url)
-}
-
-func icon(size: Int, url: URL) throws {
-    try png(url, width: size, height: size) {
-        let scale = CGFloat(size) / 1024
-        let transform = NSAffineTransform()
-        transform.scale(by: scale)
-        transform.concat()
-        background.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 72, y: 72, width: 880, height: 880),
-                     xRadius: 196, yRadius: 196).fill()
-        mint.setStroke()
-        let prompt = NSBezierPath()
-        prompt.lineWidth = 66
-        prompt.lineCapStyle = .square
-        prompt.lineJoinStyle = .miter
-        prompt.move(to: NSPoint(x: 300, y: 663))
-        prompt.line(to: NSPoint(x: 462, y: 512))
-        prompt.line(to: NSPoint(x: 300, y: 361))
-        prompt.stroke()
-        let cursor = NSBezierPath()
-        cursor.lineWidth = 66
-        cursor.move(to: NSPoint(x: 555, y: 349))
-        cursor.line(to: NSPoint(x: 751, y: 349))
-        cursor.stroke()
-    }
-}
-
 func centered(_ string: String, y: CGFloat, font: NSFont, color: NSColor) {
     let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
     let size = string.size(withAttributes: attributes)
     string.draw(at: NSPoint(x: (580 - size.width) / 2, y: y), withAttributes: attributes)
 }
 
-try icon(size: 1024, url: assets.appendingPathComponent("disquisition.png"))
+let icons = root.appendingPathComponent("resources/icons")
+let windows = root.appendingPathComponent("resources/windows")
+let web = root.appendingPathComponent("src/web/public")
+try FileManager.default.createDirectory(at: windows, withIntermediateDirectories: true)
 let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-let iconset = temporary.appendingPathComponent("disquisition.iconset")
-try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: temporary) }
-for size in [16, 32, 128, 256, 512] {
-    try icon(size: size, url: iconset.appendingPathComponent("icon_\(size)x\(size).png"))
-    try icon(size: size * 2, url: iconset.appendingPathComponent("icon_\(size)x\(size)@2x.png"))
+
+func run(_ executable: String, _ arguments: [String]) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { fatalError("\(executable) failed") }
 }
-let process = Process()
-process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-process.arguments = ["-c", "icns", iconset.path, "-o", assets.appendingPathComponent("disquisition.icns").path]
-try process.run()
-process.waitUntilExit()
-guard process.terminationStatus == 0 else { fatalError("iconutil failed") }
+
+let developerPipe = Pipe()
+let developer = Process()
+developer.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+developer.arguments = ["-p"]
+developer.standardOutput = developerPipe
+try developer.run()
+let developerPath = String(data: developerPipe.fileHandleForReading.readDataToEndOfFile(),
+                           encoding: .utf8)!.trimmingCharacters(in: .whitespacesAndNewlines)
+developer.waitUntilExit()
+guard developer.terminationStatus == 0 else { fatalError("xcode-select failed") }
+let ictool = URL(fileURLWithPath: developerPath).deletingLastPathComponent()
+    .appendingPathComponent("Applications/Icon Composer.app/Contents/Executables/ictool")
+let source = icons.appendingPathComponent("disquisition.icon")
+try run(ictool.path, [source.path, "--export-image", "--output-file",
+    icons.appendingPathComponent("disquisition.png").path, "--platform", "macOS",
+    "--rendition", "Default", "--width", "1024", "--height", "1024", "--scale", "1",
+    "--design-generation", "26"])
+try run("/usr/bin/xcrun", ["actool", source.path, "--compile", temporary.path,
+    "--platform", "macosx", "--target-device", "mac", "--minimum-deployment-target", "11.0",
+    "--app-icon", "disquisition", "--output-partial-info-plist",
+    temporary.appendingPathComponent("partial.plist").path])
+for name in ["Assets.car", "disquisition.icns"] {
+    try Data(contentsOf: temporary.appendingPathComponent(name)).write(to: assets.appendingPathComponent(name))
+}
+
+let image = NSImage(contentsOf: icons.appendingPathComponent("disquisition.png"))!
+func resizedPNG(_ size: Int) -> Data {
+    bitmap(width: size, height: size) {
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+                   from: .zero, operation: .copy, fraction: 1)
+    }.representation(using: .png, properties: [:])!
+}
+
+// ICO supports PNG frames, including alpha, on every supported Windows version.
+func ico(_ sizes: [Int]) -> Data {
+    let frames = sizes.map(resizedPNG)
+    var data = Data()
+    func word(_ value: UInt16) {
+        var value = value.littleEndian
+        withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+    }
+    func dword(_ value: UInt32) {
+        var value = value.littleEndian
+        withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+    }
+    word(0); word(1); word(UInt16(sizes.count))
+    var offset = 6 + 16 * sizes.count
+    for (size, frame) in zip(sizes, frames) {
+        data.append(contentsOf: [UInt8(size % 256), UInt8(size % 256), 0, 0])
+        word(1); word(32)
+        dword(UInt32(frame.count)); dword(UInt32(offset))
+        offset += frame.count
+    }
+    frames.forEach { data.append($0) }
+    return data
+}
+try ico([16, 20, 24, 32, 40, 48, 64, 96, 128, 256])
+    .write(to: windows.appendingPathComponent("disquisition.ico"))
+try ico([16, 32, 48]).write(to: web.appendingPathComponent("favicon.ico"))
+try resizedPNG(64).write(to: web.appendingPathComponent("favicon.png"))
+try resizedPNG(180).write(to: web.appendingPathComponent("apple-touch-icon.png"))
 
 func installerBackground() {
     NSColor(srgbRed: 239 / 255, green: 241 / 255, blue: 240 / 255, alpha: 1).setFill()
@@ -106,4 +139,4 @@ let installerImage = NSImage(size: NSSize(width: 580, height: 380))
 installerReps.forEach { installerImage.addRepresentation($0) }
 try installerImage.tiffRepresentation(using: .lzw, factor: 1)!
     .write(to: assets.appendingPathComponent("dmg-background.tiff"))
-print("Generated macOS icon and DMG background in \(assets.path)")
+print("Generated desktop and web icons, and macOS DMG background")

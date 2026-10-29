@@ -313,10 +313,13 @@ if(BUILD_DESKTOP_APP)
       # The window and tray icon. The macOS bundle has its own.
       qt_add_resources(disquisition-desktop app_icon
         PREFIX /
-        BASE resources/macos
-        FILES resources/macos/disquisition.png)
+        BASE resources/icons
+        FILES resources/icons/disquisition.png)
     endif()
     if(WIN32)
+      enable_language(RC)
+      target_sources(disquisition-desktop PRIVATE resources/windows/disquisition.rc)
+      target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows")
       target_sources(disquisition-desktop PRIVATE
         include/desktop/windows_notifications.h src/desktop/windows_notifications.cpp)
       target_link_libraries(disquisition-desktop PRIVATE runtimeobject)
@@ -391,8 +394,9 @@ if(BUILD_DESKTOP_APP)
       # Packaging reads the actual bundle path, including spaces and the channel.
       file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/disquisition-app-bundle-$<CONFIG>.txt"
         CONTENT "$<TARGET_BUNDLE_DIR:disquisition-desktop>\n")
-      target_sources(disquisition-desktop PRIVATE resources/macos/disquisition.icns)
-      set_source_files_properties(resources/macos/disquisition.icns PROPERTIES
+      target_sources(disquisition-desktop PRIVATE
+        resources/macos/disquisition.icns resources/macos/Assets.car)
+      set_source_files_properties(resources/macos/disquisition.icns resources/macos/Assets.car PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
       set(DISQUISITION_SIGN_COMMAND "${CMAKE_COMMAND}"
           "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_RESOLVED_CODESIGN_IDENTITY}"
@@ -443,6 +447,7 @@ if(BUILD_TESTING AND TARGET disquisition-desktop)
   # with isolated identity/settings directories and no audio hardware access.
   get_target_property(COMMUNITY_UI_SOURCES disquisition-desktop SOURCES)
   list(REMOVE_ITEM COMMUNITY_UI_SOURCES src/desktop/main.cpp resources/macos/disquisition.icns
+    resources/macos/Assets.car resources/windows/disquisition.rc
     src/desktop/relay_audio.cpp)
   # Keep hardware capture/playback outside UI tests; control startup outcomes
   # while exercising the real settings, presence, and failure handling.
