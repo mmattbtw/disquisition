@@ -6,6 +6,7 @@
 #include <QCompleter>
 #include <QComboBox>
 #include <QDeadlineTimer>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -53,6 +54,14 @@
 #include "desktop/penguin_sprites.h"
 #include "desktop/screen_stage.h"
 #include "fake_relay_audio.h"
+class ChatLinkCapture : public QObject {
+    Q_OBJECT
+public:
+    QUrl opened;
+public slots:
+    void capture(const QUrl& url) { opened = url; }
+};
+
 // Stable identities keep the custom-sprite screenshot probes in separate lanes
 // and positions, rather than randomly obscuring one another.
 static void seedIdentity(const QString& directory, char seed) {
@@ -199,6 +208,34 @@ int main(int argc, char** argv) {
     panel->findChild<QPushButton*>("communitySend")->click();
     auto* transcript = panel->findChild<QTextBrowser*>("communityTranscript");
     CHECK(transcript->toPlainText().contains("not delivered"));
+    if (app.arguments().contains("--chat-links-only")) {
+        // URLs remain literal text, become anchors, and coexist with mentions.
+        const QString linkedMessage =
+            "@Alice <b>links</b> https://example.com/a?x=1&y=2.\n"
+            "(http://example.org/wiki/Test_(page)) HTTPS://example.net/@everyone "
+            "javascript:alert(1) file:///tmp/example";
+        composer->setText(linkedMessage);
+        panel->findChild<QPushButton*>("communitySend")->click();
+        CHECK(transcript->toPlainText().contains(linkedMessage));
+        ChatLinkCapture capture;
+        QDesktopServices::setUrlHandler("http", &capture, "capture");
+        QDesktopServices::setUrlHandler("https", &capture, "capture");
+        for (const QString& url : {QString("https://example.com/a?x=1&y=2"),
+                                   QString("http://example.org/wiki/Test_(page)"),
+                                   QString("HTTPS://example.net/@everyone")}) {
+            const auto anchor = transcript->document()->find(url);
+            CHECK(!anchor.isNull() && anchor.charFormat().isAnchor());
+            CHECK(QUrl(anchor.charFormat().anchorHref()) == QUrl(url));
+            transcript->anchorClicked(QUrl(anchor.charFormat().anchorHref()));
+            CHECK(capture.opened == QUrl(url));
+        }
+        CHECK(!transcript->document()->find("javascript:alert(1)").charFormat().isAnchor());
+        CHECK(!transcript->document()->find("file:///tmp/example").charFormat().isAnchor());
+        CHECK(!transcript->document()->find("<b>links</b>").charFormat().isAnchor());
+        QDesktopServices::unsetUrlHandler("http");
+        QDesktopServices::unsetUrlHandler("https");
+        return 0;
+    }
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
@@ -1051,3 +1088,5 @@ int main(int argc, char** argv) {
     online->click();
     std::puts("community_ui_test: ok");
 }
+
+#include "community_ui_test.moc"
