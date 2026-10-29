@@ -5,14 +5,21 @@
 #import <CoreVideo/CoreVideo.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 
+#include <libproc.h>
+
 #include <atomic>
 #include <utility>
+#include <vector>
 
 @interface DisquisitionScreenOutput : NSObject <SCStreamOutput, SCStreamDelegate> {
 @public
     std::atomic_bool active;
     std::function<void(QImage)> frameCallback;
     std::function<void(QString)> errorCallback;
+    ShareAudioCallback audioCallback;
+    // Sound is delivered in order on its own queue, then interleaved here.
+    dispatch_queue_t audioQueue;
+    std::vector<float> interleaved;
     SCStream* stream;
 }
 @end
@@ -21,7 +28,12 @@
 
 - (void)stream:(SCStream*)source didOutputSampleBuffer:(CMSampleBufferRef)sample
         ofType:(SCStreamOutputType)type {
-    if (!active || type != SCStreamOutputTypeScreen || !CMSampleBufferIsValid(sample)) return;
+    if (!active || !CMSampleBufferIsValid(sample)) return;
+    if (type == SCStreamOutputTypeAudio) {
+        [self deliverAudio:sample];
+        return;
+    }
+    if (type != SCStreamOutputTypeScreen) return;
     CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, false);
     if (attachments && CFArrayGetCount(attachments) > 0) {
         NSDictionary* info = (__bridge NSDictionary*)CFArrayGetValueAtIndex(attachments, 0);
@@ -40,6 +52,39 @@
     if (active && !copy.isNull()) frameCallback(std::move(copy));
 }
 
+// The stream is configured for 32-bit float stereo, usually one buffer per
+// channel.
+- (void)deliverAudio:(CMSampleBufferRef)sample {
+    const AudioStreamBasicDescription* format =
+        CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+    if (!format || !(format->mFormatFlags & kAudioFormatFlagIsFloat) ||
+        format->mBitsPerChannel != 32 || format->mChannelsPerFrame != kShareAudioChannels) return;
+    size_t listSize = 0;
+    CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sample, &listSize, nullptr, 0, nullptr,
+                                                            nullptr, 0, nullptr);
+    std::vector<char> storage(listSize);
+    auto* list = reinterpret_cast<AudioBufferList*>(storage.data());
+    CMBlockBufferRef block = nullptr;
+    if (CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sample, nullptr, list, listSize, kCFAllocatorDefault, kCFAllocatorDefault,
+            kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, &block) != noErr) return;
+    const int frames = static_cast<int>(CMSampleBufferGetNumSamples(sample));
+    if (!(format->mFormatFlags & kAudioFormatFlagIsNonInterleaved)) {
+        audioCallback(static_cast<const float*>(list->mBuffers[0].mData), frames);
+    }
+    else if (list->mNumberBuffers == kShareAudioChannels) {
+        interleaved.resize(static_cast<size_t>(frames) * kShareAudioChannels);
+        for (int channel = 0; channel < kShareAudioChannels; ++channel) {
+            const auto* samples = static_cast<const float*>(list->mBuffers[channel].mData);
+            for (int frame = 0; frame < frames; ++frame) {
+                interleaved[frame * kShareAudioChannels + channel] = samples[frame];
+            }
+        }
+        audioCallback(interleaved.data(), frames);
+    }
+    CFRelease(block);
+}
+
 - (void)stream:(SCStream*)source didStopWithError:(NSError*)error {
     if (active.exchange(false)) errorCallback(QString::fromUtf8(error.localizedDescription.UTF8String));
 }
@@ -50,6 +95,14 @@ namespace {
 
 QString toQString(NSString* text) {
     return QString::fromUtf8(text.UTF8String);
+}
+
+bool isThisAppOrChild(pid_t process) {
+    const pid_t self = NSProcessInfo.processInfo.processIdentifier;
+    if (process == self) return true;
+    proc_bsdinfo info {};
+    return proc_pidinfo(process, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) == sizeof(info) &&
+           static_cast<pid_t>(info.pbi_ppid) == self;
 }
 
 // Picks what to capture from the shareable content and sets the frame size
@@ -80,11 +133,21 @@ void startStream(DisquisitionScreenOutput* output, NSString* missing, FilterChoo
         configuration.minimumFrameInterval = CMTimeMake(1, 30);
         configuration.queueDepth = 3;
         configuration.showsCursor = YES;
+        const bool audio = static_cast<bool>(output->audioCallback);
+        if (audio) {
+            configuration.capturesAudio = YES;
+            configuration.excludesCurrentProcessAudio = YES;
+            configuration.sampleRate = kShareAudioRate;
+            configuration.channelCount = kShareAudioChannels;
+        }
         output->stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:output];
         NSError* addError = nil;
         if (![output->stream addStreamOutput:output type:SCStreamOutputTypeScreen
                           sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0)
-                                      error:&addError]) {
+                                      error:&addError] ||
+            (audio && ![output->stream addStreamOutput:output type:SCStreamOutputTypeAudio
+                                    sampleHandlerQueue:output->audioQueue
+                                                 error:&addError])) {
             output->errorCallback(toQString(addError.localizedDescription));
             return;
         }
@@ -145,11 +208,13 @@ struct MacScreenCapture::State {
 };
 
 MacScreenCapture::MacScreenCapture(std::function<void(QImage)> frame,
-                                   std::function<void(QString)> error)
+                                   std::function<void(QString)> error, ShareAudioCallback audio)
     : state_(new State {[[DisquisitionScreenOutput alloc] init]}) {
     state_->output->active = false;
     state_->output->frameCallback = std::move(frame);
     state_->output->errorCallback = std::move(error);
+    state_->output->audioCallback = std::move(audio);
+    state_->output->audioQueue = dispatch_queue_create("disquisition.share-audio", DISPATCH_QUEUE_SERIAL);
 }
 
 MacScreenCapture::~MacScreenCapture() {
@@ -165,11 +230,12 @@ void MacScreenCapture::startDisplay(quint32 displayId) {
               *size = CGSizeMake(display.width, display.height);
               // Exclude our windows so the raised annotation panels are never
               // baked into the video, but keep ordinary app windows visible in
-              // a full-screen share. Drawing panels live above layer 0.
+              // a full-screen share. Drawing panels live above layer 0. Child
+              // processes are excluded too, so their sound stays out.
               const pid_t self = NSProcessInfo.processInfo.processIdentifier;
               NSMutableArray<SCRunningApplication*>* excluded = [NSMutableArray array];
               for (SCRunningApplication* application in content.applications) {
-                  if (application.processID == self)
+                  if (isThisAppOrChild(application.processID))
                       [excluded addObject:application];
               }
               NSMutableArray<SCWindow*>* excepted = [NSMutableArray array];

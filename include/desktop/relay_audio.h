@@ -7,6 +7,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -23,6 +24,10 @@ public:
     void remove(const QString& sender);
     void setMuted(bool muted) { muted_ = muted; }
     void setDeafened(bool deafened) { deafened_ = deafened; }
+    // How loud one sender plays here, linear from 0 to 1, and whether they
+    // play at all. Both are kept across calls.
+    void setPeerVolume(const QString& sender, qreal volume);
+    void setPeerMuted(const QString& sender, bool muted);
     bool running() const { return source_ != nullptr; }
 
 signals:
@@ -42,6 +47,8 @@ private:
     QAudioSource* source_ = nullptr;
     QIODevice* capture_ = nullptr;
     QHash<QString, Playback> playback_;
+    QHash<QString, qreal> peerVolumes_;
+    QSet<QString> mutedPeers_;
     QByteArray captureBytes_;
     QVector<float> captureSamples_;
     double capturePosition_ = 0;

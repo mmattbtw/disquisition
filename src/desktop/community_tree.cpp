@@ -234,6 +234,18 @@ void CommunityTree::mouseReleaseEvent(QMouseEvent* event) {
     QTreeWidget::mouseReleaseEvent(event);
 }
 
+void CommunityTree::mouseDoubleClickEvent(QMouseEvent* event) {
+    // Not itemDoubleClicked: the first click selects the channel and rebuilds
+    // the tree, so Qt sees the second click land on a different item.
+    auto* item = itemAt(event->position().toPoint());
+    if (event->button() == Qt::LeftButton && item && item->data(0, kVoiceChannel).toBool()) {
+        emit voiceChannelDoubleClicked(item->data(0, Qt::UserRole).toString(),
+                                       item->data(0, Qt::UserRole + 1).toString());
+        return;
+    }
+    QTreeWidget::mouseDoubleClickEvent(event);
+}
+
 QTreeWidgetItem* CommunityTree::channelItem(const QString& community,
                                            const QString& channel) const {
     if (community.isEmpty() || channel.isEmpty())

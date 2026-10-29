@@ -5,10 +5,20 @@
 
 namespace {
 std::deque<bool> startResults;
+QHash<QString, qreal> peerVolumes;
+QSet<QString> mutedPeers;
 }
 
 void testAudio::setStartResults(std::initializer_list<bool> results) {
     startResults.assign(results);
+}
+
+qreal testAudio::peerVolume(const QString& sender) {
+    return peerVolumes.value(sender, 1.0);
+}
+
+bool testAudio::peerMuted(const QString& sender) {
+    return mutedPeers.contains(sender);
 }
 
 RelayAudio::RelayAudio(QObject* parent) : QObject(parent) {}
@@ -41,3 +51,12 @@ void RelayAudio::stop() {
 // Packet transport and speaking detection stay real; only hardware playback is absent.
 void RelayAudio::receive(const QString&, const QByteArray&) {}
 void RelayAudio::remove(const QString&) {}
+void RelayAudio::setPeerVolume(const QString& sender, qreal volume) {
+    peerVolumes[sender] = volume;
+}
+void RelayAudio::setPeerMuted(const QString& sender, bool muted) {
+    if (muted)
+        mutedPeers.insert(sender);
+    else
+        mutedPeers.remove(sender);
+}

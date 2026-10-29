@@ -1,6 +1,7 @@
 #include "desktop/community_panel.h"
 
 #include <QAction>
+#include <QAudio>
 #include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
@@ -63,6 +64,7 @@
 #include "desktop/remote_media.h"
 #include "desktop/screen_stage.h"
 #include "desktop/share_picker.h"
+#include "desktop/volume_menu.h"
 
 using community::freshId;
 namespace {
@@ -128,6 +130,17 @@ QPixmap voiceIndicator(const QString& kind) {
         painter.drawRoundedRect(QRectF(2, 8, 3, 6), 1, 1);
         painter.drawRoundedRect(QRectF(11, 8, 3, 6), 1, 1);
     }
+    else if (kind == "muted by you") {
+        QPainterPath speaker;
+        speaker.moveTo(2, 6);
+        speaker.lineTo(5, 6);
+        speaker.lineTo(9, 3);
+        speaker.lineTo(9, 13);
+        speaker.lineTo(5, 10);
+        speaker.lineTo(2, 10);
+        speaker.closeSubpath();
+        painter.drawPath(speaker);
+    }
     else {
         painter.drawRect(QRectF(2, 2, 12, 9));
         painter.drawLine(8, 11, 8, 14);
@@ -136,6 +149,11 @@ QPixmap voiceIndicator(const QString& kind) {
     if (kind != "sharing screen")
         painter.drawLine(2, 1, 14, 15);
     return image;
+}
+// Slider positions follow loudness as heard, which is roughly logarithmic.
+qreal linearVolume(int percent) {
+    return QAudio::convertVolume(percent / 100.0, QAudio::LogarithmicVolumeScale,
+                                 QAudio::LinearVolumeScale);
 }
 QIcon voiceChannelIcon(qreal scale) {
     QPixmap image(QSize(20, 20) * scale);
@@ -281,6 +299,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     for (const auto& peer : streams_) {
                         stopDrawing(peer);
                         stage_->removeStream(peer);
+                        screenAudio_.remove(peer);
                     }
                     streams_.clear();
                     watching_.clear();
@@ -375,6 +394,21 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     node_->sendPacket(voiceCid_, voiceChannel_, "watch",
                                       {{"target", peer}, {"enabled", true}});
                 });
+    });
+    connect(&capture_, &ScreenCapture::audioReady, this, [this](const QByteArray& packet) {
+        if (!online_ || voiceCid_.isEmpty())
+            return;
+        const auto bytes = QString::fromLatin1(packet.toBase64());
+        const auto watchers = watchers_;
+        for (const auto& peer : watchers)
+            if (!node_->presence(voiceCid_, peer).deafened)
+                attempt([&] {
+                    node_->sendPacket(voiceCid_, voiceChannel_, "screen-audio",
+                                      {{"target", peer}, {"bytes", bytes}});
+                });
+    });
+    connect(&capture_, &ScreenCapture::audioUnavailable, this, [this](const QString& reason) {
+        commandReply("Screen sharing", "Sharing without sound: " + reason);
     });
     connect(&capture_, &ScreenCapture::errorOccurred, this, [this](const QString& error) {
         stopSharing();
@@ -490,6 +524,14 @@ void CommunityPanel::buildUi() {
     joining_->hide();
     side->addWidget(joining_);
     side->addWidget(tree_, 1);
+    connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceChannelDoubleClicked, this,
+            [this](const QString& cid, const QString& channel) {
+                if (cid == voiceCid_ && channel == voiceChannel_)
+                    return;
+                selectedVoiceCid_ = cid;
+                selectedVoiceChannel_ = channel;
+                joinVoice();
+            });
     connect(static_cast<CommunityTree*>(tree_), &CommunityTree::voiceMoveRequested, this,
             [this](const QString& cid, const QString& peer, const QString& channel) {
                 attempt([&] { node_->moveVoice(cid, peer, channel); });
@@ -624,6 +666,10 @@ void CommunityPanel::buildUi() {
             [this](const QString& peer) { watch(peer, true); });
     connect(stage_, &ScreenStage::stopWatchingRequested, this,
             [this](const QString& peer) { watch(peer, false); });
+    connect(stage_, &ScreenStage::volumeChanged, this, [this](const QString& peer, int percent) {
+        QSettings().setValue("community/streamVolume/" + peer, percent);
+        setStreamVolume(peer, percent);
+    });
     auto* compose = new QHBoxLayout;
     composer_ = new QLineEdit(this);
     composer_->setObjectName("communityComposer");
@@ -1066,6 +1112,8 @@ void CommunityPanel::settings() {
             saved.setValue("community/port", port->value());
             saved.setValue("community/input", inputId);
             saved.setValue("community/output", outputId);
+            if (outputId != previousOutput)
+                screenAudio_.setOutputDevice(outputId);
             saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());
@@ -1531,6 +1579,11 @@ void CommunityPanel::select(QTreeWidgetItem* item) {
         return;
     const auto cid = item->data(0, Qt::UserRole).toString();
     const auto channel = item->data(0, Qt::UserRole + 1).toString();
+    // A row holding a button, such as "Join voice", becomes current when the
+    // button takes focus on a press. Selecting it would rebuild the tree and
+    // delete the button before the click completes.
+    if (cid.isEmpty())
+        return;
     if (channel.isEmpty()) {
         if (cid != cid_)
             selectCommunity(cid);
@@ -1703,6 +1756,8 @@ void CommunityPanel::refresh() {
                     activity.append("deafened");
                 if (state.sharing)
                     activity.append("sharing screen");
+                if (QSettings().value("community/voiceMuted/" + peer.id, false).toBool())
+                    activity.append("muted by you");
                 auto label = peer.name;
                 if (peer.id == node_->peerId())
                     label += " (you)";
@@ -1751,6 +1806,13 @@ void CommunityPanel::refresh() {
                                          QSize(160, std::max(48, row->sizeHint().height() + 12)));
                 tree_->setItemWidget(participant, 0, row);
                 paintSpeaking(row, speaking_.contains(peer.id));
+                if (peer.id != node_->peerId()) {
+                    row->setContextMenuPolicy(Qt::CustomContextMenu);
+                    connect(row, &QWidget::customContextMenuRequested, this,
+                            [this, row, id = peer.id](const QPoint& at) {
+                                showVoiceMemberMenu(id, row->mapToGlobal(at));
+                            });
+                }
                 static_cast<CommunityTree*>(tree_)->configureVoiceParticipant(
                     participant, row, model.id, channel.id, peer.id,
                     online_ && model.canAdmin(node_->peerId()));
@@ -1890,10 +1952,13 @@ void CommunityPanel::refresh() {
             for (const auto& [_, session] : drawings_)
                 session->peerChanged(peer, false);
         }
+        for (const auto& peer : active - audioPeers_)
+            applyVoiceSettings(peer);
         audioPeers_ = active;
         for (const auto& peer : streams_ - streaming) {
             stopDrawing(peer);
             stage_->removeStream(peer);
+            screenAudio_.remove(peer);
             // Preserve watch intent while a peer is disconnected. Explicitly
             // ending a share or leaving voice still removes the subscription.
             if (node_->online(voiceCid_).contains(peer) || !voiceModel.isMember(peer))
@@ -1904,6 +1969,9 @@ void CommunityPanel::refresh() {
         }
         for (const auto& peer : streaming - streams_) {
             stage_->addStream(peer, false, memberName(voiceCid_, peer));
+            const int volume = QSettings().value("community/streamVolume/" + peer, 100).toInt();
+            stage_->setVolume(peer, volume);
+            setStreamVolume(peer, volume);
             if (watching_.contains(peer))
                 watch(peer, true);
         }
@@ -2285,6 +2353,10 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         else
             watchers_.remove(peer);
     }
+    else if (type == "screen-audio" && watching_.contains(peer) && cid == voiceCid_ &&
+             channel == voiceChannel_ && !deafen_->isChecked()) {
+        screenAudio_.play(peer, QByteArray::fromBase64(data.value("bytes").toString().toLatin1()));
+    }
     else if (type == "screen" && watching_.contains(peer) && cid == voiceCid_ &&
              channel == voiceChannel_) {
         const auto frame = data.value("frame").toDouble(-1);
@@ -2329,6 +2401,7 @@ void CommunityPanel::joinVoice() {
             noteError("The selected audio devices are unavailable.");
             return;
         }
+        screenAudio_.setOutputDevice(settings.value("community/output").toString());
         voiceCid_ = cid;
         voiceChannel_ = selectedChannel;
         updatePushToTalk();
@@ -2368,8 +2441,10 @@ void CommunityPanel::leaveVoice() {
     quietAudioFrames_.clear();
     lastAudioAt_.clear();
     watchers_.clear();
-    for (const auto& peer : streams_)
+    for (const auto& peer : streams_) {
         stage_->removeStream(peer);
+        screenAudio_.remove(peer);
+    }
     streams_.clear();
     watching_.clear();
     lastScreenFrames_.clear();
@@ -2399,7 +2474,7 @@ void CommunityPanel::share() {
     });
     if (dialog.exec() != QDialog::Accepted || !dialog.chosen())
         return;
-    if (!capture_.start(*dialog.chosen())) {
+    if (!capture_.start(*dialog.chosen(), dialog.shareAudio())) {
         noteError("Could not start screen sharing.");
         return;
     }
@@ -2440,11 +2515,45 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
             lastScreenFrames_.remove(peer);
             decoders_.erase(peer);
             frames_.remove(peer);
+            screenAudio_.remove(peer);
             if (watching_.isEmpty())
                 streamRetry_.stop();
         }
         stage_->setWatching(peer, enabled);
     });
+}
+
+void CommunityPanel::setStreamVolume(const QString& peer, int percent) {
+    screenAudio_.setVolume(peer, linearVolume(percent));
+}
+
+void CommunityPanel::applyVoiceSettings(const QString& peer) {
+    QSettings settings;
+    audio_.setPeerVolume(
+        peer, linearVolume(settings.value("community/voiceVolume/" + peer, 100).toInt()));
+    audio_.setPeerMuted(peer, settings.value("community/voiceMuted/" + peer, false).toBool());
+}
+
+void CommunityPanel::showVoiceMemberMenu(const QString& peer, const QPoint& at) {
+    QSettings settings;
+    // Parented to the panel: a presence update can rebuild the row while the
+    // menu is open.
+    QMenu menu(this);
+    addVolumeSlider(menu, settings.value("community/voiceVolume/" + peer, 100).toInt(),
+                    [this, peer](int percent) {
+                        QSettings().setValue("community/voiceVolume/" + peer, percent);
+                        audio_.setPeerVolume(peer, linearVolume(percent));
+                    });
+    menu.addSeparator();
+    auto* mute = menu.addAction("Mute");
+    mute->setCheckable(true);
+    mute->setChecked(settings.value("community/voiceMuted/" + peer, false).toBool());
+    connect(mute, &QAction::toggled, this, [this, peer](bool muted) {
+        QSettings().setValue("community/voiceMuted/" + peer, muted);
+        audio_.setPeerMuted(peer, muted);
+        refresh();
+    });
+    menu.exec(at);
 }
 
 void CommunityPanel::dragEnterEvent(QDragEnterEvent* event) {

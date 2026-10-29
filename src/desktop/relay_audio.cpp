@@ -1,5 +1,7 @@
 #include "desktop/relay_audio.h"
 
+#include "desktop/audio_device.h"
+
 #include <QIODevice>
 #include <QMediaDevices>
 
@@ -14,34 +16,6 @@ constexpr int relayFrameBytes = 640; // 20 ms of mono signed 16-bit PCM.
 constexpr double speakingLevel = 180; // RMS, about -45 dBFS.
 // Pauses between words shorter than this do not end talking.
 constexpr int speakingHoldFrames = 10;
-
-QAudioDevice selectedDevice(const QList<QAudioDevice>& devices, const QString& id,
-                            const QAudioDevice& fallback) {
-    for (const QAudioDevice& device : devices) {
-        if (device.id() == id.toUtf8()) return device;
-    }
-    return fallback;
-}
-
-QAudioFormat deviceFormat(const QAudioDevice& device) {
-    if (device.isNull()) return {};
-    const QAudioFormat preferred = device.preferredFormat();
-    if (device.isFormatSupported(preferred)) return preferred;
-
-    for (int rate : {48000, 44100}) {
-        for (int channels : {1, 2}) {
-            for (QAudioFormat::SampleFormat sampleFormat :
-                 {QAudioFormat::Int16, QAudioFormat::Float}) {
-                QAudioFormat format;
-                format.setSampleRate(rate);
-                format.setChannelCount(channels);
-                format.setSampleFormat(sampleFormat);
-                if (device.isFormatSupported(format)) return format;
-            }
-        }
-    }
-    return {};
-}
 
 float readSample(const char* data, QAudioFormat::SampleFormat format) {
     switch (format) {
@@ -115,12 +89,12 @@ RelayAudio::RelayAudio(QObject* parent) : QObject(parent) {}
 
 bool RelayAudio::start(const QString& inputId, const QString& outputId) {
     stop();
-    const QAudioDevice input = selectedDevice(QMediaDevices::audioInputs(), inputId,
-                                              QMediaDevices::defaultAudioInput());
-    outputDevice_ = selectedDevice(QMediaDevices::audioOutputs(), outputId,
-                                   QMediaDevices::defaultAudioOutput());
-    inputFormat_ = deviceFormat(input);
-    outputFormat_ = deviceFormat(outputDevice_);
+    const QAudioDevice input = findAudioDevice(QMediaDevices::audioInputs(), inputId,
+                                               QMediaDevices::defaultAudioInput());
+    outputDevice_ = findAudioDevice(QMediaDevices::audioOutputs(), outputId,
+                                    QMediaDevices::defaultAudioOutput());
+    inputFormat_ = supportedAudioFormat(input);
+    outputFormat_ = supportedAudioFormat(outputDevice_);
     if (!inputFormat_.isValid() || !outputFormat_.isValid()) return false;
 
     source_ = new QAudioSource(input, inputFormat_, this);
@@ -196,10 +170,13 @@ void RelayAudio::stop() {
 }
 
 void RelayAudio::receive(const QString& sender, const QByteArray& pcm) {
-    if (!running() || deafened_ || pcm.size() != relayFrameBytes) return;
+    if (!running() || deafened_ || mutedPeers_.contains(sender) ||
+        pcm.size() != relayFrameBytes)
+        return;
     if (!playback_.contains(sender)) {
         auto* sink = new QAudioSink(outputDevice_, outputFormat_, this);
         sink->setBufferSize(outputFormat_.bytesForDuration(200000));
+        sink->setVolume(peerVolumes_.value(sender, 1.0));
         QIODevice* device = sink->start();
         if (!device) {
             delete sink;
@@ -224,6 +201,21 @@ void RelayAudio::receive(const QString& sender, const QByteArray& pcm) {
         }
     }
     playback.device->write(output);
+}
+
+void RelayAudio::setPeerVolume(const QString& sender, qreal volume) {
+    peerVolumes_[sender] = volume;
+    if (playback_.contains(sender)) playback_[sender].sink->setVolume(volume);
+}
+
+void RelayAudio::setPeerMuted(const QString& sender, bool muted) {
+    if (!muted) {
+        mutedPeers_.remove(sender);
+        return;
+    }
+    mutedPeers_.insert(sender);
+    // Stop what is already buffered too.
+    remove(sender);
 }
 
 void RelayAudio::remove(const QString& sender) {

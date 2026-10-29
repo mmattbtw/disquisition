@@ -36,3 +36,9 @@ void listShareSources(std::function<void(QList<ShareSource>)> done);
 // that does not expose its position, such as Wayland.
 QRect shareSourceGeometry(const ShareSource& source);
 bool shareSourceSupportsOverlay(const ShareSource& source);
+
+#if !defined(Q_OS_MACOS)
+// The process that owns a shared window, or 0 when it cannot be told, such as
+// on Wayland or for a window whose title is not unique.
+qint64 shareSourceProcessId(const ShareSource& source);
+#endif

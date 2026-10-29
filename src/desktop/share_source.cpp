@@ -178,6 +178,31 @@ bool shareSourceSupportsOverlay(const ShareSource& source) {
 #endif
 }
 
+#if !defined(Q_OS_MACOS)
+qint64 shareSourceProcessId(const ShareSource& source) {
+    if (source.kind != ShareSource::Kind::Window || !source.nativeId)
+        return 0;
+#    if defined(Q_OS_WIN)
+    DWORD process = 0;
+    GetWindowThreadProcessId(reinterpret_cast<HWND>(source.nativeId), &process);
+    return process;
+#    elif defined(DISQUISITION_HAVE_XCB)
+    if (QGuiApplication::platformName() != "xcb")
+        return 0;
+    XConnection x;
+    if (!x.valid())
+        return 0;
+    const auto pid = x.property(static_cast<xcb_window_t>(source.nativeId), x.atom("_NET_WM_PID"),
+                                XCB_ATOM_CARDINAL);
+    if (!pid || pid->format != 32 || xcb_get_property_value_length(pid.get()) < 4)
+        return 0;
+    return *static_cast<const uint32_t*>(xcb_get_property_value(pid.get()));
+#    else
+    return 0;
+#    endif
+}
+#endif
+
 QRect shareSourceGeometry(const ShareSource& source) {
 #if defined(Q_OS_MACOS)
     return macShareSourceGeometry(source);

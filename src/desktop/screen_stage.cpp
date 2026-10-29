@@ -1,8 +1,10 @@
 #include "desktop/screen_stage.h"
 
+#include <QContextMenuEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QShortcut>
@@ -10,6 +12,8 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+
+#include "desktop/volume_menu.h"
 
 StreamView::StreamView(QWidget* parent) : DrawingCanvas(parent) {
     setMinimumSize(160, 90);
@@ -52,6 +56,10 @@ void StreamView::paintEvent(QPaintEvent*) {
 void StreamView::mouseDoubleClickEvent(QMouseEvent*) {
     if (!drawing() || !drawing()->penActive())
         emit doubleClicked();
+}
+
+void StreamView::contextMenuEvent(QContextMenuEvent* event) {
+    emit menuRequested(event->globalPos());
 }
 
 StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QString& label)
@@ -116,6 +124,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     connect(focusButton_, &QPushButton::clicked, this, &StreamTile::focusClicked);
     connect(fullscreenButton_, &QPushButton::clicked, this, &StreamTile::fullscreenClicked);
     connect(view_, &StreamView::doubleClicked, this, &StreamTile::fullscreenClicked);
+    connect(view_, &StreamView::menuRequested, this, &StreamTile::showVolumeMenu);
 
     setWatching(own);
 }
@@ -130,6 +139,7 @@ void StreamTile::setWatching(bool watching) {
     body_->setCurrentWidget(watching ? static_cast<QWidget*>(view_) : invitation_);
     fullscreenButton_->setVisible(watching);
     stopButton_->setVisible(watching && !own_);
+    watching_ = watching;
     drawingControls_->setVisible(watching);
     if (!watching)
         drawing_->setState(false, 0);
@@ -138,6 +148,18 @@ void StreamTile::setWatching(bool watching) {
     statsClock_.invalidate();
     statsFrames_ = 0;
     statsBytes_ = 0;
+}
+
+void StreamTile::showVolumeMenu(const QPoint& globalPosition) {
+    // Your own share's sound is never played back to you.
+    if (own_ || !watching_)
+        return;
+    QMenu menu(this);
+    addVolumeSlider(menu, volume_, [this](int percent) {
+        volume_ = percent;
+        emit volumeChanged(percent);
+    });
+    menu.exec(globalPosition);
 }
 
 void StreamTile::setFocusState(bool available, bool focused) {
@@ -211,6 +233,8 @@ void ScreenStage::addStream(const QString& name, bool own, const QString& label)
             [this, name] { emit stopWatchingRequested(name); });
     connect(tile, &StreamTile::focusClicked, this, [this, name] { toggleFocus(name); });
     connect(tile, &StreamTile::fullscreenClicked, this, [this, name] { toggleFullscreen(name); });
+    connect(tile, &StreamTile::volumeChanged, this,
+            [this, name](int percent) { emit volumeChanged(name, percent); });
     // Your own share comes first, like in a call.
     if (own) {
         tiles_.prepend(tile);
@@ -243,6 +267,11 @@ void ScreenStage::setWatching(const QString& name, bool watching) {
     if (!watching && name == fullscreenName_) {
         exitFullscreen();
     }
+}
+
+void ScreenStage::setVolume(const QString& name, int percent) {
+    if (auto* tile = find(name))
+        tile->setVolume(percent);
 }
 
 void ScreenStage::setDetail(const QString& name, const QString& detail) {
@@ -306,6 +335,7 @@ void ScreenStage::toggleFullscreen(const QString& name) {
     fullscreen_->setImage(tile->image());
     fullscreenName_ = name;
     connect(fullscreen_, &StreamView::doubleClicked, this, &ScreenStage::exitFullscreen);
+    connect(fullscreen_, &StreamView::menuRequested, tile, &StreamTile::showVolumeMenu);
     connect(fullscreen_, &QObject::destroyed, this, [this, view = fullscreen_.data()] {
         if (fullscreen_.isNull() || fullscreen_ == view) {
             fullscreen_.clear();
