@@ -235,6 +235,9 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
     }
     messageColor_ = kChatColors[QRandomGenerator::global()->bounded(kChatColors.size())];
     QSettings penguinSettings;
+    const auto savedColor = penguinSettings.value("community/color").toString().toLower();
+    if (validChatColor(savedColor)) messageColor_ = savedColor;
+    penguinSettings.setValue("community/color", messageColor_);
     penguins_ = new PenguinOverlay(this);
     penguins_->setEnabled(penguinSettings.value("penguins/unlocked", false).toBool() &&
                           penguinSettings.value("penguins/enabled", false).toBool());
@@ -823,6 +826,10 @@ void CommunityPanel::settings() {
         return form;
     };
     auto* userForm = page("User", "Your profile is shared with members of your communities.");
+    auto* color = new QLineEdit(messageColor_, &dialog);
+    color->setObjectName("userChatColor");
+    color->setToolTip("pink, mint, butter, periwinkle, lilac, aqua, peach, or an allowed 0-255 color");
+    userForm->addRow("Chat color", color);
     auto* showPenguins = new QCheckBox("Show desktop penguins for this community", &dialog);
     showPenguins->setObjectName("communityShowPenguins");
     showPenguins->setChecked(penguinsAction_->isChecked());
@@ -1071,6 +1078,8 @@ void CommunityPanel::settings() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
+            if (!validChatColor(color->text().trimmed().toLower()))
+                throw std::runtime_error("Choose a valid chat color. Use /color for available colors.");
             const auto sprites = spriteEditor->sprites();
             if (unlocked && sprites.enabled && !sprites.complete())
                 throw std::runtime_error("Upload both a standing and walking image, or turn custom sprites off.");
@@ -1098,6 +1107,7 @@ void CommunityPanel::settings() {
             node_->setProfile(profile);
             name_->setText(profile.name);
             saved.setValue("community/name", profile.name);
+            runCommand("/color " + color->text().trimmed());
             saved.setValue("voice/pushToTalk", ptt->isChecked());
             if (pttKey->key()) {
                 saved.setValue("voice/pushToTalkKey", *pttKey->key());
@@ -2835,6 +2845,7 @@ void CommunityPanel::runCommand(const QString& command) {
             return;
         } else {
             messageColor_ = argument.toLower();
+            QSettings().setValue("community/color", messageColor_);
             if (node_) penguins_->setColor(node_->peerId(), chatColor(messageColor_));
             for (const auto& [peer, session] : drawings_)
                 if (auto* drawing = stage_->drawing(peer)) drawing->setChatColor(chatColor(messageColor_));
