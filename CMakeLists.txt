@@ -26,7 +26,7 @@ if(BUILD_DESKTOP_APP)
 else()
   set(DISQUISITION_QT_MIN_VERSION 6.2)
 endif()
-find_package(Qt6 ${DISQUISITION_QT_MIN_VERSION} QUIET COMPONENTS Core Network)
+find_package(Qt6 ${DISQUISITION_QT_MIN_VERSION} QUIET COMPONENTS Core Network Concurrent)
 if(NOT Qt6_FOUND)
   message(FATAL_ERROR
     "Qt ${DISQUISITION_QT_MIN_VERSION}+ Core/Network development files were not found.\n"
@@ -76,7 +76,7 @@ add_library(chat_communities STATIC
   include/community/node.h
   src/community/identity.cpp src/community/model.cpp src/community/store.cpp src/community/node.cpp)
 target_include_directories(chat_communities PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE OpenSSL::Crypto)
+target_link_libraries(chat_communities PUBLIC Qt6::Core Qt6::Network PRIVATE Qt6::Concurrent OpenSSL::Crypto)
 set_target_properties(chat_communities PROPERTIES AUTOMOC ON)
 
 if(BUILD_RELAY OR BUILD_TESTING)
