@@ -682,7 +682,8 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         const auto image = decoders_[id].decode(frame, keyframe, encoded);
         if (!image.isNull())
             stage_->setCameraFrame(node_->peerId(), image);
-        for (const auto& peer : cameraWatchers_)
+        const auto watchers = cameraWatchers_;
+        for (const auto& peer : watchers)
             attempt([&] { node_->sendScreenFrame(voiceCid_, voiceChannel_, peer, frame,
                                                chunks, keyframe, true); });
     });
@@ -714,7 +715,9 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
             return;
         const auto now = QDateTime::currentMSecsSinceEpoch();
         for (const auto& peer : cameraWatching_)
-            if (now - lastScreenFrames_.value("camera/" + peer) > 5000)
+            if (node_->online(voiceCid_).contains(peer) &&
+                node_->presence(voiceCid_, peer).camera &&
+                now - lastScreenFrames_.value("camera/" + peer) > 5000)
                 attempt([&] { node_->sendPacket(voiceCid_, voiceChannel_, "watch-camera",
                                                {{"target", peer}, {"enabled", true}}); });
         for (const auto& peer : watching_)
