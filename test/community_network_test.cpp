@@ -7,6 +7,8 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QThreadPool>
+#include <QSemaphore>
 #include <cstdio>
 #include <functional>
 
@@ -110,6 +112,84 @@ private:
     QProcess relay;
     quint16 port_ = 0;
 };
+
+// Delay metadata work without relying on machine speed or a huge fixture.
+// The main event loop must still service timers and allow local edits.
+void metadataValidationYieldsToTheEventLoop() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1"));
+    CHECK(b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("before sync");
+    const auto invitation = a.invite(cid);
+    auto* pool = QThreadPool::globalInstance();
+    const int threads = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore started, release;
+    pool->start([&] { started.release(); release.acquire(); });
+    CHECK(started.tryAcquire(1, 5000));
+    b.joinCommunity(invitation);
+    CHECK(until([&] { return a.communities()[cid].isMember(b.peerId()); }));
+    bool timerRan = false;
+    QTimer::singleShot(200, &a, [&] { timerRan = true; });
+    CHECK(until([&] { return timerRan; }));
+    CHECK(!b.communities().contains(cid));
+    a.edit(cid, "rename", {{"name", "edited during sync"}});
+    release.release();
+    CHECK(until([&] {
+        return b.communities().contains(cid) && b.communities()[cid].name == "edited during sync" &&
+               a.communities()[cid].name == "edited during sync" &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    // An established admin edits its own model while an incoming merge is queued.
+    a.edit(cid, "admin", {{"peer", b.peerId()}, {"enabled", true}});
+    CHECK(until([&] { return b.communities()[cid].canAdmin(b.peerId()) &&
+                             !a.synchronizing(cid) && !b.synchronizing(cid); }));
+    pool->start([&] { started.release(); release.acquire(); });
+    CHECK(started.tryAcquire(1, 5000));
+    bool disconnectedDuringValidation = false;
+    const auto connection = QObject::connect(&b, &Node::changed, [&] {
+        if (b.connectionCount() == 0)
+            disconnectedDuringValidation = true;
+    });
+    a.edit(cid, "rename", {{"name", "remote edit"}});
+    timerRan = false;
+    // Completed transfers must not expire at the 20-second receive deadline
+    // while local validation is still queued.
+    QTimer::singleShot(21000, &a, [&] { timerRan = true; });
+    CHECK(until([&] { return timerRan; }, 23000));
+    CHECK(!disconnectedDuringValidation && b.connectionCount() == 1);
+    QObject::disconnect(connection);
+    CHECK(b.communities()[cid].name == "edited during sync");
+    QString text;
+    for (const auto& channel : b.communities()[cid].channels)
+        if (channel.type == "text")
+            text = channel.id;
+    b.edit(cid, "channel", {{"id", text}, {"name", "general"}, {"type", "text"},
+                            {"topic", "local edit survives"}});
+    release.release();
+    CHECK(until([&] {
+        return b.communities()[cid].name == "remote edit" &&
+               b.communities()[cid].channels[text].topic == "local edit survives" &&
+               a.communities()[cid].channels[text].topic == "local edit survives" &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    // Stopping a peer must invalidate any queued completion without blocking shutdown.
+    pool->start([&] { started.release(); release.acquire(); });
+    CHECK(started.tryAcquire(1, 5000));
+    a.edit(cid, "rename", {{"name", "stopped during sync"}});
+    timerRan = false;
+    QTimer::singleShot(200, &a, [&] { timerRan = true; });
+    CHECK(until([&] { return timerRan; }));
+    CHECK(b.communities()[cid].name == "remote edit");
+    b.stop();
+    release.release();
+    pool->waitForDone();
+    pool->setMaxThreadCount(threads);
+    CHECK(b.start("bob", "127.0.0.1"));
+    CHECK(until([&] { return b.communities()[cid].name == "stopped during sync" &&
+                             !b.synchronizing(cid); }));
+}
 
 void relayRejectsInvalidAndRetiredOptions() {
     if (relayExecutable.isEmpty())
@@ -930,6 +1010,7 @@ int main(int argc, char** argv) {
         return 77;
     }
     rejoinToleratesAnInFlightSnapshot();
+    metadataValidationYieldsToTheEventLoop();
     stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever();
     stalledUnauthenticatedMemberDoesNotBlockAdmissions();
     localAuthorityDoesNotDependOnPeerSynchronization();
