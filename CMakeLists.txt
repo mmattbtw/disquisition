@@ -271,7 +271,9 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_audio PUBLIC Qt6::Multimedia PRIVATE PkgConfig::FFMPEG)
 
-    add_executable(disquisition-desktop MACOSX_BUNDLE
+    # Qt finalization imports the Darwin permission plugins from Info.plist.
+    # They are required by QCamera even when authorization is requested natively.
+    qt_add_executable(disquisition-desktop MANUAL_FINALIZATION MACOSX_BUNDLE
       include/desktop/audio_permission.h
       include/desktop/chat_media.h
       include/desktop/desktop_notifier.h
@@ -441,6 +443,7 @@ if(BUILD_DESKTOP_APP)
         COMMENT "Signing deployed disquisition for macOS permissions"
         VERBATIM)
     endif()
+    qt_finalize_executable(disquisition-desktop)
   elseif(NOT Qt6_FOUND)
     message(STATUS "Qt 6.6+ not found; skipping disquisition-desktop")
   else()
@@ -537,4 +540,12 @@ if(BUILD_TESTING AND TARGET desktop_screen AND TARGET chat_communities)
   target_link_libraries(community_drawing_test PRIVATE desktop_screen chat_communities chat_community_router)
   add_test(NAME community_drawing_test COMMAND community_drawing_test)
   set_tests_properties(community_drawing_test PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(BUILD_TESTING AND APPLE AND TARGET disquisition-desktop)
+  add_test(NAME macos_permission_plugins_test
+    COMMAND "${CMAKE_COMMAND}" "-DNM=${CMAKE_NM}"
+      "-DAPP_BINARY=$<TARGET_FILE:disquisition-desktop>"
+      "-DAPP_PLIST=$<TARGET_BUNDLE_DIR:disquisition-desktop>/Contents/Info.plist"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_permission_plugins_test.cmake")
 endif()
