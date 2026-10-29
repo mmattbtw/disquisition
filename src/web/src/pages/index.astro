@@ -62,11 +62,6 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 	<main id="main">
 		<section class="hero">
 			<div class="wrap hero-inner">
-				<p class="eyebrow">
-					<span class="ping" aria-hidden="true"></span>
-					open source <span aria-hidden="true">·</span> no central server
-				</p>
-
 				<h1 class="hero-title">
 					<span class="line">
 						Group chat that <span class="mark mark-under">lives<svg class="drawn" viewBox="0 0 220 26" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M4 19C38 8 92 5 138 8c28 2 56 6 78 3" stroke="#9dccca" stroke-width="4.5"></path></svg><span class="scribble-cursor" style="--tag-color:#9dccca; right:-10px; bottom:-0.06em"><svg viewBox="0 0 17 22" aria-hidden="true"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#9dccca" stroke="#16181d" stroke-width="1.4" stroke-linejoin="round"></path></svg><span class="tag">maya</span></span></span>
@@ -138,8 +133,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 		<section id="features" class="section">
 			<div class="wrap">
 				<div class="section-head reveal">
-					<p class="eyebrow-mono">what's inside</p>
-					<h2 class="section-title">Small-group software, not a platform.</h2>
+										<h2 class="section-title">Small-group software, not a platform.</h2>
 					<p class="section-sub">
 						Text, voice, screen sharing, and all the little things that make a group feel
 						like a place — without a feed, an algorithm, or an account in the middle.
@@ -189,9 +183,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 								<text class="node-sub" x="434" y="188">direct</text>
 
 								<rect class="node" x="228" y="84" width="104" height="56" rx="12"></rect>
-								<text class="relay-label" x="280" y="106" text-anchor="middle">relay</text>
-								<text class="node-sub" x="280" y="122" text-anchor="middle">encrypted hop</text>
-								<circle cx="280" cy="132" r="2.4" fill="#9dccca"></circle>
+								<text class="relay-label" x="280" y="118" text-anchor="middle">relay</text>
 
 								<g transform="translate(263 56)">
 									<rect class="lock" x="0" y="3" width="12" height="9" rx="2"></rect>
@@ -205,7 +197,6 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 							<div class="mesh-legend">
 								<span><i class="d-direct"></i> direct</span>
 								<span><i class="d-relay"></i> via relay</span>
-								<span class="mesh-note">authenticated TLS end to end</span>
 							</div>
 						</div>
 					</article>
@@ -219,7 +210,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 						<div class="visual">
 							<div class="voice-mock" aria-hidden="true">
 								<div class="vm-head">
-									<span class="live-dot"></span>
+
 									Lounge
 									<span class="wave"><i></i><i></i><i></i><i></i></span>
 									<span class="pill">4 in voice</span>
@@ -229,7 +220,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 										<span class="v1"></span><span class="v2"></span><span class="v3"></span><span class="v4"></span>
 										<span class="vword">make<br />noise</span>
 									</div>
-									<div class="vm-share-meta"><span class="live">LIVE</span> maya is sharing <b>cover-v3.fig</b></div>
+									<div class="vm-share-meta">maya is sharing <b>cover-v3.fig</b></div>
 								</div>
 								<div class="vm-people">
 									<span class="vm-person speaking"><span class="face" style="background:#9dccca">M</span>maya</span>
@@ -295,18 +286,11 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 			<div class="wrap">
 				<div class="drawing-head reveal">
 					<div class="left">
-						<p class="eyebrow-mono">screen share, shared pen</p>
-						<h2 class="section-title">Everyone gets a pen. Even on your screen.</h2>
+												<h2 class="section-title">Everyone gets a pen. Even on your screen.</h2>
 						<p class="section-sub">
 							Turn on drawing for a share and everyone watching can point, circle, underline,
 							and erase — each stroke in their chat color, with their name at the cursor.
 						</p>
-					</div>
-					<div class="tool-chips" aria-label="Drawing tools">
-						<span class="tool-chip"><span class="dot" style="--dot:#ff66c4"></span> pen</span>
-						<span class="tool-chip"><span class="dot" style="--dot:#ffde59"></span> eraser</span>
-						<span class="tool-chip"><span class="dot" style="--dot:#0cc0df"></span> laser</span>
-						<span class="tool-chip"><span class="dot" style="--dot:#9dccca"></span> select</span>
 					</div>
 				</div>
 
@@ -360,8 +344,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 		<section id="privacy" class="section">
 			<div class="wrap privacy-grid">
 				<div class="reveal">
-					<p class="eyebrow-mono">no server in the middle</p>
-					<h2 class="section-title">Your messages don't need a landlord.</h2>
+										<h2 class="section-title">Your messages don't need a landlord.</h2>
 					<p class="section-sub">
 						Communities live on member devices. Peers connect with authenticated TLS and signed
 						metadata, and the relay only forwards encrypted traffic when a direct connection
@@ -400,8 +383,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 				</div>
 
 				<div class="manifesto reveal" style="--reveal-delay:120ms">
-					<p class="mono">the fine print</p>
-					<p class="big">
+										<p class="big">
 						No feed.<br />
 						No algorithm.<br />
 						<span class="mark mark-circle wide">No account.<svg class="drawn" viewBox="0 0 280 90" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M14 46C16 20 84 6 156 8c72 2 116 16 114 38-2 22-64 36-132 36C70 82 12 68 14 46" stroke="#ffde59" stroke-width="3.4"></path></svg></span>
@@ -417,8 +399,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 		<section id="download" class="download">
 			<div class="wrap">
 				<div class="download-head reveal">
-					<p class="eyebrow-mono">get the app</p>
-					<h2 class="section-title">Take your community with you.</h2>
+										<h2 class="section-title">Take your community with you.</h2>
 					<p class="section-sub">
 						Free and open source. Pick your platform, open the app, pick a name, then create a
 						community or join with an invite.
@@ -494,7 +475,6 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 						A desktop community app for small groups. Text channels, voice, and screen
 						sharing you can draw on together.
 					</p>
-					<span class="status"><i aria-hidden="true"></i> open source · on github</span>
 				</div>
 
 				<div class="footer-col">
@@ -527,7 +507,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 					<span class="petals" aria-hidden="true">
 						{petals.map((petal) => <i style={`--petal:${petal}`}></i>)}
 					</span>
-					<span>© 2026 disquisition. Made by <a href="https://github.com/mmattbtw" target="_blank" rel="noreferrer">Matt</a> and friends.</span>
+					<span>© 2026 disquisition. Made by Natural Intelligence.</span>
 				</div>
 				<div>
 					<a href="https://github.com/mmattbtw/disquisition" target="_blank" rel="noreferrer">Source on GitHub</a>
