@@ -48,6 +48,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <cmath>
 
 #include "community/qr.h"
@@ -704,6 +705,9 @@ void CommunityPanel::buildUi() {
     connect(transcript_, &QTextBrowser::anchorClicked, this, [this](const QUrl& link) {
         if (link.scheme() == "profile")
             showProfile(link.host(), link.path().mid(1), QCursor::pos());
+        else if ((link.scheme() == "http" || link.scheme() == "https") &&
+                 link.isValid() && !link.host().isEmpty())
+            QDesktopServices::openUrl(link);
     });
     gifSearch_ = new GifSearch(network, this);
     QSettings settings;
@@ -2156,14 +2160,55 @@ void CommunityPanel::showEntry(const Entry& entry) {
     const auto mentions = findMentions(body, memberNames(cid));
     const bool mentioned = peer != node_->peerId() &&
         mentionOf(mentions, memberName(cid, node_->peerId())) != Mentioned::No;
+    struct Span {
+        qsizetype start;
+        qsizetype length;
+        bool url;
+    };
+    QList<Span> spans;
+    static const QRegularExpression webLink(
+        R"(\bhttps?://[^\s<>"']+)", QRegularExpression::CaseInsensitiveOption);
+    auto matches = webLink.globalMatch(body);
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        auto value = match.captured();
+        // Leave sentence punctuation outside the link, but retain balanced
+        // parentheses used in URLs such as Wikipedia article names.
+        while (!value.isEmpty()) {
+            const auto last = value.back();
+            if (QString(".,!?;:").contains(last) ||
+                (last == ')' && value.count(')') > value.count('(')) ||
+                (last == ']' && value.count(']') > value.count('[')) ||
+                (last == '}' && value.count('}') > value.count('{')))
+                value.chop(1);
+            else
+                break;
+        }
+        const QUrl url(value);
+        if (url.isValid() && !url.host().isEmpty())
+            spans.append({match.capturedStart(), value.size(), true});
+    }
+    for (const auto& mention : mentions) {
+        const bool overlapsLink = std::any_of(spans.cbegin(), spans.cend(), [&](const Span& span) {
+            return mention.start < span.start + span.length &&
+                   mention.start + mention.length > span.start;
+        });
+        if (!overlapsLink) spans.append({mention.start, mention.length, false});
+    }
+    std::stable_sort(spans.begin(), spans.end(), [](const Span& left, const Span& right) {
+        return left.start < right.start;
+    });
     QString html;
     qsizetype written = 0;
-    for (const auto& mention : mentions) {
-        if (mention.start < written) continue;
-        html += body.mid(written, mention.start - written).toHtmlEscaped() +
-                "<span style='background-color:#3e4372;color:#c9cdfb'>" +
-                body.mid(mention.start, mention.length).toHtmlEscaped() + "</span>";
-        written = mention.start + mention.length;
+    for (const auto& span : spans) {
+        if (span.start < written) continue;
+        const auto content = body.mid(span.start, span.length).toHtmlEscaped();
+        html += body.mid(written, span.start - written).toHtmlEscaped();
+        if (span.url)
+            html += "<a href=\"" + content + "\" style='color:#8ab4f8'>" + content + "</a>";
+        else
+            html += "<span style='background-color:#3e4372;color:#c9cdfb'>" + content + "</span>";
+        written = span.start + span.length;
     }
     html += body.mid(written).toHtmlEscaped();
     if (onlyMedia) html.clear();
