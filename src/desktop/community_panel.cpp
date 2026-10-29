@@ -16,6 +16,7 @@
 #include <QFileDialog>
 #include <QFileOpenEvent>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QImageReader>
 #include <QInputDialog>
 #include <QLabel>
@@ -69,6 +70,7 @@
 
 using community::freshId;
 namespace {
+const QString kDefaultRelay = QStringLiteral("relay.disquisition.app");
 const QStringList kChatColors{"pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 bool validChatColor(const QString& value) {
     if (kChatColors.contains(value)) return true;
@@ -750,7 +752,7 @@ void CommunityPanel::connectNode() {
         online_ =
             node_->start(name_->text().trimmed(), settings.value("community/host").toString(),
                          static_cast<quint16>(port),
-                         settings.value("community/relay", "relay.disquisition.app").toString());
+                         settings.value("community/relay", kDefaultRelay).toString());
         if (online_) {
             settings.setValue("community/name", name_->text().trimmed());
             joiningCommunities_ = node_->pendingCommunities();
@@ -959,11 +961,12 @@ void CommunityPanel::settings() {
         error->hide();
         updatePreview();
     });
-    auto relayAddress = saved.value("community/relay", "relay.disquisition.app").toString();
+    auto relayAddress = saved.value("community/relay", kDefaultRelay).toString();
     if (relayAddress.startsWith("relay://"))
         relayAddress.remove(0, 8);
     auto* relay = new QLineEdit(relayAddress, &dialog);
     relay->setObjectName("communityRelayAddress");
+    relay->setAccessibleName("Relay");
     relay->setPlaceholderText("relay.disquisition.app, or leave blank for direct connections");
     auto* host = new QLineEdit(saved.value("community/host").toString(), &dialog);
     host->setPlaceholderText("Automatic LAN address");
@@ -974,7 +977,20 @@ void CommunityPanel::settings() {
     relay->setEnabled(!online_);
     host->setEnabled(!online_);
     port->setEnabled(!online_);
-    connectionForm->addRow("Relay", relay);
+    auto* resetRelay = new QPushButton("Reset to default", &dialog);
+    resetRelay->setObjectName("communityResetRelay");
+    resetRelay->setToolTip("Use " + kDefaultRelay);
+    const auto updateResetRelay = [this, relay, resetRelay] {
+        resetRelay->setEnabled(!online_ && relay->text().trimmed() != kDefaultRelay);
+    };
+    connect(relay, &QLineEdit::textChanged, &dialog, updateResetRelay);
+    connect(resetRelay, &QPushButton::clicked, relay,
+            [relay] { relay->setText(kDefaultRelay); });
+    updateResetRelay();
+    auto* relayRow = new QHBoxLayout;
+    relayRow->addWidget(relay, 1);
+    relayRow->addWidget(resetRelay);
+    connectionForm->addRow("Relay", relayRow);
     connectionForm->addRow("Direct advertised host", host);
     connectionForm->addRow("Direct listen port", port);
     auto* saving = new QCheckBox("Save messages received or sent by this client", &dialog);
