@@ -93,6 +93,35 @@ void requestMicrophoneAccess(QObject* context, std::function<void(bool)> complet
 #endif
 }
 
+void requestCameraAccess(QObject* context, std::function<void(bool)> completion) {
+#if defined(Q_OS_MACOS)
+    const AVAuthorizationStatus status =
+        [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    if (status == AVAuthorizationStatusAuthorized) {
+        QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(true); });
+    } else if (status == AVAuthorizationStatusNotDetermined) {
+        [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+                                completionHandler:^(BOOL granted) {
+          QTimer::singleShot(0, context, [completion, granted] { completion(granted); });
+        }];
+    } else {
+        QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(false); });
+    }
+#else
+    QCameraPermission permission;
+    if (qApp->checkPermission(permission) == Qt::PermissionStatus::Granted) {
+        QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(true); });
+    } else if (qApp->checkPermission(permission) == Qt::PermissionStatus::Undetermined) {
+        qApp->requestPermission(permission, context,
+                                [completion = std::move(completion)](const QPermission& result) {
+            completion(result.status() == Qt::PermissionStatus::Granted);
+        });
+    } else {
+        QTimer::singleShot(0, context, [completion = std::move(completion)] { completion(false); });
+    }
+#endif
+}
+
 QStringList availableAudioInputs() {
 #if defined(Q_OS_MACOS)
     return coreAudioDevices(true);

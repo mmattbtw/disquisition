@@ -389,6 +389,28 @@ int main(int argc, char** argv) {
     CHECK(panel->findChild<QPushButton*>("communityDeafen")->isVisible());
     CHECK(panel->findChild<QPushButton*>("communityShare")->isVisible());
     CHECK(panel->findChild<QPushButton*>("communityCamera")->isVisible());
+    // Permission denial produces an actionable dialog and resets the toggle.
+    bool cameraDenied = false;
+    QTimer cameraDialog;
+    cameraDialog.setInterval(1);
+    QObject::connect(&cameraDialog, &QTimer::timeout, [&] {
+        auto* dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if (!dialog || dialog->objectName() != "cameraPermissionDenied") return;
+        cameraDenied = true;
+#if defined(Q_OS_MACOS)
+        bool hasSettings = false;
+        for (auto* button : dialog->buttons())
+            hasSettings |= button->text() == "Open Camera Settings";
+        CHECK(hasSettings);
+#endif
+        dialog->reject();
+    });
+    cameraDialog.start();
+    panel->findChild<QPushButton*>("communityCamera")->click();
+    CHECK(until([&] { return cameraDenied; }));
+    cameraDialog.stop();
+    CHECK(panel->findChild<QPushButton*>("communityCamera")->text() == "Turn camera on");
+    CHECK(!node->presence(cid, node->peerId()).camera);
     bool selfUnderChannel = false;
     for (QTreeWidgetItemIterator item(tree); *item; ++item)
         if ((*item)->data(0, Qt::UserRole + 2).toString() == node->peerId() && (*item)->parent() &&
