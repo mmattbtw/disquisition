@@ -50,6 +50,9 @@ public:
 signals:
     void stateChanged(Updater::State state);
     void downloadProgress(int percent);
+    // Emitted after install, before the replacement is spawned. Listeners
+    // release process-wide locks the new process will try to take.
+    void aboutToRelaunch();
 
 private:
     bool busy() const;

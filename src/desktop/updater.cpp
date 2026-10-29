@@ -73,6 +73,7 @@ void Updater::check() {
     if (!enabled() || busy() || state_ == State::Ready || state_ == State::Installed) {
         return;
     }
+    detachStaleUpdaterMount(installation_);
     if (!QDir(installation_.workDir).removeRecursively()) {
         fail("Files from the last update in " + QDir::toNativeSeparators(installation_.workDir) +
              " could not be removed.");
@@ -98,6 +99,9 @@ bool Updater::restart() {
         return false;
     }
     setState(State::Installed);
+    // Replacement's Store::Store() tryLock()s with no wait; listeners release
+    // the community-data lock before we spawn it.
+    emit aboutToRelaunch();
     if (!launchInstallation(installation_)) {
         error_ = "Build " + QString::number(availableBuild()) +
                  " is installed, but could not be started. Open the app again to use it.";
@@ -213,7 +217,7 @@ void Updater::extract() {
     const QString archive = archivePath();
     const QString payload = installation_.payloadDir();
 #if defined(Q_OS_MACOS)
-    const QString mount = installation_.workDir + "/mount";
+    const QString mount = installation_.mountDir();
     QDir().mkpath(mount);
     runTool("/usr/bin/hdiutil",
             {"attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount, archive},
@@ -224,7 +228,9 @@ void Updater::extract() {
                 }
                 const auto detach = [this, mount](bool copied) {
                     runTool("/usr/bin/hdiutil", {"detach", mount, "-force"},
-                            [this, copied](bool) { finishExtracting(copied); });
+                            [this, copied](bool detached) {
+                                finishExtracting(copied && detached);
+                            });
                 };
                 const QStringList apps = QDir(mount).entryList({"*.app"},
                                                                QDir::Dirs | QDir::NoDotAndDotDot);

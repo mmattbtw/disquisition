@@ -151,12 +151,51 @@ bool installStaged(const Installation& installation, QString* error) {
     return !replacements.isEmpty() && applyReplacements(replacements, error);
 }
 
+QStringList relaunchArguments(QStringList currentArguments, const QDir& base) {
+    const QString dataOption = QStringLiteral("--community-data=");
+    for (qsizetype i = 0; i < currentArguments.size(); ++i) {
+        if (currentArguments[i] == "--") {
+            break;
+        }
+        if (currentArguments[i] == "--community-data" && i + 1 < currentArguments.size()) {
+            ++i;
+            currentArguments[i] = base.absoluteFilePath(currentArguments[i]);
+        } else if (currentArguments[i].startsWith(dataOption)) {
+            currentArguments[i] =
+                dataOption + base.absoluteFilePath(currentArguments[i].mid(dataOption.size()));
+        }
+    }
+    return currentArguments;
+}
+
+bool detachStaleUpdaterMount(const Installation& installation) {
+#if defined(Q_OS_MACOS)
+    const QString mount = installation.mountDir();
+    QDir dir(mount);
+    if (!dir.exists() || dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).isEmpty()) {
+        return false;
+    }
+    QProcess::execute("/usr/bin/hdiutil", {"detach", mount, "-force"});
+    return true;
+#else
+    Q_UNUSED(installation);
+    return false;
+#endif
+}
+
 bool launchInstallation(const Installation& installation) {
+    const QStringList arguments =
+        relaunchArguments(QCoreApplication::arguments().mid(1), QDir::current());
     if (installation.bundle) {
         // -n starts a new instance even though this one has not quit yet.
-        return QProcess::startDetached("/usr/bin/open", {"-n", installation.root});
+        QStringList openArguments{"-n", installation.root};
+        if (!arguments.isEmpty()) {
+            openArguments.append("--args");
+            openArguments.append(arguments);
+        }
+        return QProcess::startDetached("/usr/bin/open", openArguments);
     }
-    return QProcess::startDetached(installation.executable, {}, installation.root);
+    return QProcess::startDetached(installation.executable, arguments, QDir::currentPath());
 }
 
 bool startStagedUpdate(const Installation& installation, int currentBuild) {

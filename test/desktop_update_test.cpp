@@ -1,9 +1,11 @@
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <cstdio>
 #include <functional>
@@ -283,9 +285,53 @@ void testFailedInstallIsNotRetried() {
     CHECK(!stagedBuild(installation));
 }
 
+void testRelaunchArgumentsForwardsCommunityData() {
+    QTemporaryDir temp;
+    CHECK(temp.isValid());
+    const QDir base(temp.path());
+
+    QStringList spaced =
+        relaunchArguments({"--community-data", "relative/data", "disquisition://join/x"}, base);
+    CHECK(spaced.size() == 3);
+    CHECK(spaced[0] == "--community-data");
+    CHECK(spaced[1] == base.absoluteFilePath("relative/data"));
+    CHECK(spaced[2] == "disquisition://join/x");
+
+    const QString absolute = base.absoluteFilePath("already/absolute");
+    QStringList equals = relaunchArguments({"--community-data=also/rel",
+                                            "--community-data=" + absolute},
+                                           base);
+    CHECK(equals.size() == 2);
+    CHECK(equals[0] == "--community-data=" + base.absoluteFilePath("also/rel"));
+    CHECK(equals[1] == "--community-data=" + absolute);
+
+    QStringList passthrough =
+        relaunchArguments({"--", "--community-data", "literal"}, base);
+    CHECK(passthrough == QStringList({"--", "--community-data", "literal"}));
+
+    CHECK(relaunchArguments({}, base).isEmpty());
+}
+
+void testDetachStaleUpdaterMount() {
+    QTemporaryDir temp;
+    CHECK(temp.isValid());
+    const Installation installation = directoryInstallation(temp);
+
+    CHECK(!detachStaleUpdaterMount(installation));
+
+    CHECK(QDir().mkpath(installation.mountDir()));
+    CHECK(!detachStaleUpdaterMount(installation));
+
+    write(installation.mountDir() + "/stale-marker", "placeholder");
+#if !defined(Q_OS_MACOS)
+    CHECK(!detachStaleUpdaterMount(installation));
+#endif
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    QCoreApplication app(argc, argv);
     testBuildNumbers();
     testParseRelease();
     testPlanDirectory();
@@ -295,6 +341,8 @@ int main() {
     testApplyReplacesDirectory();
     testStagedUpdate();
     testFailedInstallIsNotRetried();
+    testRelaunchArgumentsForwardsCommunityData();
+    testDetachStaleUpdaterMount();
     std::puts("desktop_update_test passed");
     return 0;
 }

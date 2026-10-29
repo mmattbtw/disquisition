@@ -2,7 +2,10 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <optional>
+
+class QDir;
 
 // Every install step is a rename. Windows lets a running program rename its
 // own executable and libraries but not overwrite or delete them, so replaced
@@ -18,6 +21,7 @@ struct Installation {
     QString payloadDir() const { return workDir + "/payload"; }
     QString backupDir() const { return workDir + "/backup"; }
     QString stagedMarker() const { return workDir + "/staged"; }
+    QString mountDir() const { return workDir + "/mount"; } // macOS DMG mount
 };
 
 Installation currentInstallation();
@@ -40,6 +44,14 @@ std::optional<int> stagedBuild(const Installation& installation);
 bool installStaged(const Installation& installation, QString* error);
 
 bool launchInstallation(const Installation& installation);
+
+// Relative --community-data paths are made absolute against `base`:
+// /usr/bin/open resets the working directory for the relaunched process.
+QStringList relaunchArguments(QStringList currentArguments, const QDir& base);
+
+// Detaches a hdiutil mount a crashed extraction may have left behind, which
+// would otherwise block removeRecursively() on workDir. macOS only.
+bool detachStaleUpdaterMount(const Installation& installation);
 
 // Returns true if a newer staged build was installed and started; the caller should exit.
 bool startStagedUpdate(const Installation& installation, int currentBuild);

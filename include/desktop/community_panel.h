@@ -38,6 +38,7 @@ public:
     QAction* penguinsAction() const { return penguinsAction_; }
     void showSettings() { settings(); }
     void reloadSavingSettings() { openHistory(); }
+    void releaseStore();
 signals:
     void activated();
 

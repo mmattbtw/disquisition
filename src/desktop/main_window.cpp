@@ -64,6 +64,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
     connect(updater_, &Updater::stateChanged, this, &MainWindow::showUpdateState);
     connect(updater_, &Updater::downloadProgress, updateProgress_, &QProgressBar::setValue);
+    connect(updater_, &Updater::aboutToRelaunch, communities, &CommunityPanel::releaseStore);
     connect(updateButton_, &QPushButton::clicked, this, [this] {
         if (updater_->state() == Updater::State::ManualInstall) {
             QDesktopServices::openUrl(updater_->releasePage());
