@@ -289,6 +289,50 @@ void shareSoundReachesOnlyListeningWatchers(Node& a, Node& b, const QString& cid
     QObject::disconnect(receive);
 }
 
+// Camera and screen frames have independent presence and packet kinds, even
+// when frame ids match. Ordered presence updates fence rejected packets.
+void cameraAndScreenAreIndependent(Node& a, Node& b, const QString& cid, const QString& voice) {
+    QList<QByteArray> cameras, screens;
+    const auto receive = QObject::connect(&b, &Node::packetReceived,
+        [&](const QString&, const QString&, const QString&, const QString& kind, const QJsonObject& data) {
+            const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
+            if (kind == "camera") cameras.append(bytes);
+            if (kind == "screen") screens.append(bytes);
+        });
+    a.setVoice(cid, voice, false, false, true, true);
+    b.setVoice(cid, voice, true, true);
+    CHECK(until([&] { return b.presence(cid, a.peerId()).camera &&
+                            a.presence(cid, b.peerId()).deafened; }));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 1, {"face"}, true, true));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 1, {"desktop"}, true));
+    CHECK(until([&] { return cameras.size() == 1 && screens.size() == 1; }));
+    CHECK(cameras == QList<QByteArray>{"face"});
+    CHECK(screens == QList<QByteArray>{"desktop"});
+
+    a.setVoice(cid, voice, false, false, true, false);
+    CHECK(until([&] { return !b.presence(cid, a.peerId()).camera; }));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 2, {"camera off"}, true, true));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 2, {"still sharing"}, true));
+    CHECK(until([&] { return screens.size() == 2; }));
+    CHECK(cameras.size() == 1);
+
+    a.setVoice(cid, voice, false, false, false, true);
+    CHECK(until([&] { return b.presence(cid, a.peerId()).camera; }));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 3, {"screen off"}, true));
+    CHECK(a.sendScreenFrame(cid, voice, b.peerId(), 3, {"still on camera"}, true, true));
+    CHECK(until([&] { return cameras.size() == 2; }));
+    CHECK(screens.size() == 2);
+
+    b.setVoice(cid, {});
+    CHECK(until([&] { return a.presence(cid, b.peerId()).voiceChannel.isEmpty(); }));
+    CHECK(!a.sendScreenFrame(cid, voice, b.peerId(), 4, {"other channel"}, true, true));
+    a.setVoice(cid, {}, false, false, true, true);
+    CHECK(!a.presence(cid, a.peerId()).camera && !a.presence(cid, a.peerId()).sharing);
+    CHECK(until([&] { return b.presence(cid, a.peerId()).voiceChannel.isEmpty(); }));
+    CHECK(!b.presence(cid, a.peerId()).camera);
+    QObject::disconnect(receive);
+}
+
 void spritesUseAuthenticatedCommunityLinks(Node& a, Node& b, const QString& cid) {
     QList<QJsonObject> received;
     const auto connection = QObject::connect(&b, &Node::packetReceived,
@@ -425,6 +469,7 @@ void directAdmissionIsolationAndConnectionReuse() {
     largeScreenFrameDelivers(a, b, cid, voice);
     shareSoundOvertakesLargeFrames(a, b, cid, voice);
     shareSoundReachesOnlyListeningWatchers(a, b, cid, voice);
+    cameraAndScreenAreIndependent(a, b, cid, voice);
 }
 
 void stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever() {
@@ -725,6 +770,7 @@ void relayHostMigrationAndReconnection() {
     largeScreenFrameDelivers(a, b, cid, channel(a.communities()[cid], "voice"));
     shareSoundOvertakesLargeFrames(a, b, cid, channel(a.communities()[cid], "voice"));
     shareSoundReachesOnlyListeningWatchers(a, b, cid, channel(a.communities()[cid], "voice"));
+    cameraAndScreenAreIndependent(a, b, cid, channel(a.communities()[cid], "voice"));
     a.stop();
     CHECK(a.communities()[cid].canAdmin(a.peerId()));
     CHECK(until([&] { return b.online(cid).size() == 1; }));

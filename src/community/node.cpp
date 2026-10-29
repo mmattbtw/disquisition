@@ -58,7 +58,8 @@ QJsonObject presenceObject(const QString& cid, const Presence& presence) {
             {"channel", presence.voiceChannel},
             {"muted", presence.muted},
             {"deafened", presence.deafened},
-            {"sharing", presence.sharing}};
+            {"sharing", presence.sharing},
+            {"camera", presence.camera}};
 }
 } // namespace
 
@@ -904,7 +905,8 @@ void Node::handle(Link* link, const QJsonObject& message) {
             return;
         presence_[cid][link->peer] = {channel, message.value("muted").toBool(),
                                       message.value("deafened").toBool(),
-                                      !channel.isEmpty() && message.value("sharing").toBool()};
+                                      !channel.isEmpty() && message.value("sharing").toBool(),
+                                      !channel.isEmpty() && message.value("camera").toBool()};
         emit changed();
         return;
     }
@@ -1018,7 +1020,7 @@ qint64 Node::mediaBacklog() const {
 }
 
 void Node::setVoice(const QString& cid, const QString& channel, bool muted, bool deafened,
-                    bool sharing) {
+                    bool sharing, bool camera) {
     if (!channel.isEmpty() && (!models_.contains(cid) || !models_[cid].isMember(peerId()) ||
                                !models_[cid].channels.contains(channel) ||
                                models_[cid].channels[channel].type != "voice"))
@@ -1031,7 +1033,7 @@ void Node::setVoice(const QString& cid, const QString& channel, bool muted, bool
             if (writable(link, it.key()) && link->ready.contains(it.key()))
                 send(link, presenceObject(it.key(), {}));
     }
-    mine_[cid] = {channel, muted, deafened, sharing};
+    mine_[cid] = {channel, muted, deafened, !channel.isEmpty() && sharing, !channel.isEmpty() && camera};
     for (auto* link : peers_)
         if (writable(link, cid) && link->ready.contains(cid))
             send(link, presenceObject(cid, mine_[cid]));
@@ -1092,10 +1094,12 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
     if (type == "audio")
         return !local.deafened && !remote.muted &&
                QByteArray::fromBase64(data.value("bytes").toString().toLatin1()).size() == 640;
-    if (type == "watch")
+    if (type == "watch" || type == "watch-camera")
         return data.value("enabled").isBool() && target == peerId();
     if (type == "drawing")
         return target == peerId() && canonical(data).size() <= 24 * 1024;
+    if (type == "camera")
+        return target == peerId() && remote.camera && canonical(data).size() <= 24 * 1024;
     if (type == "screen")
         return remote.sharing && canonical(data).size() <= 24 * 1024;
     // The sharer's list of who is watching, shown to everyone in the call.
@@ -1122,14 +1126,14 @@ int Node::sendPacket(const QString& cid, const QString& channel, const QString& 
 }
 
 bool Node::sendScreenFrame(const QString& cid, const QString& channel, const QString& peer,
-                           quint32 frameId, const QList<QByteArray>& chunks, bool keyframe) {
+                           quint32 frameId, const QList<QByteArray>& chunks, bool keyframe, bool camera) {
     if (!isPeerId(peer) || chunks.isEmpty() || chunks.size() > chat::kMaxScreenChunks ||
         std::any_of(chunks.begin(), chunks.end(), [](const auto& chunk) {
             return chunk.isEmpty() || chunk.size() > qsizetype(chat::kScreenChunkBytes);
         }))
         throw std::runtime_error("invalid screen frame");
     for (int index = 0; index < chunks.size(); ++index) {
-        if (!sendPacketImpl(cid, channel, "screen",
+        if (!sendPacketImpl(cid, channel, camera ? "camera" : "screen",
                             {{"target", peer},
                              {"frame", double(frameId)},
                              {"index", index},
@@ -1174,7 +1178,7 @@ int Node::sendPacketImpl(const QString& cid, const QString& channel, const QStri
             continue;
         if ((type == "audio" || type == "screen-audio") && writeBacklog(link) > 64 * 1024)
             continue;
-        if (type == "screen") {
+        if (type == "screen" || type == "camera") {
             if (checkScreenBacklog && writeBacklog(link) + link->videoBytes > 64 * 1024)
                 continue;
             queueVideo(link, packet);
