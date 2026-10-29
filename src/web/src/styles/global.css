@@ -933,13 +933,6 @@ ul {
 	color: #d7dddb;
 	font-weight: 600;
 }
-.voice-mock .live-dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--green);
-	box-shadow: 0 0 0 4px rgba(126, 217, 87, 0.1);
-}
 .voice-mock .pill {
 	margin-left: auto;
 	font-family: var(--font-mono);
@@ -1026,14 +1019,6 @@ ul {
 	font-size: 9.5px;
 	color: #dfe6e3;
 	white-space: nowrap;
-}
-.vm-share-meta .live {
-	background: #e05252;
-	color: #fff3f3;
-	font-size: 8px;
-	font-weight: 800;
-	letter-spacing: 0.08em;
-	padding: 1px 4px;
 }
 .vm-share-meta b {
 	font-weight: 600;

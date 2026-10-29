@@ -42,18 +42,6 @@ function ellipse(cx: number, cy: number, rx: number, ry: number, wobble = 0.0035
 	return points;
 }
 
-function wave(x1: number, y1: number, x2: number, y2: number): Point[] {
-	const points: Point[] = [];
-	const steps = 36;
-	for (let i = 0; i <= steps; i++) {
-		const t = i / steps;
-		points.push({
-			x: x1 + (x2 - x1) * t,
-			y: y1 + (y2 - y1) * t + Math.sin(t * Math.PI * 3) * 0.0035 + Math.sin(t * Math.PI) * 0.006,
-		});
-	}
-	return points;
-}
 
 
 const STROKES: Stroke[] = [
@@ -68,8 +56,17 @@ const STROKES: Stroke[] = [
 		cursor: 'june',
 		color: '#ff66c4',
 		width: 3,
-		duration: 720,
-		points: wave(0.07, 0.805, 0.3, 0.8),
+		duration: 820,
+		points: [
+			{ x: 0.408, y: 0.602 },
+			{ x: 0.382, y: 0.62 },
+			{ x: 0.356, y: 0.64 },
+			{ x: 0.33, y: 0.66 },
+			{ x: 0.312, y: 0.672 },
+			{ x: 0.334, y: 0.652 },
+			{ x: 0.312, y: 0.672 },
+			{ x: 0.336, y: 0.688 },
+		],
 	},
 ];
 
