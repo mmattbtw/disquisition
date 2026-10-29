@@ -77,9 +77,13 @@ longer exists require a reachable routing hint, such as an updated invite.
 
 **Manage** has a category sidebar for community settings, channels, members,
 invites, and host priority. It contains the channel editor, admin assignments,
-invite revocations, member removal, and a draggable host priority list. Removing
-a member blocks that peer identity from rejoining with another invite. The
-current UI does not provide an unblock or ownership-transfer operation.
+invite revocations, member removal, and a draggable host priority list.
+**Kick member** removes a member and allows them to rejoin with an invite.
+**Remove and block member** also bans that peer identity from rejoining.
+Select them in **Banned member** and choose **Unban member** to allow
+rejoining. Unbanning does not restore membership or an administrator role.
+Existing blocks can also be removed this way. All member devices need an updated
+client to apply kicks and unbans consistently. Ownership transfer is not available.
 
 Host priority chooses the first reachable listed member. The owner and then
 the remaining peer IDs provide a deterministic fallback. A disconnected group

@@ -90,6 +90,54 @@ int main(int argc, char** argv) {
         QApplication::processEvents();
         CHECK(fresh.findChild<QPushButton*>("communityConnect")->text() == "Connect");
     }
+    // Exercise member moderation through the actual management controls.
+    {
+        const auto moderationData = directory.path() + "/moderation";
+        const auto kicked = community::Identity::generate();
+        const auto blocked = community::Identity::generate();
+        QString cid;
+        {
+            community::Store store(moderationData);
+            auto model = community::Model::create(store.identity(), "Moderation", "Owner",
+                                                  "tcp://127.0.0.1:9001");
+            const auto code = model.issueInvite(store.identity());
+            community::Invite invite{model.id, model.owner, code, {}};
+            for (const auto* peer : {&kicked, &blocked})
+                model.admit(store.identity(), community::joinIntent(*peer, invite, "Guest",
+                                                                    "tcp://127.0.0.1:9002"));
+            cid = model.id;
+            store.save(model);
+        }
+        CommunityPanel moderation(nullptr, moderationData);
+        auto* moderationNode = moderation.findChild<community::Node*>();
+        auto* manageMembers = moderation.findChild<QPushButton*>("communityManage");
+        CHECK(moderationNode && manageMembers->isEnabled());
+        QTimer::singleShot(0, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            CHECK(dialog);
+            auto* members = dialog->findChild<QComboBox*>("communityMember");
+            auto* bans = dialog->findChild<QComboBox*>("communityBannedMember");
+            auto* unban = dialog->findChild<QPushButton*>("communityUnbanMember");
+            members->setCurrentIndex(members->findData(kicked.id()));
+            dialog->findChild<QPushButton*>("communityKickMember")->click();
+            CHECK(!moderationNode->communities()[cid].isMember(kicked.id()));
+            CHECK(!moderationNode->communities()[cid].banned.contains(kicked.id()));
+            CHECK(bans->count() == 0 && !unban->isEnabled());
+            members->setCurrentIndex(members->findData(blocked.id()));
+            dialog->findChild<QPushButton*>("communityRemoveMember")->click();
+            CHECK(moderationNode->communities()[cid].banned.contains(blocked.id()));
+            CHECK(bans->count() == 1 && bans->currentData().toString() == blocked.id());
+            CHECK(bans->currentText().contains("Guest") && unban->isEnabled());
+            unban->click();
+            CHECK(!moderationNode->communities()[cid].banned.contains(blocked.id()));
+            CHECK(!moderationNode->communities()[cid].isMember(blocked.id()));
+            CHECK(bans->count() == 0 && !unban->isEnabled());
+            CHECK(!dialog->findChild<QPushButton*>("communityKickMember")->isEnabled());
+            CHECK(!dialog->findChild<QPushButton*>("communityRemoveMember")->isEnabled());
+            dialog->accept();
+        });
+        manageMembers->click();
+    }
     const auto data = directory.path() + "/community";
     app.setProperty("communityDataDirectory", data);
     QSettings().setValue("community/host", "127.0.0.1");
@@ -202,6 +250,10 @@ int main(int argc, char** argv) {
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
+        CHECK(!dialog->findChild<QPushButton*>("communityKickMember")->isEnabled());
+        CHECK(!dialog->findChild<QPushButton*>("communityRemoveMember")->isEnabled());
+        CHECK(!dialog->findChild<QPushButton*>("communityUnbanMember")->isEnabled());
+        CHECK(dialog->findChild<QComboBox*>("communityBannedMember")->count() == 0);
         auto* categories = dialog->findChild<QListWidget*>("communityManageCategories");
         auto* pages = dialog->findChild<QStackedWidget*>("communityManagePages");
         CHECK(categories && pages && categories->count() == 5);

@@ -266,6 +266,83 @@ void removingHostPreservesItsPreviouslyAcceptedAdmissions() {
     CHECK(group.model.isMember(group.carol.id()));
     CHECK(Model::fromJson(group.model.toJson()).isMember(group.carol.id()));
 }
+void kickingAllowsFreshAdmissionWithoutRestoringRole() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    const auto stale = group.model.toJson();
+    group.model.change(group.alice, "remove", {{"peer", group.bob.id()}});
+    CHECK(!group.model.isMember(group.bob.id()) && !group.model.canAdmin(group.bob.id()));
+    CHECK(!group.model.banned.contains(group.bob.id()));
+    group.model.merge(stale);
+    CHECK(!group.model.isMember(group.bob.id()));
+    group.join(group.bob, "returning bob");
+    CHECK(group.model.isMember(group.bob.id()) && !group.model.canAdmin(group.bob.id()));
+    group.model.change(group.bob, "profile", {{"name", "Bob"}, {"endpoint", "tcp://127.0.0.1:9002"}});
+    CHECK(Model::fromJson(group.model.toJson()).members.value(group.bob.id()).name == "Bob");
+    rejects([&] { group.model.change(group.bob, "remove", {{"peer", group.alice.id()}}); });
+    rejects([&] { group.model.change(group.alice, "remove", {{"peer", group.alice.id()}}); });
+    rejects([&] { group.model.change(group.alice, "remove", {{"peer", group.carol.id()}}); });
+}
+
+void legacyBansCanBeLiftedWithoutRestoringMembership() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    group.model.change(group.alice, "kick", {{"peer", group.bob.id()}});
+    const auto banned = group.model.toJson();
+    group.model = Model::fromJson(banned);
+    CHECK(group.model.banned.contains(group.bob.id()));
+    rejects([&] { group.join(group.bob, "blocked bob"); });
+    rejects([&] { group.model.change(group.carol, "unban", {{"peer", group.bob.id()}}); });
+    rejects([&] { group.model.change(group.alice, "unban", {{"peer", group.alice.id()}}); });
+    group.model.change(group.alice, "unban", {{"peer", group.bob.id()}});
+    CHECK(!group.model.banned.contains(group.bob.id()) && !group.model.isMember(group.bob.id()));
+    group.model.merge(banned);
+    group.join(group.bob, "returning bob");
+    CHECK(group.model.isMember(group.bob.id()) && !group.model.canAdmin(group.bob.id()));
+    CHECK(Model::fromJson(group.model.toJson()).isMember(group.bob.id()));
+    group.model.change(group.alice, "kick", {{"peer", group.bob.id()}});
+    CHECK(group.model.banned.contains(group.bob.id()) && !group.model.isMember(group.bob.id()));
+}
+
+void concurrentKickRejectsHostActionsAndAdmissions() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
+    auto stale = group.model;
+    group.model.change(group.alice, "remove", {{"peer", group.bob.id()}});
+    stale.change(group.bob, "rename", {{"name", "stale admin"}});
+    stale.admit(group.bob, joinIntent(group.carol, group.invite, "carol", "tcp://127.0.0.1:9003"));
+    group.model.merge(stale.toJson());
+    stale.merge(group.model.toJson());
+    CHECK(group.model.name == "friends" && !group.model.isMember(group.carol.id()));
+    CHECK(!group.model.isMember(group.bob.id()) && stale.revision() == group.model.revision());
+    group.join(group.bob, "returning bob");
+    CHECK(group.model.isMember(group.bob.id()));
+}
+
+void concurrentBanWinsUnbanAndStaleReadmission() {
+    Group group;
+    group.join(group.bob, "bob");
+    group.model.change(group.alice, "kick", {{"peer", group.bob.id()}});
+    auto offline = group.model;
+    group.model.change(group.alice, "unban", {{"peer", group.bob.id()}});
+    group.join(group.bob, "returning bob");
+    group.model.change(group.alice, "kick", {{"peer", group.bob.id()}});
+    offline.change(group.alice, "unban", {{"peer", group.bob.id()}});
+    offline.admit(group.alice, joinIntent(group.bob, group.invite, "stale bob", "tcp://127.0.0.1:9002"));
+    group.model.merge(offline.toJson());
+    offline.merge(group.model.toJson());
+    CHECK(group.model.banned.contains(group.bob.id()) && !group.model.isMember(group.bob.id()));
+    CHECK(offline.banned.contains(group.bob.id()) && !offline.isMember(group.bob.id()));
+    CHECK(group.model.revision() == offline.revision());
+    group.model.change(group.alice, "unban", {{"peer", group.bob.id()}});
+    CHECK(!group.model.isMember(group.bob.id()));
+    group.join(group.bob, "fresh bob");
+    CHECK(Model::fromJson(group.model.toJson()).isMember(group.bob.id()));
+}
+
 void leavingOnlyRemovesTheAuthorAndAllowsFreshAdmission() {
     Group group;
     group.join(group.bob, "bob");
@@ -463,6 +540,10 @@ int main(int argc, char** argv) {
     demotionBlocksConcurrentAndFutureAdminEdits();
     persistsMetadataWithoutChatHistory();
     removingHostPreservesItsPreviouslyAcceptedAdmissions();
+    kickingAllowsFreshAdmissionWithoutRestoringRole();
+    legacyBansCanBeLiftedWithoutRestoringMembership();
+    concurrentKickRejectsHostActionsAndAdmissions();
+    concurrentBanWinsUnbanAndStaleReadmission();
     leavingOnlyRemovesTheAuthorAndAllowsFreshAdmission();
     leavingBlocksConcurrentHostAdmissionsAndEdits();
     separateJoinAttemptsOnTheSameConnectionHaveDistinctSignedRequests();
