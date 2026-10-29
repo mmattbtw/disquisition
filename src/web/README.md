@@ -12,6 +12,36 @@ bun run astro dev --background
 
 Use `bun run astro dev stop`, `status`, and `logs` to manage the dev server.
 
+## Landing page assets
+
+The app screenshots on the landing page are rendered from
+`design/app-mockups.html`, and the Open Graph image from `design/og.html`.
+Both are high-resolution static captures, so the page stays fast and the
+screenshots keep their real UI proportions.
+
+Regenerate them with a local Chrome install:
+
+```sh
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+"$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=1440,900 --screenshot=src/assets/screenshots/app-hero.png \
+  "file://$PWD/design/app-mockups.html?s=hero"
+"$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=1280,800 --screenshot=src/assets/screenshots/app-drawing.png \
+  "file://$PWD/design/app-mockups.html?s=drawing"
+"$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=900,620 --screenshot=src/assets/screenshots/app-chat.png \
+  "file://$PWD/design/app-mockups.html?s=chat"
+"$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=820,620 --screenshot=src/assets/screenshots/app-invite.png \
+  "file://$PWD/design/app-mockups.html?s=invite"
+"$CHROME" --headless=new --hide-scrollbars --window-size=1200,630 \
+  --screenshot=public/og.png "file://$PWD/design/og.html"
+```
+
+The brand mark is cropped from the app icon in
+`resources/icons/disquisition.icon`. Fonts are subset from `resources/fonts`.
+
 ## Deploy with cf
 
 ```sh
