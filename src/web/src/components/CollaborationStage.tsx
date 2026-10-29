@@ -60,16 +60,16 @@ const STROKES: Stroke[] = [
 	{
 		cursor: 'maya',
 		color: '#9dccca',
-		width: 3.2,
+		width: 3.4,
 		duration: 1050,
-		points: ellipse(0.631, 0.197, 0.102, 0.057),
+		points: ellipse(0.5, 0.081, 0.205, 0.075),
 	},
 	{
 		cursor: 'june',
 		color: '#ff66c4',
 		width: 3,
 		duration: 720,
-		points: wave(0.265, 0.823, 0.525, 0.82),
+		points: wave(0.07, 0.805, 0.3, 0.8),
 	},
 ];
 
@@ -152,9 +152,8 @@ export default function CollaborationStage({ src, alt, width, height }: Props) {
 
 	function setupCanvas() {
 		const canvas = canvasRef.current;
-		const wrap = wrapRef.current;
-		if (!canvas || !wrap) return;
-		const rect = wrap.getBoundingClientRect();
+		if (!canvas) return;
+		const rect = canvas.getBoundingClientRect();
 		const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
 		const w = Math.max(1, rect.width);
 		const h = Math.max(1, rect.height);
@@ -461,32 +460,34 @@ export default function CollaborationStage({ src, alt, width, height }: Props) {
 				decoding="async"
 				draggable={false}
 			/>
-			<canvas
-				ref={canvasRef}
-				className="ink-canvas"
-				aria-label="Drawing surface over the disquisition screenshot. Activate the pen button to draw."
-				onPointerDown={onPointerDown}
-				onPointerMove={onPointerMove}
-				onPointerUp={onPointerUp}
-				onPointerCancel={onPointerUp}
-			/>
-			{STROKES.map((stroke, i) => {
-				const style = CURSOR_STYLE[stroke.cursor];
-				return (
-					<div
-						key={`${stroke.cursor}-${i}`}
-						className="stage-cursor"
-						style={{ ['--cursor-color' as string]: style.color }}
-						ref={(el) => {
-							cursorRefs.current[stroke.cursor] = el;
-						}}
-						aria-hidden="true"
-					>
-						<CursorGlyph color={style.color} />
-						<span className="tag">{style.label}</span>
-					</div>
-				);
-			})}
+			<div className="ink-layer">
+				<canvas
+					ref={canvasRef}
+					className="ink-canvas"
+					aria-label="Drawing surface over the screen share. Activate the pen button to draw."
+					onPointerDown={onPointerDown}
+					onPointerMove={onPointerMove}
+					onPointerUp={onPointerUp}
+					onPointerCancel={onPointerUp}
+				/>
+				{STROKES.map((stroke, i) => {
+					const style = CURSOR_STYLE[stroke.cursor];
+					return (
+						<div
+							key={`${stroke.cursor}-${i}`}
+							className="stage-cursor"
+							style={{ ['--cursor-color' as string]: style.color }}
+							ref={(el) => {
+								cursorRefs.current[stroke.cursor] = el;
+							}}
+							aria-hidden="true"
+						>
+							<CursorGlyph color={style.color} />
+							<span className="tag">{style.label}</span>
+						</div>
+					);
+				})}
+			</div>
 
 			<div
 				className="stage-tools"
@@ -498,7 +499,7 @@ export default function CollaborationStage({ src, alt, width, height }: Props) {
 						<button type="button" className="tool-btn pen-cta" onClick={toggleDrawing}>
 							<PenIcon /> Try the pen
 						</button>
-						<span className="hint">everyone gets a color</span>
+						<span className="hint">everyone gets a pen</span>
 					</>
 				) : (
 					<>
@@ -574,7 +575,7 @@ export default function CollaborationStage({ src, alt, width, height }: Props) {
 						pointerEvents: 'none',
 					}}
 				>
-					Draw anywhere — nothing is saved.
+					Draw on the share — nothing is saved.
 				</p>
 			)}
 		</div>
