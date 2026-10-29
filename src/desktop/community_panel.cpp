@@ -1463,22 +1463,62 @@ void CommunityPanel::manage() {
     auto* people = new QWidget(tabs);
     auto* peopleForm = new QFormLayout(people);
     auto* member = new QComboBox(people);
+    member->setObjectName("communityMember");
     for (const auto& item : model.members)
         member->addItem(item.name + " · " + item.id.left(8), item.id);
     auto* admin = new QCheckBox("Administrator", people);
     auto* saveRole = button("Save role", "communitySaveRole", people);
+    auto* kick = button("Kick member", "communityKickMember", people);
     auto* remove = button("Remove and block member", "communityRemoveMember", people);
+    auto* bannedMember = new QComboBox(people);
+    bannedMember->setObjectName("communityBannedMember");
+    auto* unban = button("Unban member", "communityUnbanMember", people);
+    const auto fillBans = [&] {
+        bannedMember->clear();
+        auto peers = node_->communities()[cid].banned.values();
+        peers.sort();
+        QMap<QString, QPair<int, QString>> names;
+        for (const auto& value : node_->communities()[cid].toJson().value("operations").toArray()) {
+            const auto operation = value.toObject();
+            const auto data = operation.value("data").toObject();
+            const auto intent = data.value("intent").toObject();
+            const bool profile = operation.value("kind") == "profile";
+            const auto peer = profile ? operation.value("author").toString()
+                                      : intent.value("peer").toString();
+            const auto name = profile ? data.value("name").toString()
+                                      : intent.value("name").toString();
+            const auto clock = operation.value("clock").toInt();
+            if (!name.isEmpty() && (!names.contains(peer) || clock > names[peer].first))
+                names[peer] = {clock, name};
+        }
+        for (const auto& peer : peers) {
+            const auto name = names.value(peer).second;
+            bannedMember->addItem(name.isEmpty() ? peer : name + " · " + peer.left(8), peer);
+            bannedMember->setItemData(bannedMember->count() - 1, peer, Qt::ToolTipRole);
+        }
+        unban->setEnabled(bannedMember->count() > 0);
+    };
+    fillBans();
     peopleForm->addRow("Member", member);
     peopleForm->addRow(admin);
     peopleForm->addRow(saveRole);
+    peopleForm->addRow(kick);
     peopleForm->addRow(remove);
+    auto* removalHelp = new QLabel(
+        "Kicked members can rejoin with an invite. Blocked members must be unbanned first. "
+        "Unbanning lets them rejoin; it does not restore their membership or role.", people);
+    removalHelp->setWordWrap(true);
+    peopleForm->addRow(removalHelp);
+    peopleForm->addRow("Banned member", bannedMember);
+    peopleForm->addRow(unban);
     const auto memberChanged = [&] {
         const auto peer = member->currentData().toString();
         const auto current = node_->communities()[cid];
         admin->setChecked(current.members.value(peer).admin);
-        admin->setEnabled(node_->peerId() == current.owner && peer != current.owner);
+        admin->setEnabled(!peer.isEmpty() && node_->peerId() == current.owner && peer != current.owner);
         saveRole->setEnabled(admin->isEnabled());
-        remove->setEnabled(peer != current.owner);
+        kick->setEnabled(!peer.isEmpty() && peer != current.owner);
+        remove->setEnabled(kick->isEnabled());
     };
     connect(member, &QComboBox::currentIndexChanged, &dialog, memberChanged);
     memberChanged();
@@ -1486,10 +1526,19 @@ void CommunityPanel::manage() {
         apply("admin",
               {{"peer", member->currentData().toString()}, {"enabled", admin->isChecked()}});
     });
+    connect(kick, &QPushButton::clicked, &dialog, [&] {
+        if (apply("remove", {{"peer", member->currentData().toString()}}))
+            member->removeItem(member->currentIndex());
+    });
     connect(remove, &QPushButton::clicked, &dialog, [&] {
         if (apply("kick", {{"peer", member->currentData().toString()}})) {
             member->removeItem(member->currentIndex());
+            fillBans();
         }
+    });
+    connect(unban, &QPushButton::clicked, &dialog, [&] {
+        if (apply("unban", {{"peer", bannedMember->currentData().toString()}}))
+            fillBans();
     });
     addPage(people, "Members");
 

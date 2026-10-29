@@ -318,6 +318,8 @@ void Model::rebuild() {
     };
     QMap<QString, QStringList> revocations;
     QMap<QString, QStringList> removals;
+    QMap<QString, QStringList> bans;
+    QMap<QString, QStringList> unbans;
     QMap<QString, QStringList> departures;
     QMap<QString, QString> admissions;
     QSet<QString> acceptedIntents;
@@ -335,16 +337,36 @@ void Model::rebuild() {
             revokedInvites.insert(data.value("hash").toString());
             revocations[data.value("hash").toString()].append(key);
         }
-        if (operation.value("kind") == "kick" && isPeerId(data.value("peer").toString()) &&
+        if (operation.value("kind") == "unban" && isPeerId(data.value("peer").toString()) &&
+            data.value("peer").toString() != owner)
+            unbans[data.value("peer").toString()].append(key);
+        if ((operation.value("kind") == "kick" || operation.value("kind") == "remove") &&
+            isPeerId(data.value("peer").toString()) &&
             data.value("peer").toString() != owner) {
-            banned.insert(data.value("peer").toString());
             removals[data.value("peer").toString()].append(key);
+            if (operation.value("kind") == "kick")
+                bans[data.value("peer").toString()].append(key);
         }
     }
+    // An unban clears only bans it has seen. A concurrent ban still wins.
+    const auto banCleared = [&](const QString& ban, const QString& peer, const QString& before) {
+        for (const auto& unban : unbans.value(peer))
+            if (ancestor(ban, unban) && (before.isEmpty() || ancestor(unban, before)))
+                return true;
+        return false;
+    };
+    for (auto it = bans.cbegin(); it != bans.cend(); ++it)
+        for (const auto& ban : it.value())
+            if (!banCleared(ban, it.key(), {}))
+                banned.insert(it.key());
     const auto couldAct = [&](const QString& peer, const QString& operation) {
-        for (const auto& removal : removals.value(peer))
-            if (!ancestor(operation, removal))
+        for (const auto& removal : removals.value(peer)) {
+            if (ancestor(operation, removal))
+                continue;
+            const auto admission = admissions.value(peer);
+            if (admission.isEmpty() || !ancestor(removal, admission) || !ancestor(admission, operation))
                 return false;
+        }
         for (const auto& departure : departures.value(peer)) {
             if (ancestor(operation, departure))
                 continue; // Actions accepted before leaving remain valid history.
@@ -390,7 +412,10 @@ void Model::rebuild() {
             const auto peer = intent.value("peer").toString();
             bool peerCouldAct = true;
             for (const auto& removal : removals.value(peer))
-                if (!ancestor(key, removal))
+                if (!ancestor(key, removal) && !ancestor(removal, key))
+                    peerCouldAct = false;
+            for (const auto& ban : bans.value(peer))
+                if (!ancestor(key, ban) && !banCleared(ban, peer, key))
                     peerCouldAct = false;
             bool concurrentDeparture = false;
             for (const auto& departure : departures.value(peer))
@@ -422,6 +447,14 @@ void Model::rebuild() {
                                   false,
                                   {},
                                   {}});
+            continue;
+        }
+        if ((kind == "kick" || kind == "remove") && authorized(key)) {
+            const auto peer = data.value("peer").toString();
+            if (peer != owner && isPeerId(peer)) {
+                members.remove(peer);
+                adminGrants_.remove(peer);
+            }
             continue;
         }
         if (kind == "leave") {
@@ -500,6 +533,15 @@ void Model::rebuild() {
             }
         }
     }
+    for (auto it = removals.cbegin(); it != removals.cend(); ++it) {
+        for (const auto& removal : it.value()) {
+            if (!ancestor(removal, admissions.value(it.key()))) {
+                members.remove(it.key());
+                adminGrants_.remove(it.key());
+                break;
+            }
+        }
+    }
     for (const auto& peer : banned) {
         members.remove(peer);
         adminGrants_.remove(peer);
@@ -537,8 +579,8 @@ QJsonObject Model::append(const Identity& author, const QString& kind, QJsonObje
 }
 
 QJsonObject Model::change(const Identity& author, const QString& kind, QJsonObject data) {
-    const QSet<QString> administrative{"rename", "icon",     "channel", "delete-channel", "invite",
-                                       "revoke", "priority", "kick",    "admin"};
+    const QSet<QString> administrative{"rename", "icon", "channel", "delete-channel", "invite",
+                                       "revoke", "priority", "kick", "remove", "unban", "admin"};
     require(!deleted, "this community has been deleted");
     require((kind == "leave" && isMember(author.id()) && author.id() != owner) ||
                 (kind == "delete" && author.id() == owner) ||
@@ -561,10 +603,12 @@ QJsonObject Model::change(const Identity& author, const QString& kind, QJsonObje
         require(QByteArray::fromBase64(data.value("bytes").toString().toLatin1()).size() <=
                     kMaxIconBytes,
                 "community icon is too large");
-    if (kind == "kick")
+    if (kind == "kick" || kind == "remove")
         require(data.value("peer").toString() != owner &&
                     members.contains(data.value("peer").toString()),
                 "cannot remove the owner or an unknown member");
+    if (kind == "unban")
+        require(banned.contains(data.value("peer").toString()), "this member is not banned");
     if (kind == "admin")
         require(members.contains(data.value("peer").toString()) &&
                     data.value("peer").toString() != owner && data.value("enabled").isBool(),
