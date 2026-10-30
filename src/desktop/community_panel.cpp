@@ -2684,12 +2684,6 @@ void CommunityPanel::refresh() {
     const auto channel = model.channels.value(channel_);
     const bool member = model.isMember(node_->peerId());
     const bool textChannel = member && channel.type == "text";
-    windowTitle_->setText(
-        QString("<span style='color:%1;font-weight:600'>%2</span>")
-            .arg(theme::kText, QApplication::applicationDisplayName().toHtmlEscaped()) +
-        (model.id.isEmpty() ? QString()
-                            : QString("<span style='color:%1'>&nbsp; — &nbsp;%2</span>")
-                                  .arg(theme::kMuted, model.name.toHtmlEscaped())));
     heading_->setText(model.id.isEmpty()
                           ? "Your communities"
                           : (channel.type == "text"
@@ -2872,6 +2866,15 @@ void CommunityPanel::openStage(bool open) {
     }
     stageOpen_ = open && !selectedVoiceChannel_.isEmpty();
     views_->setCurrentIndex(stageOpen_ ? 1 : 0);
+    // Name the community of whatever is on screen: the call or the chat.
+    const auto shown = node_ ? node_->communities().value(stageOpen_ ? selectedVoiceCid_ : cid_)
+                             : community::Model{};
+    windowTitle_->setText(
+        QString("<span style='color:%1;font-weight:600'>%2</span>")
+            .arg(theme::kText, QApplication::applicationDisplayName().toHtmlEscaped()) +
+        (shown.id.isEmpty() ? QString()
+                            : QString("<span style='color:%1'>&nbsp; — &nbsp;%2</span>")
+                                  .arg(theme::kMuted, shown.name.toHtmlEscaped())));
     QString sharer;
     for (const auto& peer : streams_) {
         sharer = memberName(voiceCid_, peer);
