@@ -8,6 +8,9 @@
 
 void addVolumeSlider(QMenu& menu, int percent, std::function<void(int)> changed) {
     auto* row = new QWidget(&menu);
+    // Menu rows have no titlebar. Native safe-area insets can otherwise leave
+    // this layout with a negative height when QWidgetAction reparents the row.
+    row->setAttribute(Qt::WA_LayoutOnEntireRect);
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(10, 6, 10, 6);
     auto* label = new QLabel(row);
