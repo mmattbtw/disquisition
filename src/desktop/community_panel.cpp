@@ -2738,10 +2738,9 @@ void CommunityPanel::openStage(bool open) {
     }
     const bool viewingCall = stageOpen_ && selectedVoiceCid_ == voiceCid_ &&
                              selectedVoiceChannel_ == voiceChannel_;
-    stageToggle_->setText(viewingCall        ? "Back to chat"
-                          : !sharer.isEmpty() ? "Watch " + sharer
-                                              : "Show call");
-    stageToggle_->setVisible(!voiceCid_.isEmpty());
+    // Inside the call, the sidebar's text channels lead back to chat.
+    stageToggle_->setText(!sharer.isEmpty() ? "Watch " + sharer : "Show call");
+    stageToggle_->setVisible(!voiceCid_.isEmpty() && !viewingCall);
     setFlag(stageToggle_, "primary", !viewingCall && !streams_.isEmpty());
     refreshCall();
     refreshPip();

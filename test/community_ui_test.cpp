@@ -708,6 +708,12 @@ int main(int argc, char** argv) {
     CHECK(remote.presence(cid, remote.peerId()).voiceChannel == voiceChannel);
     CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
     CHECK(voiceStatus->text().contains("Lounge"));
+    const auto openTextChannel = [&] {
+        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole + 1).toString() == textChannel)
+                tree->setCurrentItem(*it);
+        QApplication::processEvents();
+    };
     // Talking peers light up their row while audio keeps arriving.
     const auto speakingRow = [&]() -> QWidget* {
         for (QTreeWidgetItemIterator it(tree); *it; ++it)
@@ -753,7 +759,7 @@ int main(int argc, char** argv) {
         CHECK(glowing);
         CHECK(window.grab().save("community-call-speaking.png"));
         if (opened)
-            panel->findChild<QPushButton*>("communityStageToggle")->click();
+            openTextChannel();
         window.hide();
     }
     for (int index = 0; index < 12; ++index)
@@ -894,7 +900,9 @@ int main(int argc, char** argv) {
     // Back in the chat, the watched stream keeps playing in a small window.
     auto* pip = panel->findChild<QFrame*>("streamPip");
     CHECK(pip && pip->isHidden());
-    panel->findChild<QPushButton*>("communityStageToggle")->click();
+    // The call view has no "back" button; a text channel leads back to chat.
+    CHECK(!panel->findChild<QPushButton*>("communityStageToggle")->isVisible());
+    openTextChannel();
     QApplication::processEvents();
     CHECK(pip->isVisible() && transcript->isVisible());
     CHECK(window.grab().save("community-pip.png"));
@@ -1111,9 +1119,11 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return node->online(cid).size() == 2 && !node->synchronizing(cid); }));
     const auto visit = remote.createCommunity("Bobby's club");
     const auto visitInvite = remote.invite(visit);
-    std::vector<std::unique_ptr<QSignalBlocker>> joinBlockers;
+    // Guarded pointers: a socket can close and be deleted while blocked.
+    std::vector<QPointer<QSslSocket>> joinBlockers;
     for (auto* socket : remote.findChildren<QSslSocket*>())
-        joinBlockers.push_back(std::make_unique<QSignalBlocker>(socket));
+        if (!socket->blockSignals(true))
+            joinBlockers.emplace_back(socket);
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
@@ -1125,6 +1135,9 @@ int main(int argc, char** argv) {
     auto* joining = panel->findChild<QWidget*>("communityJoining");
     CHECK(joining && !joining->isHidden());
     CHECK(window.grab().save("community-joining.png"));
+    for (const auto& socket : joinBlockers)
+        if (socket)
+            socket->blockSignals(false);
     joinBlockers.clear();
     for (auto* socket : remote.findChildren<QSslSocket*>())
         if (socket->bytesAvailable())
