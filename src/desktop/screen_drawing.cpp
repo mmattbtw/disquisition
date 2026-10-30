@@ -301,6 +301,8 @@ void ScreenDrawing::setStatus(const QString& status) {
 
 DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent) :
     QWidget(parent) {
+    setObjectName("drawingControls");
+    setAttribute(Qt::WA_StyledBackground);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
@@ -913,11 +915,14 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
     auto* layout = new QHBoxLayout(tools_);
     layout->setContentsMargins(10, 8, 10, 8);
     layout->addWidget(new DrawingControls(drawing, true, tools_));
-    tools_->setStyleSheet("QWidget#screenDrawingToolbar { background: #252830; border: 1px solid "
-                          "#535963; border-radius: 8px; } QLabel, QPushButton, QComboBox { color: "
-                          "#f3f4f6; } QPushButton, QComboBox { background: #343943; padding: 5px "
-                          "8px; border: 1px solid #606874; border-radius: 4px; } "
-                          "QPushButton:checked { background: #365e51; border-color: #67e8a5; }");
+    tools_->setStyleSheet(
+        "QWidget#screenDrawingToolbar { background: #16191f; border: 1px solid #5f6974; "
+        "border-radius: 12px; } QWidget { font-family: Inter, sans-serif; font-size: 12px; } "
+        "QLabel { color: #8b959e; } QPushButton, QComboBox { color: #dfe4e4; background: "
+        "transparent; padding: 6px 11px; border: 1px solid transparent; border-radius: 8px; "
+        "font-weight: 600; } QPushButton:hover { background: rgba(255, 255, 255, 18); } "
+        "QComboBox { background: #1f2228; border-color: #3a3f48; font-weight: 400; } "
+        "QPushButton:checked { color: #effff8; background: #2f5549; border-color: #67e8a5; }");
 #if defined(Q_OS_MACOS)
     if (QGuiApplication::platformName() == "cocoa") {
         canvasPanel_ = new MacDrawingPanel(this, drawing);

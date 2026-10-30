@@ -108,13 +108,14 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     drawing_ = new ScreenDrawing(this);
     view_->setDrawing(drawing_);
     drawingControls_ = new DrawingControls(drawing_, own, this);
+    drawingControls_->layout()->setContentsMargins(6, 5, 6, 5);
     body_ = new QStackedWidget(this);
     body_->addWidget(invitation_);
     body_->addWidget(view_);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(6);
+    layout->setContentsMargins(10, 8, 10, 10);
+    layout->setSpacing(8);
     layout->addLayout(header);
     layout->addWidget(drawingControls_);
     layout->addWidget(body_, 1);

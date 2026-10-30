@@ -285,6 +285,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/screen_h264.h
       include/desktop/share_picker.h
       include/desktop/system_audio_capture.h
+      include/desktop/theme.h
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
       src/desktop/desktop_notifier.cpp
@@ -298,7 +299,8 @@ if(BUILD_DESKTOP_APP)
       src/desktop/screen_capture.cpp
       src/desktop/screen_h264.cpp
       src/desktop/share_picker.cpp
-      src/desktop/system_audio_capture.cpp)
+      src/desktop/system_audio_capture.cpp
+      src/desktop/theme.cpp)
     set_target_properties(disquisition-desktop PROPERTIES AUTOMOC ON)
     # No console window in release builds; dev and staging keep it for logs.
     if(DISQUISITION_BUILD_CHANNEL STREQUAL "production")
@@ -324,6 +326,15 @@ if(BUILD_DESKTOP_APP)
         resources/fonts/Inter-Bold.ttf
         resources/fonts/CalSans-Regular.ttf
         resources/fonts/JetBrainsMono-Regular.ttf)
+    qt_add_resources(disquisition-desktop "ui_images"
+      PREFIX "/"
+      BASE resources
+      FILES
+        resources/brand/disquisition-mark.png
+        resources/ui/check.png resources/ui/check@2x.png
+        resources/ui/chevron-down.png resources/ui/chevron-down@2x.png
+        resources/ui/chevron-up.png resources/ui/chevron-up@2x.png
+        resources/ui/chevron-right.png resources/ui/chevron-right@2x.png)
     if(NOT APPLE)
       # The window and tray icon. The macOS bundle has its own.
       qt_add_resources(disquisition-desktop app_icon

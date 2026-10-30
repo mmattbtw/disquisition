@@ -50,14 +50,14 @@ QPixmap voiceDragPreview(const QIcon& avatar, const QString& name) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     painter.setPen(QPen(QColor("#9dccca"), 1));
-    painter.setBrush(QColor(0x2f, 0x36, 0x3f, 235));
+    painter.setBrush(QColor(0x1f, 0x22, 0x28, 240));
     painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, kHeight - 1), 10, 10);
 
     const QRectF avatarRect(kPadding, (kHeight - kAvatarSide) / 2.0, kAvatarSide, kAvatarSide);
     const QPixmap picture = avatar.pixmap(kAvatarSide, kAvatarSide);
     if (!picture.isNull()) {
         QPainterPath clip;
-        clip.addEllipse(avatarRect);
+        clip.addRoundedRect(avatarRect, kAvatarSide * 0.26, kAvatarSide * 0.26);
         painter.save();
         painter.setClipPath(clip);
         painter.drawPixmap(avatarRect.topLeft(), picture);
