@@ -114,6 +114,10 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME community_network_test COMMAND community_network_test ${COMMUNITY_RELAY_TEST_ARGS})
   set_tests_properties(community_network_test PROPERTIES TIMEOUT 120)
+  # This regression deliberately waits beyond the 20-second snapshot deadline.
+  # Give it a separate budget from the transport suite's other timeout scenarios.
+  add_test(NAME community_metadata_sync_test COMMAND community_network_test --metadata-sync)
+  set_tests_properties(community_metadata_sync_test PROPERTIES TIMEOUT 60)
   if(APPLE OR WIN32)
     if(APPLE)
       set(COMMUNITY_NATIVE_TLS_BACKEND securetransport)
@@ -121,6 +125,9 @@ if(BUILD_TESTING)
       set(COMMUNITY_NATIVE_TLS_BACKEND schannel)
     endif()
     add_test(NAME community_native_tls_test COMMAND community_network_test ${COMMUNITY_RELAY_TEST_ARGS})
+    add_test(NAME community_metadata_native_tls_test COMMAND community_network_test --metadata-sync)
+    set_tests_properties(community_metadata_native_tls_test PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77
+      ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
     set_tests_properties(community_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
       ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
   endif()
