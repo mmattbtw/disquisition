@@ -393,8 +393,9 @@ if(BUILD_DESKTOP_APP)
         src/desktop/mac_screen_capture.mm src/desktop/mac_drawing_panel.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       target_sources(disquisition-desktop PRIVATE
-        include/desktop/mac_notifications.h src/desktop/mac_notifications.mm)
-      set_source_files_properties(src/desktop/mac_notifications.mm
+        include/desktop/mac_notifications.h src/desktop/mac_notifications.mm
+        include/desktop/mac_window.h src/desktop/mac_window.mm)
+      set_source_files_properties(src/desktop/mac_notifications.mm src/desktop/mac_window.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
       find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
       find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)

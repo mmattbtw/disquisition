@@ -17,6 +17,9 @@
 #include "desktop/notification_center.h"
 #include "desktop/theme.h"
 #include "desktop/updater.h"
+#if defined(Q_OS_MACOS)
+#include "desktop/mac_window.h"
+#endif
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     theme::loadFonts();
@@ -84,6 +87,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowFlag(Qt::NoTitleBarBackgroundHint);
     setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea, false);
     communities->setCustomTitleBar(true);
+#endif
+}
+
+void MainWindow::showEvent(QShowEvent* event) {
+    QMainWindow::showEvent(event);
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    // The panel's own title row replaces the one macOS draws.
+    hideNativeWindowTitle(this);
 #endif
 }
 
