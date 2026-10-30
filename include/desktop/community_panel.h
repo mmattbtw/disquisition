@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+
 #include <QMap>
 #include <QThreadPool>
 #include <QWidget>
@@ -20,13 +22,16 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QLineEdit;
 class QPushButton;
+class QFrame;
 class QLabel;
 class QListWidget;
+class QStackedWidget;
 class QTextBrowser;
 class ChatMedia;
 class GifPicker;
 class GifSearch;
 class ScreenStage;
+class StreamView;
 class NotificationCenter;
 class MentionCompleter;
 
@@ -37,6 +42,8 @@ public:
     ~CommunityPanel() override;
     QAction* penguinsAction() const { return penguinsAction_; }
     void showSettings() { settings(); }
+    // Shows the app's own title row, for windows drawn under the system title bar.
+    void setCustomTitleBar(bool enabled);
     void reloadSavingSettings() { openHistory(); }
     void releaseStore();
 signals:
@@ -91,6 +98,17 @@ private:
     QStringList memberNames(const QString& cid) const;
     void share();
     void stopSharing();
+    // Shows the screen share in place of the chat, while there is one to show.
+    void openStage(bool open);
+    // Opens or closes the call view after a user action, updating the sidebar.
+    void showCall(bool open);
+    void refreshCall();
+    void refreshPip();
+    // Tells the call who is watching this user's share.
+    void announceViewers();
+    void refreshAudience();
+    void placePip();
+    void showFrame(const QString& peer, const QImage& image, qsizetype encodedBytes);
     void watch(const QString& peer, bool enabled);
     void setStreamVolume(const QString& peer, int percent);
     void applyVoiceSettings(const QString& peer);
@@ -127,6 +145,8 @@ private:
     QSet<QString> streams_;
     QSet<QString> watching_;
     QSet<QString> watchers_;
+    // Who watches each remote share, as its sharer last announced.
+    QHash<QString, QSet<QString>> viewers_;
     QSet<QString> joiningCommunities_;
     QSet<QString> speaking_;
     QMap<QString, int> quietAudioFrames_;
@@ -143,6 +163,30 @@ private:
     QLabel* heading_ = nullptr;
     QLabel* topic_ = nullptr;
     QLabel* status_ = nullptr;
+    QLabel* connectionStatus_ = nullptr;
+    QLabel* userAvatar_ = nullptr;
+    QLabel* userName_ = nullptr;
+    QLabel* userState_ = nullptr;
+    QLabel* voiceDetail_ = nullptr;
+    QFrame* composerFrame_ = nullptr;
+    QWidget* titleBar_ = nullptr;
+    QLabel* windowTitle_ = nullptr;
+    QLabel* brandMark_ = nullptr;
+    QLabel* brandName_ = nullptr;
+    QWidget* brandGap_ = nullptr;
+    QStackedWidget* views_ = nullptr;
+    QLabel* callTitle_ = nullptr;
+    QLabel* callSubtitle_ = nullptr;
+    QPushButton* joinCall_ = nullptr;
+    ScreenStage* otherCall_ = nullptr;
+    QPushButton* stageToggle_ = nullptr;
+    bool stageOpen_ = false;
+    // A small live view of a share, shown over the chat while the stage is closed.
+    QFrame* pip_ = nullptr;
+    StreamView* pipView_ = nullptr;
+    QLabel* pipName_ = nullptr;
+    QString pipPeer_;
+    QString pipDismissed_;
     QAction* leaveAction_ = nullptr;
     QWidget* joining_ = nullptr;
     QLabel* voiceStatus_ = nullptr;

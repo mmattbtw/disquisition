@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QCursor>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPointer>
@@ -50,14 +51,14 @@ QPixmap voiceDragPreview(const QIcon& avatar, const QString& name) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
     painter.setPen(QPen(QColor("#9dccca"), 1));
-    painter.setBrush(QColor(0x2f, 0x36, 0x3f, 235));
+    painter.setBrush(QColor(0x1f, 0x22, 0x28, 240));
     painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, kHeight - 1), 10, 10);
 
     const QRectF avatarRect(kPadding, (kHeight - kAvatarSide) / 2.0, kAvatarSide, kAvatarSide);
     const QPixmap picture = avatar.pixmap(kAvatarSide, kAvatarSide);
     if (!picture.isNull()) {
         QPainterPath clip;
-        clip.addEllipse(avatarRect);
+        clip.addRoundedRect(avatarRect, kAvatarSide * 0.26, kAvatarSide * 0.26);
         painter.save();
         painter.setClipPath(clip);
         painter.drawPixmap(avatarRect.topLeft(), picture);
@@ -78,6 +79,36 @@ CommunityTree::CommunityTree(QWidget* parent) : QTreeWidget(parent) {
     setDragDropMode(QAbstractItemView::DragDrop);
     setDragEnabled(false); // Only participant drags use our control protocol.
     setDefaultDropAction(Qt::MoveAction);
+}
+
+void CommunityTree::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
+                            const QModelIndex& index) const {
+    // Channel highlights span the sidebar, indentation included, so the
+    // channel's icon sits inside the band rather than against its edge.
+    // QTreeView works out row state inside drawRow, so `option` lacks it.
+    const bool selected = selectionModel() && selectionModel()->isSelected(index);
+    const bool hovered = viewport()->underMouse() &&
+                         indexAt(viewport()->mapFromGlobal(QCursor::pos())) == index;
+    if (index.parent().isValid() && (selected || hovered) &&
+        !index.data(Qt::UserRole + 2).isValid()) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(selected ? QColor("#36464a") : QColor("#2b2f36"));
+        const QRect row(viewport()->rect().left(), option.rect.top(), viewport()->width(),
+                        option.rect.height());
+        painter->drawRoundedRect(QRectF(row).adjusted(2, 1, -2, -1), 5, 5);
+        painter->restore();
+    }
+    QTreeWidget::drawRow(painter, option, index);
+}
+
+bool CommunityTree::viewportEvent(QEvent* event) {
+    // Qt repaints only the hovered item, not the indentation the band covers.
+    if (event->type() == QEvent::HoverMove || event->type() == QEvent::HoverLeave ||
+        event->type() == QEvent::Leave)
+        viewport()->update();
+    return QTreeWidget::viewportEvent(event);
 }
 
 void CommunityTree::configureVoiceChannel(QTreeWidgetItem* item, const QString& community,

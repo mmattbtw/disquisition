@@ -23,6 +23,7 @@
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
+#include <QFrame>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -314,9 +315,10 @@ int main(int argc, char** argv) {
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
-        auto* link = dialog->findChild<QPlainTextEdit*>();
+        auto* link = dialog->findChild<QLineEdit*>("communityInviteLink");
         CHECK(link);
-        CHECK(link->toPlainText().startsWith("disquisition://join/"));
+        CHECK(link->text().startsWith("disquisition://join/"));
+        CHECK(dialog->grab().save("community-invite.png"));
         dialog->accept();
     });
     panel->findChild<QPushButton*>("communityInvite")->click();
@@ -396,7 +398,7 @@ int main(int argc, char** argv) {
             CHECK(tree->itemWidget(*item, 0));
             auto* row = tree->itemWidget(*item, 0);
             auto* profile = row->findChild<QPushButton*>("voiceMemberProfile");
-            CHECK(profile && profile->iconSize() == QSize(28, 28));
+            CHECK(profile && profile->iconSize() == QSize(20, 20));
             CHECK(profile->text() == "Alice (you)");
             CHECK((*item)->text(0).isEmpty()); // No second name painted beneath the row widget.
             CHECK((*item)->data(0, Qt::AccessibleTextRole).toString() == "Alice (you)");
@@ -484,15 +486,15 @@ int main(int argc, char** argv) {
     CHECK(center && !center->settings().muted);
     UnreadBadge badge;
     QObject::connect(center, &NotificationCenter::badgeChanged, [&](const UnreadBadge& next) { badge = next; });
-    const auto channelLabel = [&](const QString& channelId) {
+    const auto channelUnread = [&](const QString& channelId) {
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             auto* root = tree->topLevelItem(i);
             if (root->data(0, Qt::UserRole).toString() != cid) continue;
             for (int j = 0; j < root->childCount(); ++j)
                 if (root->child(j)->data(0, Qt::UserRole + 1).toString() == channelId)
-                    return root->child(j)->text(0);
+                    return root->child(j)->data(0, Qt::UserRole + 20).toInt();
         }
-        return QString();
+        return 0;
     };
     window.hide();
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Hi @Alice"}}) == 1);
@@ -509,10 +511,10 @@ int main(int argc, char** argv) {
     CHECK(window.grab().save("community-mentions.png"));
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Legacy color"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Legacy color"); }));
-    CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#d7dbde"));
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Invalid color"}, {"color", "<b>bad</b>"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Invalid color"); }));
-    CHECK(transcript->document()->find("Invalid color").charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(transcript->document()->find("Invalid color").charFormat().foreground().color() == QColor("#d7dbde"));
     const auto sender = transcript->document()->find("Bob");
     CHECK(!sender.isNull() && sender.charFormat().isAnchor());
     CHECK(sender.charFormat().anchorHref() == "profile://" + cid + '/' + remote.peerId());
@@ -521,13 +523,13 @@ int main(int argc, char** argv) {
     checkProfileCard();
     // Channel unread markers and badges disappear when notifications are off.
     CHECK(remote.sendPacket(cid, musicChannel, "chat", {{"body", "unread while on"}}) == 1);
-    CHECK(until([&] { return channelLabel(musicChannel).contains("[1]"); }));
+    CHECK(until([&] { return channelUnread(musicChannel) == 1; }));
     CHECK(badge.unread);
     auto settings = center->settings();
     settings.muted = true;
     center->setSettings(settings);
     CHECK(until([&] { return !badge.unread && badge.mentions == 0; }));
-    CHECK(!channelLabel(musicChannel).contains("["));
+    CHECK(channelUnread(musicChannel) == 0);
     CHECK(remote.sendPacket(cid, musicChannel, "chat", {{"body", "quiet unread"}}) == 1);
     CHECK(until([&] {
         chat::RecentMessages history((directory.path() + "/history.db").toStdString());
@@ -535,7 +537,7 @@ int main(int argc, char** argv) {
         return !saved.empty() && saved.back().body == "quiet unread";
     }));
     QApplication::processEvents();
-    CHECK(!channelLabel(musicChannel).contains("["));
+    CHECK(channelUnread(musicChannel) == 0);
     CHECK(!badge.unread && badge.mentions == 0);
     composer->setText("/dnd");
     panel->findChild<QPushButton*>("communitySend")->click();
@@ -564,7 +566,7 @@ int main(int argc, char** argv) {
     panel->findChild<QPushButton*>("communitySend")->click();
     CHECK(until([&] { return sentColor == "pink"; }));
     const auto pinkMessage = transcript->document()->find("A pink community message");
-    CHECK(pinkMessage.charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(pinkMessage.charFormat().foreground().color() == QColor("#d7dbde"));
     CHECK(transcript->document()->find("Alice", pinkMessage.position(), QTextDocument::FindBackward)
               .charFormat().foreground().color() == QColor("#ff87af"));
     {
@@ -576,7 +578,7 @@ int main(int argc, char** argv) {
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "A peach reply"}, {"color", "peach"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("A peach reply"); }));
     const auto peachMessage = transcript->document()->find("A peach reply");
-    CHECK(peachMessage.charFormat().foreground().color() == QColor("#c5c8c6"));
+    CHECK(peachMessage.charFormat().foreground().color() == QColor("#d7dbde"));
     CHECK(transcript->document()->find("Bob", peachMessage.position(), QTextDocument::FindBackward)
               .charFormat().foreground().color() == QColor("#ffaf87"));
     panel->findChild<QNetworkAccessManager*>()->setProxy(
@@ -706,6 +708,12 @@ int main(int argc, char** argv) {
     CHECK(remote.presence(cid, remote.peerId()).voiceChannel == voiceChannel);
     CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
     CHECK(voiceStatus->text().contains("Lounge"));
+    const auto openTextChannel = [&] {
+        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole + 1).toString() == textChannel)
+                tree->setCurrentItem(*it);
+        QApplication::processEvents();
+    };
     // Talking peers light up their row while audio keeps arriving.
     const auto speakingRow = [&]() -> QWidget* {
         for (QTreeWidgetItemIterator it(tree); *it; ++it)
@@ -734,6 +742,26 @@ int main(int argc, char** argv) {
     }));
     CHECK(speakingRow()->styleSheet().contains("QWidget#voiceParticipantRow"));
     CHECK(tree->grab().save("community-voice-speaking.png"));
+    {
+        // The call view lights up the same person's tile.
+        window.show();
+        QApplication::processEvents();
+        auto* call = panel->findChild<ScreenStage*>();
+        CHECK(call);
+        const bool opened = !call->isVisible();
+        if (opened)
+            panel->findChild<QPushButton*>("communityStageToggle")->click();
+        QApplication::processEvents();
+        CHECK(call->isVisible());
+        bool glowing = false;
+        for (auto* person : call->findChildren<ParticipantTile*>())
+            glowing |= person->participant().id == remote.peerId() && person->speaking();
+        CHECK(glowing);
+        CHECK(window.grab().save("community-call-speaking.png"));
+        if (opened)
+            openTextChannel();
+        window.hide();
+    }
     for (int index = 0; index < 12; ++index)
         CHECK(remote.sendPacket(cid, voiceChannel, "audio",
                                 {{"bytes", QString::fromLatin1(QByteArray(640, 0).toBase64())}}) == 1);
@@ -850,6 +878,9 @@ int main(int argc, char** argv) {
     for (const auto* label : tile->findChildren<QLabel*>())
         CHECK(!label->text().contains(remote.peerId()));
     CHECK(tile->displayName() == "Bob");
+    // Only people watching appear under the stream: here, just this viewer.
+    auto* audience = tile->findChild<QPushButton*>("streamAudience");
+    CHECK(audience && until([&] { return audience->text() == "1 watching"; }));
     // Encode real video, deliver it through the peer transport, and verify that
     // the panel replaces its waiting state without screen or camera access.
     H264Encoder encoder;
@@ -863,6 +894,21 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return !tile->image().isNull(); }));
     CHECK(tile->image().size() == source.size());
     CHECK(tile->image().pixelColor(100, 100).red() > 150);
+    window.show();
+    QApplication::processEvents();
+    CHECK(window.grab().save("community-screen-share.png"));
+    // Back in the chat, the watched stream keeps playing in a small window.
+    auto* pip = panel->findChild<QFrame*>("streamPip");
+    CHECK(pip && pip->isHidden());
+    // The call view has no "back" button; a text channel leads back to chat.
+    CHECK(!panel->findChild<QPushButton*>("communityStageToggle")->isVisible());
+    openTextChannel();
+    QApplication::processEvents();
+    CHECK(pip->isVisible() && transcript->isVisible());
+    CHECK(window.grab().save("community-pip.png"));
+    pip->findChild<QPushButton*>("streamPipClose")->click();
+    CHECK(pip->isHidden());
+    window.hide();
     // A viewer joining a static screen needs an immediately requested keyframe.
     video.clear();
     keyframe = false;
@@ -1073,19 +1119,25 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return node->online(cid).size() == 2 && !node->synchronizing(cid); }));
     const auto visit = remote.createCommunity("Bobby's club");
     const auto visitInvite = remote.invite(visit);
-    std::vector<std::unique_ptr<QSignalBlocker>> joinBlockers;
+    // Guarded pointers: a socket can close and be deleted while blocked.
+    std::vector<QPointer<QSslSocket>> joinBlockers;
     for (auto* socket : remote.findChildren<QSslSocket*>())
-        joinBlockers.push_back(std::make_unique<QSignalBlocker>(socket));
+        if (!socket->blockSignals(true))
+            joinBlockers.emplace_back(socket);
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog);
         dialog->findChild<QPlainTextEdit*>("communityInviteInput")->setPlainText(visitInvite);
+        CHECK(dialog->grab().save("community-join.png"));
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
     });
     panel->findChild<QPushButton*>("communityJoin")->click();
     auto* joining = panel->findChild<QWidget*>("communityJoining");
     CHECK(joining && !joining->isHidden());
     CHECK(window.grab().save("community-joining.png"));
+    for (const auto& socket : joinBlockers)
+        if (socket)
+            socket->blockSignals(false);
     joinBlockers.clear();
     for (auto* socket : remote.findChildren<QSslSocket*>())
         if (socket->bytesAvailable())

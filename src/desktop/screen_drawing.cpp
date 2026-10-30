@@ -1,7 +1,9 @@
 #include "desktop/screen_drawing.h"
 
 #include <QApplication>
-#include <QComboBox>
+#include <QConicalGradient>
+#include <QFrame>
+#include <QStyle>
 #include <QColorDialog>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -14,6 +16,8 @@
 #include <QSignalBlocker>
 #include <QShortcut>
 #include <QVBoxLayout>
+#include <cmath>
+#include <utility>
 
 #if defined(Q_OS_MACOS)
 #    include "desktop/mac_drawing_panel.h"
@@ -299,79 +303,244 @@ void ScreenDrawing::setStatus(const QString& status) {
     emit changed();
 }
 
+namespace {
+// Line icons for the drawing toolbar, after the ones on disquisition.app.
+QIcon toolIcon(const QString& kind) {
+    QIcon icon;
+    for (const auto& [mode, color] : {std::pair{QIcon::Normal, QColor("#dfe4e4")},
+                                      std::pair{QIcon::Disabled, QColor("#5f6872")}}) {
+        for (const qreal scale : {1.0, 2.0}) {
+            QPixmap image(QSize(16, 16) * scale);
+            image.setDevicePixelRatio(scale);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            QPainterPath path;
+            if (kind == "pen") {
+                path.moveTo(2.8, 13.2);
+                path.lineTo(3.4, 10.4);
+                path.lineTo(10.6, 3.2);
+                path.lineTo(12.8, 5.4);
+                path.lineTo(5.6, 12.6);
+                path.closeSubpath();
+                path.moveTo(9.2, 4.6);
+                path.lineTo(11.4, 6.8);
+            } else if (kind == "eraser") {
+                path.moveTo(6.2, 13.2);
+                path.lineTo(2.9, 9.9);
+                path.lineTo(9.4, 3.4);
+                path.lineTo(13.1, 7.1);
+                path.lineTo(7.0, 13.2);
+                path.lineTo(13.5, 13.2);
+                path.moveTo(5.4, 7.0);
+                path.lineTo(9.5, 11.1);
+            } else if (kind == "select") {
+                path.addRoundedRect(QRectF(2.8, 2.8, 10.4, 10.4), 2.2, 2.2);
+                painter.setBrush(color);
+                painter.drawEllipse(QPointF(8, 8), 1.4, 1.4);
+                painter.setBrush(Qt::NoBrush);
+            } else if (kind == "laser") {
+                path.moveTo(8, 2.2);
+                path.lineTo(12.8, 4);
+                path.lineTo(12.8, 7.8);
+                path.cubicTo(12.8, 10.8, 10.6, 12.9, 8, 13.9);
+                path.cubicTo(5.4, 12.9, 3.2, 10.8, 3.2, 7.8);
+                path.lineTo(3.2, 4);
+                path.closeSubpath();
+                path.moveTo(6, 7.9);
+                path.lineTo(7.5, 9.4);
+                path.lineTo(10.2, 6.5);
+            } else if (kind == "undo") {
+                path.arcMoveTo(QRectF(3, 3, 10, 10), 120);
+                path.arcTo(QRectF(3, 3, 10, 10), 120, 290);
+                path.moveTo(5.5, 2.4);
+                path.lineTo(5.6, 4.9);
+                path.lineTo(8.1, 4.8);
+            } else if (kind == "delete") {
+                path.moveTo(3, 4.5);
+                path.lineTo(13, 4.5);
+                path.moveTo(6.3, 4.5);
+                path.lineTo(6.6, 2.8);
+                path.lineTo(9.4, 2.8);
+                path.lineTo(9.7, 4.5);
+                path.moveTo(4.4, 4.5);
+                path.lineTo(5.2, 13.2);
+                path.lineTo(10.8, 13.2);
+                path.lineTo(11.6, 4.5);
+            } else if (kind == "picker") {
+                path.moveTo(3, 13);
+                path.lineTo(4, 10);
+                path.lineTo(9.2, 4.8);
+                path.lineTo(11.2, 6.8);
+                path.lineTo(6, 12);
+                path.closeSubpath();
+                path.moveTo(9.6, 3.4);
+                path.cubicTo(11, 2, 12.6, 2.2, 13.2, 2.8);
+                path.cubicTo(13.8, 3.4, 14, 5, 12.6, 6.4);
+            }
+            painter.drawPath(path);
+            painter.end();
+            icon.addPixmap(image, mode);
+        }
+    }
+    return icon;
+}
+
+// A round ink color. The chosen one wears a light ring; the custom swatch is a
+// color wheel until a custom color is picked.
+class Swatch final : public QPushButton {
+public:
+    Swatch(const QString& name, QWidget* parent) : QPushButton(parent) {
+        setObjectName("drawingSwatch");
+        setCheckable(true);
+        setFixedSize(22, 22);
+        setCursor(Qt::PointingHandCursor);
+        setAccessibleName(name);
+        setToolTip(name);
+    }
+    void setColor(const QColor& color) {
+        color_ = color;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QPointF center = QRectF(rect()).center();
+        if (isChecked()) {
+            painter.setPen(QPen(QColor("#effff8"), 1.5));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(center, 9.6, 9.6);
+        }
+        QBrush fill(color_);
+        if (!color_.isValid()) {
+            QConicalGradient wheel(center, 90);
+            for (int i = 0; i <= 6; ++i)
+                wheel.setColorAt(i / 6.0, QColor::fromHsvF(std::fmod(i / 6.0, 1.0), 0.65, 1.0));
+            fill = QBrush(wheel);
+        }
+        painter.setPen(QPen(QColor(255, 255, 255, 50), 1.2));
+        painter.setBrush(fill);
+        const qreal radius = underMouse() && !isChecked() ? 7.4 : 6.8;
+        painter.drawEllipse(center, radius, radius);
+    }
+
+private:
+    QColor color_;
+};
+
+QFrame* separator(QWidget* parent) {
+    auto* line = new QFrame(parent);
+    line->setObjectName("drawingSeparator");
+    line->setFixedSize(1, 20);
+    return line;
+}
+
+const char* kControlsStyle = R"(
+QWidget#drawingControls[floating="true"] { background: rgba(22, 25, 31, 238); border: 1px solid #5f6974; border-radius: 12px; }
+QPushButton { color: #dfe4e4; background: transparent; border: 1px solid transparent; border-radius: 8px;
+    padding: 4px 9px; font-family: Inter, sans-serif; font-size: 12px; font-weight: 600; }
+QPushButton:hover { background: rgba(255, 255, 255, 18); }
+QPushButton:checked { color: #effff8; background: #2f5549; border-color: #67e8a5; }
+QPushButton:disabled { color: #5f6872; }
+QPushButton#drawingClear, QPushButton#drawingClearMine { color: #ff8a8a; font-weight: 500; }
+QPushButton#drawingClear:disabled, QPushButton#drawingClearMine:disabled { color: #6b4b4f; }
+QPushButton#drawingUndo, QPushButton#drawingPickColor { padding: 4px 6px; }
+QLineEdit#drawingHexColor { background: #1f2228; border: 1px solid #3a3f48; border-radius: 6px; padding: 2px 6px;
+    color: #e6eae9; font-family: "JetBrains Mono", monospace; font-size: 11px;
+    selection-background-color: #9dccca; selection-color: #12171a; }
+QLineEdit#drawingHexColor:focus { border-color: #9dccca; }
+QFrame#drawingSeparator { background: #3a424c; border: 0; }
+QLabel { color: #8b959e; background: transparent; font-family: Inter, sans-serif; font-size: 11px; padding: 0 4px; }
+)";
+} // namespace
+
 DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent) :
     QWidget(parent) {
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(4);
-    auto* row = new QHBoxLayout;
-    row->setSpacing(6);
-    layout->addLayout(row);
-    auto* allow = new QPushButton("allow drawing", this);
+    setObjectName("drawingControls");
+    setAttribute(Qt::WA_StyledBackground);
+    setStyleSheet(kControlsStyle);
+    auto* row = new QHBoxLayout(this);
+    row->setContentsMargins(5, 5, 5, 5);
+    row->setSpacing(2);
+    const auto tool = [this, row](const QString& text, const QString& icon, const char* name) {
+        auto* result = new QPushButton(text, this);
+        result->setObjectName(name);
+        if (!icon.isEmpty())
+            result->setIcon(toolIcon(icon));
+        result->setIconSize(QSize(14, 14));
+        result->setCursor(Qt::PointingHandCursor);
+        row->addWidget(result);
+        return result;
+    };
+    auto* allow = tool("allow drawing", {}, "drawingAllow");
     allow->setCheckable(true);
     allow->setVisible(owner);
     allow->setToolTip("Let viewers draw on your shared screen. Turning this off clears all drawings.");
-    row->addWidget(allow);
-    auto* pen = new QPushButton("pen", this);
+    auto* toolsLine = separator(this);
+    row->addWidget(toolsLine);
+    auto* pen = tool("pen", "pen", "drawingPen");
     pen->setCheckable(true);
     pen->setToolTip("Draw on the shared screen. Press Esc to return to using your mouse.");
-    row->addWidget(pen);
-    auto* laser = new QPushButton("laser pointer", this);
-    laser->setCheckable(true);
-    laser->setToolTip("Move your mouse to point with a fading trail. No click needed. Press Esc to exit.");
-    row->addWidget(laser);
-    auto* eraser = new QPushButton("eraser", this);
+    auto* eraser = tool("eraser", "eraser", "drawingEraser");
     eraser->setCheckable(true);
     eraser->setToolTip(owner ? "Drag over a stroke to erase it." : "Drag over one of your strokes to erase it.");
-    row->addWidget(eraser);
-    auto* select = new QPushButton("select", this);
+    auto* select = tool("select", "select", "drawingSelect");
     select->setCheckable(true);
     select->setToolTip("Click a stroke or drag a box, then press Delete to remove selected strokes.");
-    row->addWidget(select);
-    auto* colors = new QComboBox(this);
-    colors->setAccessibleName("Pen color");
-    colors->setEditable(true);
-    colors->setInsertPolicy(QComboBox::NoInsert);
-    colors->setToolTip("Enter #RRGGBB, choose a preset, or choose pick color to open the color picker.");
-    colors->lineEdit()->setAccessibleName("Hex pen color");
-    colors->lineEdit()->setPlaceholderText("#RRGGBB");
-    colors->addItem("chat color");
-    const QStringList names{"red", "yellow", "green", "blue", "purple", "white"};
+    auto* colorsLine = separator(this);
+    row->addWidget(colorsLine);
+    // Swatch 0 follows the chat color, 1-6 are the presets and the last is custom.
+    QList<Swatch*> swatches;
+    const QStringList names{"chat color", "red", "yellow", "green", "blue", "purple", "white",
+                            "custom color"};
     for (int i = 0; i < names.size(); ++i) {
-        QPixmap swatch(12, 12);
-        swatch.fill(screenPenColor(i));
-        colors->addItem(QIcon(swatch), names[i]);
+        auto* swatch = new Swatch(names[i], this);
+        swatch->setObjectName(QString("drawingSwatch%1").arg(i));
+        if (i > 0 && i <= chat::kPenColorCount)
+            swatch->setColor(screenPenColor(i - 1));
+        row->addWidget(swatch);
+        swatches.append(swatch);
     }
-    const int customIndex = colors->count();
-    colors->addItem(drawing->penColor().name(QColor::HexRgb).toUpper());
-    const int pickerIndex = colors->count();
-    colors->addItem("pick color...");
-    row->addWidget(colors);
-    row->addStretch();
-    auto* actions = new QHBoxLayout;
-    actions->setSpacing(6);
-    layout->addLayout(actions);
-    auto* undo = new QPushButton("undo", this);
+    auto* hex = new QLineEdit(this);
+    hex->setObjectName("drawingHexColor");
+    hex->setAccessibleName("Hex pen color");
+    hex->setPlaceholderText("#RRGGBB");
+    hex->setMaxLength(7);
+    hex->setFixedWidth(74);
+    hex->setToolTip("Enter a color as #RRGGBB.");
+    row->addWidget(hex);
+    auto* pick = tool({}, "picker", "drawingPickColor");
+    pick->setAccessibleName("Pick color");
+    pick->setToolTip("Open the color picker.");
+    auto* actionsLine = separator(this);
+    row->addWidget(actionsLine);
+    auto* laser = tool("laser", "laser", "drawingLaser");
+    laser->setCheckable(true);
+    laser->setToolTip("Move your mouse to point with a fading trail. No click needed. Press Esc to exit.");
+    auto* undo = tool({}, "undo", "drawingUndo");
+    undo->setAccessibleName("undo");
     undo->setToolTip(QString("Undo your last stroke (%1).")
                      .arg(QKeySequence(QKeySequence::Undo).toString(QKeySequence::NativeText)));
-    actions->addWidget(undo);
     auto* undoShortcut = new QShortcut(QKeySequence::Undo, this);
     undoShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(undoShortcut, &QShortcut::activated, drawing, &ScreenDrawing::undo);
     connect(undo, &QPushButton::clicked, drawing, &ScreenDrawing::undo);
-    auto* clearMine = new QPushButton("clear mine", this);
+    auto* deleteSelected = tool({}, "delete", "drawingDeleteSelected");
+    deleteSelected->setAccessibleName("delete selected");
+    deleteSelected->setToolTip("Delete the selected strokes.");
+    auto* clearLine = separator(this);
+    row->addWidget(clearLine);
+    auto* clearMine = tool("clear mine", {}, "drawingClearMine");
     clearMine->setToolTip("Remove all of your drawings from this shared screen.");
-    actions->addWidget(clearMine);
-    auto* deleteSelected = new QPushButton("delete selected", this);
-    actions->addWidget(deleteSelected);
-    auto* clear = new QPushButton("clear all", this);
-    clear->setVisible(owner);
+    auto* clear = tool("clear all", {}, "drawingClear");
     clear->setToolTip("Remove everyone's drawings from your shared screen.");
-    actions->addWidget(clear);
     auto* hint = new QLabel(this);
-    hint->setWordWrap(true);
-    actions->addWidget(hint);
-    actions->addStretch();
+    hint->setObjectName("drawingHint");
+    row->addWidget(hint);
+
     connect(allow, &QPushButton::toggled, drawing, &ScreenDrawing::permissionRequested);
     const auto toggleTool = [drawing](ScreenDrawing::Tool tool, bool checked) {
         if (checked)
@@ -383,39 +552,39 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     connect(laser, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Laser, checked); });
     connect(eraser, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Eraser, checked); });
     connect(select, &QPushButton::toggled, drawing, [=](bool checked) { toggleTool(ScreenDrawing::Tool::Select, checked); });
-    connect(colors, &QComboBox::currentIndexChanged, this, [=, this](int index) {
-        if (index == pickerIndex) {
-            // The picker is an action, not a selected color. Cancel leaves the
-            // previous color intact and the nonmodal tool stays above the share.
-            const QSignalBlocker block(colors);
-            colors->setCurrentIndex(drawing->color() + 1);
-            if (!colorPicker_) {
-                colorPicker_ = new QColorDialog(this);
-                colorPicker_->setObjectName("screenDrawingColorPicker");
-                colorPicker_->setWindowTitle("Pen color");
-                colorPicker_->setOption(QColorDialog::DontUseNativeDialog);
-                QPalette palette = colorPicker_->palette();
-                palette.setColor(QPalette::Window, QColor("#252830"));
-                palette.setColor(QPalette::WindowText, QColor("#f3f4f6"));
-                palette.setColor(QPalette::Base, QColor("#343943"));
-                palette.setColor(QPalette::Text, QColor("#f3f4f6"));
-                palette.setColor(QPalette::Button, QColor("#343943"));
-                palette.setColor(QPalette::ButtonText, QColor("#f3f4f6"));
-                colorPicker_->setPalette(palette);
-                colorPicker_->setWindowFlag(Qt::Tool);
-                colorPicker_->setWindowFlag(Qt::WindowStaysOnTopHint,
-                                           window()->windowFlags().testFlag(Qt::WindowStaysOnTopHint));
-                colorPicker_->setAttribute(Qt::WA_DeleteOnClose);
-                connect(colorPicker_, &QColorDialog::colorSelected, drawing, &ScreenDrawing::setCustomColor);
-            }
-            colorPicker_->setCurrentColor(drawing->penColor());
-            colorPicker_->show();
-            colorPicker_->raise();
-        } else if (index == customIndex) {
-            drawing->setCustomColor(drawing->customColor().isValid() ? drawing->customColor() : drawing->penColor());
-        } else if (index >= 0 && index <= chat::kPenColorCount) {
-            drawing->setColor(index - 1);
+    for (int i = 0; i < swatches.size(); ++i) {
+        connect(swatches[i], &QPushButton::clicked, drawing, [=] {
+            if (i == chat::kPenColorCount + 1)
+                drawing->setCustomColor(drawing->customColor().isValid() ? drawing->customColor()
+                                                                         : drawing->penColor());
+            else
+                drawing->setColor(i - 1);
+        });
+    }
+    connect(pick, &QPushButton::clicked, this, [=, this] {
+        // Cancel leaves the previous color intact and the nonmodal tool stays above the share.
+        if (!colorPicker_) {
+            colorPicker_ = new QColorDialog(this);
+            colorPicker_->setObjectName("screenDrawingColorPicker");
+            colorPicker_->setWindowTitle("Pen color");
+            colorPicker_->setOption(QColorDialog::DontUseNativeDialog);
+            QPalette palette = colorPicker_->palette();
+            palette.setColor(QPalette::Window, QColor("#24272e"));
+            palette.setColor(QPalette::WindowText, QColor("#e6eae9"));
+            palette.setColor(QPalette::Base, QColor("#1f2228"));
+            palette.setColor(QPalette::Text, QColor("#e6eae9"));
+            palette.setColor(QPalette::Button, QColor("#2c3038"));
+            palette.setColor(QPalette::ButtonText, QColor("#e6eae9"));
+            colorPicker_->setPalette(palette);
+            colorPicker_->setWindowFlag(Qt::Tool);
+            colorPicker_->setWindowFlag(Qt::WindowStaysOnTopHint,
+                                        window()->windowFlags().testFlag(Qt::WindowStaysOnTopHint));
+            colorPicker_->setAttribute(Qt::WA_DeleteOnClose);
+            connect(colorPicker_, &QColorDialog::colorSelected, drawing, &ScreenDrawing::setCustomColor);
         }
+        colorPicker_->setCurrentColor(drawing->penColor());
+        colorPicker_->show();
+        colorPicker_->raise();
     });
     const auto applyHex = [drawing](QString text) {
         text = text.trimmed();
@@ -424,23 +593,23 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
         if (text.size() == 6 && color.isValid())
             drawing->setCustomColor(color);
     };
-    connect(colors->lineEdit(), &QLineEdit::textEdited, drawing, applyHex);
+    connect(hex, &QLineEdit::textEdited, drawing, applyHex);
     const auto refreshColors = [=](bool force) {
-        if (!force && colors->lineEdit()->hasFocus())
-            return;
-        const QSignalBlocker block(colors);
-        QPixmap chatSwatch(12, 12), customSwatch(12, 12);
-        chatSwatch.fill(drawing->chatColor());
-        colors->setItemIcon(0, QIcon(chatSwatch));
-        const QColor custom = drawing->customColor().isValid() ? drawing->customColor() : drawing->penColor();
-        customSwatch.fill(custom);
-        colors->setItemIcon(customIndex, QIcon(customSwatch));
-        colors->setItemText(customIndex, custom.name(QColor::HexRgb).toUpper());
-        colors->setCurrentIndex(drawing->color() + 1);
-        colors->setEditText(colors->itemText(colors->currentIndex()));
+        swatches.first()->setColor(drawing->chatColor());
+        swatches.last()->setColor(drawing->customColor());
+        const int current = drawing->color() + 1;
+        for (int i = 0; i < swatches.size(); ++i) {
+            const QSignalBlocker block(swatches[i]);
+            swatches[i]->setChecked(i == current);
+        }
+        if (force || !hex->hasFocus()) {
+            const QColor custom = drawing->customColor().isValid() ? drawing->customColor()
+                                                                   : drawing->penColor();
+            hex->setText(custom.name(QColor::HexRgb).toUpper());
+        }
     };
-    connect(colors->lineEdit(), &QLineEdit::editingFinished, this, [=] {
-        applyHex(colors->currentText());
+    connect(hex, &QLineEdit::editingFinished, this, [=] {
+        applyHex(hex->text());
         refreshColors(true);
     });
     connect(clear, &QPushButton::clicked, drawing, &ScreenDrawing::clearRequested);
@@ -448,28 +617,44 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     connect(deleteSelected, &QPushButton::clicked, drawing, &ScreenDrawing::deleteSelection);
     auto refresh = [=] {
         const QSignalBlocker blockAllow(allow), blockPen(pen), blockLaser(laser), blockEraser(eraser),
-                             blockSelect(select), blockColors(colors);
+                             blockSelect(select);
+        const bool allowed = drawing->drawingAllowed();
+        const bool custom = drawing->color() == chat::kPenColorCount;
         allow->setChecked(drawing->enabled());
         pen->setChecked(drawing->tool() == ScreenDrawing::Tool::Pen);
         laser->setChecked(drawing->tool() == ScreenDrawing::Tool::Laser);
         eraser->setChecked(drawing->tool() == ScreenDrawing::Tool::Eraser);
         select->setChecked(drawing->tool() == ScreenDrawing::Tool::Select);
         refreshColors(false);
-        pen->setVisible(drawing->drawingAllowed());
-        laser->setVisible(drawing->drawingAllowed());
-        eraser->setVisible(drawing->drawingAllowed());
-        select->setVisible(owner && drawing->drawingAllowed());
-        colors->setVisible(drawing->drawingAllowed());
-        clearMine->setVisible(drawing->enabled());
+        pen->setVisible(allowed);
+        laser->setVisible(allowed);
+        eraser->setVisible(allowed);
+        select->setVisible(owner && allowed);
+        for (auto* swatch : swatches)
+            swatch->setVisible(allowed);
+        hex->setVisible(allowed && custom);
+        pick->setVisible(allowed && custom);
         undo->setVisible(drawing->enabled());
         undo->setEnabled(drawing->canUndo());
         undoShortcut->setEnabled(drawing->canUndo());
-        clearMine->setEnabled(drawing->drawingAllowed() && !drawing->strokeIds(drawing->localName()).isEmpty());
         deleteSelected->setVisible(owner && drawing->tool() == ScreenDrawing::Tool::Select);
         deleteSelected->setEnabled(!drawing->selectedStrokes().isEmpty());
-        deleteSelected->setText(drawing->selectedStrokes().isEmpty() ? "delete selected" :
-                               QString("delete selected (%1)").arg(drawing->selectedStrokes().size()));
+        deleteSelected->setText(drawing->selectedStrokes().isEmpty()
+                                    ? QString() : QString::number(drawing->selectedStrokes().size()));
+        clearMine->setVisible(!owner && drawing->enabled());
+        clearMine->setEnabled(allowed && !drawing->strokeIds(drawing->localName()).isEmpty());
+        clear->setVisible(owner);
         clear->setEnabled(drawing->enabled() && !drawing->segments().isEmpty());
+        // A divider sits between each pair of visible groups.
+        const bool groups[]{owner, allowed, allowed, allowed || drawing->enabled(),
+                            owner || drawing->enabled()};
+        QFrame* lines[]{nullptr, toolsLine, colorsLine, actionsLine, clearLine};
+        bool earlier = false;
+        for (int i = 0; i < 5; ++i) {
+            if (lines[i])
+                lines[i]->setVisible(groups[i] && earlier);
+            earlier |= groups[i];
+        }
         const bool previewOnly = owner && !drawing->presenterOverlayAvailable();
         const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
                                  drawing->tool() == ScreenDrawing::Tool::Eraser ? (owner ? "erase strokes; Esc exits" : "erase your strokes; Esc exits") : QString();
@@ -482,6 +667,12 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     connect(drawing, &ScreenDrawing::changed, this, refresh);
     connect(drawing, &ScreenDrawing::updated, this, refresh);
     refresh();
+}
+
+void DrawingControls::setFloating(bool floating) {
+    setProperty("floating", floating);
+    style()->unpolish(this);
+    style()->polish(this);
 }
 
 namespace {
@@ -911,13 +1102,10 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
     tools_->setAttribute(Qt::WA_ShowWithoutActivating);
     qApp->installEventFilter(this);
     auto* layout = new QHBoxLayout(tools_);
-    layout->setContentsMargins(10, 8, 10, 8);
+    layout->setContentsMargins(3, 1, 3, 1);
     layout->addWidget(new DrawingControls(drawing, true, tools_));
-    tools_->setStyleSheet("QWidget#screenDrawingToolbar { background: #252830; border: 1px solid "
-                          "#535963; border-radius: 8px; } QLabel, QPushButton, QComboBox { color: "
-                          "#f3f4f6; } QPushButton, QComboBox { background: #343943; padding: 5px "
-                          "8px; border: 1px solid #606874; border-radius: 4px; } "
-                          "QPushButton:checked { background: #365e51; border-color: #67e8a5; }");
+    tools_->setStyleSheet("QWidget#screenDrawingToolbar { background: #16191f; border: 1px solid "
+                          "#5f6974; border-radius: 12px; }");
 #if defined(Q_OS_MACOS)
     if (QGuiApplication::platformName() == "cocoa") {
         canvasPanel_ = new MacDrawingPanel(this, drawing);

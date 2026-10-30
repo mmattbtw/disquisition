@@ -120,6 +120,8 @@ class DrawingControls final : public QWidget {
     Q_OBJECT
 public:
     DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent = nullptr);
+    // Draws its own rounded panel, for a toolbar floating over a stream.
+    void setFloating(bool floating);
 
 private:
     QPointer<QColorDialog> colorPicker_;

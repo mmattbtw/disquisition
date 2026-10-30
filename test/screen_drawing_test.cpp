@@ -1,5 +1,5 @@
 #include <QApplication>
-#include <QComboBox>
+#include <QLineEdit>
 #include <QColorDialog>
 #include <QEventLoop>
 #include <QKeyEvent>
@@ -430,23 +430,25 @@ void testHexColorsAndPicker() {
     ScreenDrawingSession host("alice", "alice", &drawing, true);
     drawing.permissionRequested(true);
     DrawingControls controls(&drawing, true);
-    auto* colors = controls.findChild<QComboBox*>();
-    CHECK(colors && colors->isEditable());
-    auto* editor = colors->lineEdit();
+    auto* editor = controls.findChild<QLineEdit*>("drawingHexColor");
+    auto* custom = controls.findChild<QPushButton*>("drawingSwatch7");
+    CHECK(editor && custom && editor->isHidden()); // the hex field belongs to the custom swatch
+    custom->click();
+    CHECK(custom->isChecked() && !editor->isHidden());
     editor->selectAll();
     editor->insert("#1a2b3c");
     CHECK(drawing.penColor() == QColor("#1a2b3c"));
     editor->editingFinished();
-    CHECK(colors->currentText() == "#1A2B3C");
+    CHECK(editor->text() == "#1A2B3C");
     editor->selectAll();
     editor->insert("deadbe");
     CHECK(drawing.penColor() == QColor("#deadbe"));
     editor->editingFinished();
-    CHECK(colors->currentText() == "#DEADBE");
+    CHECK(editor->text() == "#DEADBE");
     editor->selectAll();
     editor->insert("#xyz");
     editor->editingFinished();
-    CHECK(drawing.penColor() == QColor("#deadbe") && colors->currentText() == "#DEADBE");
+    CHECK(drawing.penColor() == QColor("#deadbe") && editor->text() == "#DEADBE");
     drawing.setChatColor(QColor("#abcdef"));
     CHECK(drawing.penColor() == QColor("#deadbe")); // custom color survives chat color changes
     DrawingCanvas canvas;
@@ -460,7 +462,9 @@ void testHexColorsAndPicker() {
     chat::ScreenDraw decoded;
     CHECK(chat::parseScreenDraw(chat::screenDrawMessage(ink, true), true, decoded));
     CHECK(screenSegmentColor(decoded) == QColor("#deadbe"));
-    colors->setCurrentIndex(colors->findText("pick color..."));
+    auto* pick = controls.findChild<QPushButton*>("drawingPickColor");
+    CHECK(pick);
+    pick->click();
     auto* picker = controls.findChild<QColorDialog*>("screenDrawingColorPicker");
     CHECK(picker && picker->isVisible() && picker->testOption(QColorDialog::DontUseNativeDialog));
     picker->setCurrentColor(QColor("#123456"));
@@ -468,15 +472,16 @@ void testHexColorsAndPicker() {
     picker->reject();
     CHECK(drawing.penColor() == QColor("#deadbe")); // Cancel preserves the previous color
     QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    colors->setCurrentIndex(colors->findText("pick color..."));
+    pick->click();
     picker = controls.findChild<QColorDialog*>("screenDrawingColorPicker");
     CHECK(picker && picker->isVisible());
     picker->setCurrentColor(QColor("#123456"));
     picker->accept();
     CHECK(drawing.penColor() == QColor("#123456"));
-    CHECK(colors->currentText() == "#123456");
-    colors->setCurrentIndex(0);
+    CHECK(editor->text() == "#123456");
+    controls.findChild<QPushButton*>("drawingSwatch0")->click();
     CHECK(drawing.penColor() == drawing.chatColor()); // chat color is still available
+    CHECK(editor->isHidden());
 }
 
 void testUndoFromPresenterToolbarAndTextEditing() {
@@ -486,7 +491,6 @@ void testUndoFromPresenterToolbarAndTextEditing() {
     PresenterOverlay overlay(ShareSource{}, &drawing, &window);
     auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
     auto* controls = tools->findChild<DrawingControls*>();
-    auto* colors = controls->findChild<QComboBox*>();
     drawing.permissionRequested(true);
     drawing.setPenActive(true);
     DrawingCanvas canvas;
@@ -497,7 +501,8 @@ void testUndoFromPresenterToolbarAndTextEditing() {
     QApplication::sendEvent(tools, &undo);
     CHECK(drawing.segments().isEmpty());
     click(canvas, {200, 100});
-    auto* editor = colors->lineEdit();
+    controls->findChild<QPushButton*>("drawingSwatch7")->click();
+    auto* editor = controls->findChild<QLineEdit*>("drawingHexColor");
     tools->show();
     tools->activateWindow();
     editor->setFocus();
@@ -590,7 +595,7 @@ void testDrawingBans() {
         notice |= label->text().contains("banned from drawing");
     CHECK(notice);
     for (const auto* button : controls.findChildren<QPushButton*>()) {
-        if (button->text() == "pen" || button->text() == "eraser" || button->text() == "laser pointer")
+        if (button->text() == "pen" || button->text() == "eraser" || button->text() == "laser")
             CHECK(button->isHidden());
         if (button->text() == "clear mine")
             CHECK(!button->isEnabled());
@@ -640,11 +645,12 @@ void testAttributionAndPalette() {
     ScreenDrawingSession session("alice", "alice", &drawing, true);
     drawing.permissionRequested(true);
     DrawingControls controls(&drawing, true);
-    const auto palette = controls.findChild<QComboBox*>();
-    CHECK(palette && palette->currentText() == "chat color");
+    auto* chatSwatch = controls.findChild<QPushButton*>("drawingSwatch0");
+    CHECK(chatSwatch && chatSwatch->isChecked() && chatSwatch->accessibleName() == "chat color");
     drawing.setChatColor(QColor("#abcdef"));
     CHECK(drawing.penColor() == QColor("#abcdef"));
-    palette->setCurrentIndex(2); // yellow, following chat color and red
+    controls.findChild<QPushButton*>("drawingSwatch2")->click(); // yellow, after chat color and red
+    CHECK(!chatSwatch->isChecked());
     DrawingCanvas canvas;
     canvas.resize(400, 200);
     canvas.setDrawing(&drawing);
@@ -679,7 +685,7 @@ void testLaserHoverAndFade() {
     DrawingControls controls(&drawing, true);
     QPushButton* laser = nullptr;
     for (auto* button : controls.findChildren<QPushButton*>()) {
-        if (button->text() == "laser pointer") laser = button;
+        if (button->text() == "laser") laser = button;
     }
     CHECK(laser && laser->isHidden());
     drawing.permissionRequested(true);

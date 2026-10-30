@@ -12,6 +12,9 @@ class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private:
     void checkForUpdates();
     void showUpdateState();
