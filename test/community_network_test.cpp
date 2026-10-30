@@ -834,10 +834,19 @@ void relayHostMigrationAndReconnection() {
     CHECK(until(
         [&] { return !a.relayConnected() && !b.relayConnected() && b.online(cid).size() == 1; }));
     relay.resume();
+    const auto singleTunnel = [](const Node& node) {
+        int active = 0;
+        for (auto* socket : node.findChildren<QSslSocket*>())
+            if (socket->state() != QAbstractSocket::UnconnectedState)
+                ++active;
+        return active == 1;
+    };
+    // Concurrent redials can report both peers online before duplicate TLS
+    // tunnels are resolved. Check delivery only after that replacement settles.
     CHECK(until(
         [&] {
             return a.relayConnected() && b.relayConnected() && a.online(cid).size() == 2 &&
-                   b.online(cid).size() == 2;
+                   b.online(cid).size() == 2 && singleTunnel(a) && singleTunnel(b);
         },
         20000));
     chatReceived = false;
