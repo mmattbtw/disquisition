@@ -1002,15 +1002,20 @@ void allOfflineRestoresMetadataAndNeverReplaysMissedChat() {
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
-    if (argc == 2)
+    const bool metadataOnly = app.arguments().contains("--metadata-sync");
+    if (argc == 2 && !metadataOnly)
         relayExecutable = QString::fromLocal8Bit(argv[1]);
     const auto backend = qEnvironmentVariable("DISQUISITION_TEST_TLS_BACKEND");
     if (!backend.isEmpty() && !QSslSocket::setActiveBackend(backend)) {
         std::fprintf(stderr, "TLS backend unavailable: %s\n", backend.toUtf8().constData());
         return 77;
     }
+    if (metadataOnly) {
+        metadataValidationYieldsToTheEventLoop();
+        std::puts("community_metadata_sync_test: ok");
+        return 0;
+    }
     rejoinToleratesAnInFlightSnapshot();
-    metadataValidationYieldsToTheEventLoop();
     stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever();
     stalledUnauthenticatedMemberDoesNotBlockAdmissions();
     localAuthorityDoesNotDependOnPeerSynchronization();
