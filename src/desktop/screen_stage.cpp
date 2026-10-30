@@ -528,7 +528,7 @@ void ScreenStage::setWatching(const QString& name, bool watching) {
     if (StreamTile* tile = find(name)) {
         tile->setWatching(watching);
         // Choosing to watch a share brings it to the front.
-        if (watching && focused_.isEmpty())
+        if (watching)
             focused_ = name;
         if (!watching && focused_ == name)
             focused_.clear();
