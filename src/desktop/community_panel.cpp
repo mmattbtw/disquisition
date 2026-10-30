@@ -55,6 +55,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <algorithm>
 #include <cmath>
 
@@ -173,6 +174,7 @@ constexpr int kSectionRole = Qt::UserRole + 30;
 constexpr int kBadgeRole = Qt::UserRole + 31;
 constexpr int kStateRole = Qt::UserRole + 32;
 constexpr int kPresentRole = Qt::UserRole + 33;
+constexpr int kStateColorRole = Qt::UserRole + 34;
 
 QFont monoFont(qreal pixels, qreal tracking = 0) {
     QFont font("JetBrains Mono");
@@ -276,6 +278,22 @@ QLabel* fieldLabel(const QString& text, QWidget* parent) {
     label->setFont(monoFont(11, 1.4));
     return label;
 }
+
+// Moves the window when dragged, like a title bar, and zooms it on a double click.
+class DragBar final : public QWidget {
+public:
+    using QWidget::QWidget;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && window()->windowHandle())
+            window()->windowHandle()->startSystemMove();
+    }
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton)
+            window()->isMaximized() ? window()->showNormal() : window()->showMaximized();
+    }
+};
 
 // Lets the whole picture-in-picture act as one button.
 class ClickFrame final : public QFrame {
@@ -442,7 +460,8 @@ public:
         QFont small = option.font;
         small.setPixelSize(11);
         painter->setFont(small);
-        painter->setPen(QColor(theme::kMuted));
+        const auto stateColor = index.data(kStateColorRole);
+        painter->setPen(stateColor.isValid() ? stateColor.value<QColor>() : QColor(theme::kMuted));
         painter->drawText(QRect(left, row.center().y() + 1, width, 15),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QFontMetrics(small).elidedText(index.data(kStateRole).toString(),
@@ -753,19 +772,39 @@ void CommunityPanel::buildUi() {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    auto* topBar = new QWidget(this);
+    // Takes the place of the system title bar where the app draws under it.
+    titleBar_ = new DragBar(this);
+    titleBar_->setObjectName("titleBar");
+    titleBar_->setAttribute(Qt::WA_StyledBackground);
+    titleBar_->setFixedHeight(30);
+    auto* titleRow = new QHBoxLayout(titleBar_);
+    titleRow->setContentsMargins(80, 0, 80, 0);
+    titleRow->setSpacing(7);
+    auto* titleMark = new QLabel(titleBar_);
+    titleMark->setPixmap(theme::brandMark(14, devicePixelRatioF()));
+    windowTitle_ = new QLabel(titleBar_);
+    windowTitle_->setObjectName("windowTitle");
+    titleRow->addStretch(1);
+    titleRow->addWidget(titleMark);
+    titleRow->addWidget(windowTitle_);
+    titleRow->addStretch(1);
+    titleBar_->hide();
+    layout->addWidget(titleBar_);
+    auto* topBar = new DragBar(this);
     topBar->setObjectName("topBar");
     topBar->setAttribute(Qt::WA_StyledBackground);
     auto* connection = new QHBoxLayout(topBar);
     connection->setContentsMargins(12, 7, 14, 7);
     connection->setSpacing(6);
-    auto* mark = new QLabel(topBar);
-    mark->setPixmap(theme::brandMark(18, devicePixelRatioF()));
-    auto* brand = new QLabel("disquisition", topBar);
-    brand->setObjectName("brandName");
-    connection->addWidget(mark);
-    connection->addWidget(brand);
-    connection->addSpacing(14);
+    brandMark_ = new QLabel(topBar);
+    brandMark_->setPixmap(theme::brandMark(18, devicePixelRatioF()));
+    brandName_ = new QLabel("disquisition", topBar);
+    brandName_->setObjectName("brandName");
+    connection->addWidget(brandMark_);
+    connection->addWidget(brandName_);
+    brandGap_ = new QWidget(topBar);
+    brandGap_->setFixedWidth(8);
+    connection->addWidget(brandGap_);
     name_ = new QLineEdit(this);
     name_->setObjectName("communityName");
     name_->setPlaceholderText("Your name");
@@ -2436,8 +2475,12 @@ void CommunityPanel::refresh() {
                 auto* join = button(voiceCid_.isEmpty() ? "Join voice" : "Switch to this channel",
                                     "communityJoinVoice", tree_);
                 join->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                action->setSizeHint(0, QSize(160, 32));
-                tree_->setItemWidget(action, 0, join);
+                auto* holder = new QWidget(tree_);
+                auto* holderLayout = new QVBoxLayout(holder);
+                holderLayout->setContentsMargins(2, 6, 4, 6);
+                holderLayout->addWidget(join);
+                action->setSizeHint(0, QSize(160, 42));
+                tree_->setItemWidget(action, 0, holder);
                 connect(join, &QPushButton::clicked, this, &CommunityPanel::joinVoice);
             }
         }
@@ -2487,6 +2530,12 @@ void CommunityPanel::refresh() {
     const auto channel = model.channels.value(channel_);
     const bool member = model.isMember(node_->peerId());
     const bool textChannel = member && channel.type == "text";
+    windowTitle_->setText(
+        QString("<span style='color:%1;font-weight:600'>%2</span>")
+            .arg(theme::kText, QApplication::applicationDisplayName().toHtmlEscaped()) +
+        (model.id.isEmpty() ? QString()
+                            : QString("<span style='color:%1'>&nbsp; — &nbsp;%2</span>")
+                                  .arg(theme::kMuted, model.name.toHtmlEscaped())));
     heading_->setText(model.id.isEmpty()
                           ? "Your communities"
                           : (channel.type == "text"
@@ -2544,6 +2593,10 @@ void CommunityPanel::refresh() {
         else if (peer.admin)
             item->setData(kBadgeRole, "ADMIN");
         const auto state = node_->presence(cid_, peer.id);
+        item->setData(kStateColorRole,
+                      here && state.sharing ? QColor("#ec97b7")
+                      : here && !state.voiceChannel.isEmpty() ? QColor("#8fc7c2")
+                                                              : QColor(theme::kMuted));
         item->setData(kStateRole,
                       !here ? "offline"
                       : state.sharing ? "sharing screen"
@@ -2571,20 +2624,17 @@ void CommunityPanel::refresh() {
             return;
         }
         voiceStatus_->setText("Voice  ·  " + voiceModel.channels[voiceChannel_].name);
-        QStringList inCall, sharers;
+        QStringList sharers;
         for (const auto& member : voiceModel.members) {
             const auto state = node_->presence(voiceCid_, member.id);
-            if (state.voiceChannel != voiceChannel_ ||
-                !node_->online(voiceCid_).contains(member.id))
-                continue;
-            inCall.append(member.name);
-            if (state.sharing)
+            if (state.voiceChannel == voiceChannel_ && state.sharing &&
+                node_->online(voiceCid_).contains(member.id))
                 sharers.append(member.name);
         }
-        auto detail = "|   " + inCall.join(", ");
-        if (!sharers.isEmpty())
-            detail += "   |   " + sharers.join(", ") + (sharers.size() == 1 ? " is" : " are") +
-                      " sharing";
+        const QString detail =
+            sharers.isEmpty() ? QString()
+                              : "|   " + sharers.join(", ") +
+                                    (sharers.size() == 1 ? " is" : " are") + " sharing";
         voiceDetail_->setText(detail);
         voiceDetail_->setToolTip(detail);
         QSet<QString> active, streaming;
@@ -2715,6 +2765,13 @@ void CommunityPanel::refreshAudience() {
             peers.remove(node_->peerId());
         show(stream, peers);
     }
+}
+
+void CommunityPanel::setCustomTitleBar(bool enabled) {
+    titleBar_->setVisible(enabled);
+    // The title bar carries the brand, so the top bar doesn't repeat it.
+    for (QWidget* widget : std::initializer_list<QWidget*>{brandMark_, brandName_, brandGap_})
+        widget->setVisible(!enabled);
 }
 
 void CommunityPanel::refreshPip() {

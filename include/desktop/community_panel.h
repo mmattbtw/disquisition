@@ -42,6 +42,8 @@ public:
     ~CommunityPanel() override;
     QAction* penguinsAction() const { return penguinsAction_; }
     void showSettings() { settings(); }
+    // Shows the app's own title row, for windows drawn under the system title bar.
+    void setCustomTitleBar(bool enabled);
     void reloadSavingSettings() { openHistory(); }
     void releaseStore();
 signals:
@@ -164,6 +166,11 @@ private:
     QLabel* userState_ = nullptr;
     QLabel* voiceDetail_ = nullptr;
     QFrame* composerFrame_ = nullptr;
+    QWidget* titleBar_ = nullptr;
+    QLabel* windowTitle_ = nullptr;
+    QLabel* brandMark_ = nullptr;
+    QLabel* brandName_ = nullptr;
+    QWidget* brandGap_ = nullptr;
     QStackedWidget* views_ = nullptr;
     QPushButton* stageToggle_ = nullptr;
     bool stageOpen_ = false;

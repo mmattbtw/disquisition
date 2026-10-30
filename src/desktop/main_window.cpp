@@ -77,6 +77,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     updater_->setAutomatic(QSettings().value("updates/automatic", true).toBool());
     setStyleSheet(theme::styleSheet());
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    // Draw the app under a transparent title bar, keeping the system's window
+    // buttons, so the window chrome matches the rest of the app.
+    setWindowFlag(Qt::ExpandedClientAreaHint);
+    setWindowFlag(Qt::NoTitleBarBackgroundHint);
+    setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea, false);
+    communities->setCustomTitleBar(true);
+#endif
 }
 
 void MainWindow::checkForUpdates() {

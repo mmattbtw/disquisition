@@ -98,6 +98,8 @@ QProgressBar::chunk { background: #9dccca; border-radius: 2px; }
 QTextBrowser { background: transparent; border: 0; }
 QListWidget, QTreeWidget { background: transparent; border: 0; }
 
+QWidget#titleBar { background: #1b1d22; }
+QLabel#windowTitle { color: #8b959e; font-size: 12px; background: transparent; }
 QWidget#topBar { background: #1f2228; border-bottom: 1px solid #33373f; }
 QLabel#brandName { font-family: "Cal Sans", Inter, sans-serif; font-size: 16px; color: #edf0ef; }
 QLabel#connectionStatus { color: #8b959e; font-size: 12px; }
