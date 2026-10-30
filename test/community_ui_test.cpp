@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
             CHECK(tree->itemWidget(*item, 0));
             auto* row = tree->itemWidget(*item, 0);
             auto* profile = row->findChild<QPushButton*>("voiceMemberProfile");
-            CHECK(profile && profile->iconSize() == QSize(28, 28));
+            CHECK(profile && profile->iconSize() == QSize(20, 20));
             CHECK(profile->text() == "Alice (you)");
             CHECK((*item)->text(0).isEmpty()); // No second name painted beneath the row widget.
             CHECK((*item)->data(0, Qt::AccessibleTextRole).toString() == "Alice (you)");

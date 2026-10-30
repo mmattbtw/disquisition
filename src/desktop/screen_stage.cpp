@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QShortcut>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -67,24 +68,28 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     setObjectName("streamTile");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+    auto* live = new QLabel("LIVE", this);
+    live->setObjectName("live");
     title_ = new QLabel(this);
     title_->setTextFormat(Qt::PlainText);
     title_->setObjectName("streamName");
-    auto* live = new QLabel("LIVE", this);
-    live->setObjectName("live");
+    auto* sharing = new QLabel("is sharing", this);
+    sharing->setObjectName("streamSharing");
     stats_ = new QLabel(this);
     stats_->setObjectName("streamStats");
     // Lets the statistics give way first when the tile is narrow.
     stats_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    stats_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     focusButton_ = new QPushButton("Focus", this);
     fullscreenButton_ = new QPushButton("Fullscreen", this);
     stopButton_ = new QPushButton("Stop Watching", this);
 
     auto* header = new QHBoxLayout;
-    header->setSpacing(6);
-    header->addWidget(title_);
+    header->setContentsMargins(14, 10, 10, 10);
+    header->setSpacing(7);
     header->addWidget(live);
+    header->addWidget(title_);
+    header->addWidget(sharing);
+    header->addSpacing(4);
     header->addWidget(stats_, 1);
     header->addWidget(focusButton_);
     header->addWidget(fullscreenButton_);
@@ -92,6 +97,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
 
     invitation_ = new QWidget(this);
     invitationText_ = new QLabel(invitation_);
+    invitationText_->setObjectName("streamInvitation");
     invitationText_->setTextFormat(Qt::PlainText);
     invitationText_->setAlignment(Qt::AlignCenter);
     invitationText_->setWordWrap(true);
@@ -99,6 +105,7 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
     auto* invitationLayout = new QVBoxLayout(invitation_);
+    invitationLayout->setSpacing(14);
     invitationLayout->addStretch();
     invitationLayout->addWidget(invitationText_);
     invitationLayout->addWidget(watchButton, 0, Qt::AlignHCenter);
@@ -107,18 +114,31 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     view_ = new StreamView(this);
     drawing_ = new ScreenDrawing(this);
     view_->setDrawing(drawing_);
-    drawingControls_ = new DrawingControls(drawing_, own, this);
-    drawingControls_->layout()->setContentsMargins(6, 5, 6, 5);
     body_ = new QStackedWidget(this);
     body_->addWidget(invitation_);
     body_->addWidget(view_);
+    // The toolbar floats over the top of the video rather than taking a row.
+    drawingControls_ = new DrawingControls(drawing_, own, this);
+    drawingControls_->setFloating(true);
+    drawingControls_->installEventFilter(this);
+    view_->installEventFilter(this);
+
+    drawingState_ = new QLabel(this);
+    drawingState_->setObjectName("stageChip");
+    auto* footer = new QHBoxLayout;
+    footer->setContentsMargins(14, 8, 14, 10);
+    footer->addWidget(drawingState_);
+    footer->addStretch();
+    audience_ = new QLabel(this);
+    audience_->setObjectName("streamAudience");
+    footer->addWidget(audience_);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 8, 10, 10);
-    layout->setSpacing(8);
+    layout->setContentsMargins(1, 1, 1, 1);
+    layout->setSpacing(0);
     layout->addLayout(header);
-    layout->addWidget(drawingControls_);
     layout->addWidget(body_, 1);
+    layout->addLayout(footer);
 
     connect(watchButton, &QPushButton::clicked, this, &StreamTile::watchClicked);
     connect(stopButton_, &QPushButton::clicked, this, &StreamTile::stopWatchingClicked);
@@ -126,8 +146,80 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     connect(fullscreenButton_, &QPushButton::clicked, this, &StreamTile::fullscreenClicked);
     connect(view_, &StreamView::doubleClicked, this, &StreamTile::fullscreenClicked);
     connect(view_, &StreamView::menuRequested, this, &StreamTile::showVolumeMenu);
+    connect(drawing_, &ScreenDrawing::changed, this, &StreamTile::refreshDrawingState);
 
     setWatching(own);
+}
+
+void StreamTile::refreshDrawingState() {
+    const bool on = drawing_->enabled();
+    drawingState_->setText(drawing_->banned() ? "you can't draw on this stream"
+                           : on               ? QString::fromUtf8("\u2713  drawing allowed")
+                                              : "drawing off");
+    if (drawingState_->property("good").toBool() != (on && !drawing_->banned())) {
+        drawingState_->setProperty("good", on && !drawing_->banned());
+        drawingState_->style()->unpolish(drawingState_);
+        drawingState_->style()->polish(drawingState_);
+    }
+    drawingState_->setVisible(watching_);
+    drawingControls_->setVisible(watching_ && (own_ || on));
+    placeDrawingControls();
+}
+
+void StreamTile::setAudience(const QList<QPixmap>& avatars) {
+    constexpr int kSide = 20, kStep = 16, kShown = 5;
+    const int shown = qMin<int>(avatars.size(), kShown);
+    const QString more = avatars.size() > kShown ? "+" + QString::number(avatars.size() - kShown)
+                                                 : QString();
+    QFont font = audience_->font();
+    font.setPixelSize(11);
+    const int extra = more.isEmpty() ? 0 : QFontMetrics(font).horizontalAdvance(more) + 8;
+    const qreal scale = devicePixelRatioF();
+    QPixmap stack(QSize(shown ? (shown - 1) * kStep + kSide + 2 + extra : 1, kSide + 2) * scale);
+    stack.setDevicePixelRatio(scale);
+    stack.fill(Qt::transparent);
+    QPainter painter(&stack);
+    painter.setRenderHint(QPainter::Antialiasing);
+    for (int i = 0; i < shown; ++i) {
+        const QRectF tile(1 + i * kStep, 1, kSide, kSide);
+        painter.setPen(QPen(QColor("#121418"), 2));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(tile.adjusted(-0.5, -0.5, 0.5, 0.5), 6, 6);
+        painter.drawPixmap(tile.toRect(), avatars[i]);
+    }
+    if (!more.isEmpty()) {
+        painter.setFont(font);
+        painter.setPen(QColor("#8b959e"));
+        painter.drawText(QRectF((shown - 1) * kStep + kSide + 8, 0, extra, kSide + 2),
+                         Qt::AlignLeft | Qt::AlignVCenter, more);
+    }
+    painter.end();
+    audience_->setPixmap(stack);
+    audience_->setVisible(shown > 0);
+}
+
+void StreamTile::placeDrawingControls() {
+    if (!drawingControls_->isVisibleTo(this))
+        return;
+    const QRect video = body_->geometry();
+    const QSize size = drawingControls_->sizeHint();
+    const int span = qMin(size.width(), width() - 16);
+    drawingControls_->setGeometry(qMax(8, video.center().x() - span / 2), video.top() + 10, span,
+                                  size.height());
+    drawingControls_->raise();
+}
+
+bool StreamTile::eventFilter(QObject* watched, QEvent* event) {
+    // The toolbar's own layout changes, such as tools appearing, change its size.
+    if ((watched == view_ && event->type() == QEvent::Resize) ||
+        (watched == drawingControls_ && event->type() == QEvent::LayoutRequest))
+        placeDrawingControls();
+    return QFrame::eventFilter(watched, event);
+}
+
+void StreamTile::resizeEvent(QResizeEvent* event) {
+    QFrame::resizeEvent(event);
+    placeDrawingControls();
 }
 
 void StreamTile::setDisplayName(const QString& label) {
@@ -141,7 +233,7 @@ void StreamTile::setWatching(bool watching) {
     fullscreenButton_->setVisible(watching);
     stopButton_->setVisible(watching && !own_);
     watching_ = watching;
-    drawingControls_->setVisible(watching);
+    refreshDrawingState();
     if (!watching)
         drawing_->setState(false, 0);
     view_->clear();
@@ -236,6 +328,7 @@ void ScreenStage::addStream(const QString& name, bool own, const QString& label)
     connect(tile, &StreamTile::fullscreenClicked, this, [this, name] { toggleFullscreen(name); });
     connect(tile, &StreamTile::volumeChanged, this,
             [this, name](int percent) { emit volumeChanged(name, percent); });
+    tile->setAudience(audience_);
     // Your own share comes first, like in a call.
     if (own) {
         tiles_.prepend(tile);
@@ -306,6 +399,12 @@ StreamTile* ScreenStage::find(const QString& name) const {
     return nullptr;
 }
 
+void ScreenStage::setAudience(const QList<QPixmap>& avatars) {
+    audience_ = avatars;
+    for (StreamTile* tile : std::as_const(tiles_))
+        tile->setAudience(avatars);
+}
+
 ScreenDrawing* ScreenStage::drawing(const QString& name) const {
     StreamTile* tile = find(name);
     return tile ? tile->drawing() : nullptr;
@@ -329,7 +428,9 @@ void ScreenStage::toggleFullscreen(const QString& name) {
     window->setWindowTitle(tile->displayName() + "'s screen");
     auto* layout = new QVBoxLayout(window);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(new DrawingControls(tile->drawing(), tile->own(), window));
+    auto* controls = new DrawingControls(tile->drawing(), tile->own(), window);
+    controls->setFloating(true);
+    layout->addWidget(controls, 0, Qt::AlignHCenter);
     fullscreen_ = new StreamView(window);
     fullscreen_->setDrawing(tile->drawing());
     layout->addWidget(fullscreen_, 1);
@@ -363,8 +464,8 @@ void ScreenStage::relayout() {
     // Deleting a layout leaves its widgets alone.
     delete layout();
     auto* grid = new QGridLayout(this);
-    grid->setContentsMargins(0, 0, 0, 6);
-    grid->setSpacing(6);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setSpacing(10);
 
     const bool canFocus = tiles_.size() > 1;
     StreamTile* focused = canFocus ? find(focused_) : nullptr;

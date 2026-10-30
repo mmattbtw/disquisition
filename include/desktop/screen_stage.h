@@ -4,6 +4,7 @@
 #include <QFrame>
 #include <QImage>
 #include <QList>
+#include <QPixmap>
 #include <QPointer>
 #include <QString>
 #include <QWidget>
@@ -60,6 +61,8 @@ public:
     void setDetail(const QString& detail) { detail_ = detail; }
     void showFrame(const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing() const { return drawing_; }
+    // Everyone in the call, shown as overlapping avatars under the video.
+    void setAudience(const QList<QPixmap>& avatars);
 
 signals:
     void watchClicked();
@@ -68,7 +71,14 @@ signals:
     void fullscreenClicked();
     void volumeChanged(int percent);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
+    void refreshDrawingState();
+    void placeDrawingControls();
+
     QString name_;
     QString label_;
     QLabel* title_ = nullptr;
@@ -81,6 +91,8 @@ private:
     ScreenDrawing* drawing_ = nullptr;
     DrawingControls* drawingControls_ = nullptr;
     QLabel* stats_ = nullptr;
+    QLabel* drawingState_ = nullptr;
+    QLabel* audience_ = nullptr;
     QPushButton* focusButton_ = nullptr;
     QPushButton* fullscreenButton_ = nullptr;
     QPushButton* stopButton_ = nullptr;
@@ -108,6 +120,8 @@ public:
     void setDetail(const QString& name, const QString& detail);
     void showFrame(const QString& name, const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing(const QString& name) const;
+    int count() const { return static_cast<int>(tiles_.size()); }
+    void setAudience(const QList<QPixmap>& avatars);
 
 signals:
     void watchRequested(const QString& name);
@@ -130,4 +144,5 @@ private:
     QPointer<StreamView> fullscreen_;
     QString fullscreenName_;
     QShortcut* escape_ = nullptr;
+    QList<QPixmap> audience_;
 };

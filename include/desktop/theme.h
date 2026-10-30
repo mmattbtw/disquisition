@@ -30,8 +30,14 @@ QString styleSheet();
 QPalette palette();
 // A stable pastel from the site palette, so a name always gets the same tile.
 QColor avatarColor(const QString& name);
-// Rounded-square initial tile used when someone has no profile picture.
+// Rounded-square gradient tile with an initial, used when someone has no profile picture.
 QPixmap initialAvatar(const QString& name, int size, qreal scale);
+// A small pinwheel, after the brand mark, for communities without an icon.
+QPixmap communityMark(const QString& name, int size, qreal scale);
 QPixmap brandMark(int size, qreal scale);
 QIcon gearIcon(qreal scale);
+// Audio level bars marking voice channels.
+QIcon voiceIcon(qreal scale);
+// A microphone, crossed out when `muted`.
+QPixmap micIcon(bool muted, qreal scale);
 } // namespace theme

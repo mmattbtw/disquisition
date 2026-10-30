@@ -23,6 +23,7 @@ class QPushButton;
 class QFrame;
 class QLabel;
 class QListWidget;
+class QStackedWidget;
 class QTextBrowser;
 class ChatMedia;
 class GifPicker;
@@ -92,6 +93,8 @@ private:
     QStringList memberNames(const QString& cid) const;
     void share();
     void stopSharing();
+    // Shows the screen share in place of the chat, while there is one to show.
+    void openStage(bool open);
     void watch(const QString& peer, bool enabled);
     void setStreamVolume(const QString& peer, int percent);
     void applyVoiceSettings(const QString& peer);
@@ -150,6 +153,9 @@ private:
     QLabel* userState_ = nullptr;
     QLabel* voiceDetail_ = nullptr;
     QFrame* composerFrame_ = nullptr;
+    QStackedWidget* views_ = nullptr;
+    QPushButton* stageToggle_ = nullptr;
+    bool stageOpen_ = false;
     QAction* leaveAction_ = nullptr;
     QWidget* joining_ = nullptr;
     QLabel* voiceStatus_ = nullptr;

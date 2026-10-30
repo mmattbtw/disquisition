@@ -162,30 +162,6 @@ qreal linearVolume(int percent) {
     return QAudio::convertVolume(percent / 100.0, QAudio::LogarithmicVolumeScale,
                                  QAudio::LinearVolumeScale);
 }
-QIcon voiceChannelIcon(qreal scale) {
-    QPixmap image(QSize(20, 20) * scale);
-    image.setDevicePixelRatio(scale);
-    image.fill(Qt::transparent);
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor(theme::kMuted), 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    QPainterPath speaker;
-    speaker.moveTo(3, 8);
-    speaker.lineTo(6, 8);
-    speaker.lineTo(10, 4);
-    speaker.lineTo(10, 16);
-    speaker.lineTo(6, 12);
-    speaker.lineTo(3, 12);
-    speaker.closeSubpath();
-    painter.drawPath(speaker);
-    painter.drawArc(QRectF(9, 6, 6, 8), -60 * 16, 120 * 16);
-    painter.drawArc(QRectF(9, 3, 10, 14), -60 * 16, 120 * 16);
-    painter.end();
-    QIcon icon;
-    for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
-        icon.addPixmap(image, mode);
-    return icon;
-}
 constexpr int kUnreadRole = Qt::UserRole + 20;
 constexpr int kNoteRole = Qt::UserRole + 21;
 constexpr int kLiveRole = Qt::UserRole + 22;
@@ -296,7 +272,7 @@ public:
         auto size = QStyledItemDelegate::sizeHint(option, index);
         if (index.data(Qt::SizeHintRole).isValid())
             return size;
-        size.setHeight(index.parent().isValid() ? 32 : 40);
+        size.setHeight(index.parent().isValid() ? 28 : 34);
         return size;
     }
 
@@ -320,16 +296,29 @@ public:
         const bool selected = option.state & QStyle::State_Selected;
         const int unread = index.data(kUnreadRole).toInt();
         auto right = QRectF(text).adjusted(0, 0, -4, 0);
-        if (unread > 0)
-            right.setRight(right.right() - paintTag(painter, right, QString::number(unread),
-                                                    QColor(theme::kTeal), QColor(theme::kInk)) - 6);
+        if (unread > 0) {
+            const auto count = unread > 99 ? QString("99+") : QString::number(unread);
+            QFont font = item.font;
+            font.setPixelSize(10);
+            font.setWeight(QFont::Bold);
+            const int width = qMax(17, QFontMetrics(font).horizontalAdvance(count) + 9);
+            const QRectF badge(right.right() - width, right.center().y() - 8.5, width, 17);
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(theme::kTeal));
+            painter->drawRoundedRect(badge, 8.5, 8.5);
+            painter->setFont(font);
+            painter->setPen(QColor(theme::kInk));
+            painter->drawText(badge, Qt::AlignCenter, count);
+            right.setRight(badge.left() - 6);
+        }
         if (index.data(kLiveRole).toBool())
-            right.setRight(right.right() - paintTag(painter, right, "LIVE", QColor("#3a2328"),
-                                                    QColor("#ff8a8a"), QColor("#7a3a40")) - 6);
+            right.setRight(right.right() - paintTag(painter, right, "LIVE", QColor("#a5dfdc"),
+                                                    QColor(theme::kInk)) - 6);
         const auto note = index.data(kNoteRole).toString();
         if (!note.isEmpty()) {
             QFont small = item.font;
-            small.setPixelSize(12);
+            small.setPixelSize(11);
             small.setBold(false);
             painter->setFont(small);
             painter->setPen(QColor(theme::kDim));
@@ -338,7 +327,7 @@ public:
             right.setRight(right.right() - width - 8);
         }
         auto font = item.font;
-        font.setPixelSize(root ? 15 : 14);
+        font.setPixelSize(root ? 14 : 13);
         font.setWeight(root ? QFont::DemiBold : unread ? QFont::DemiBold : QFont::Normal);
         painter->setFont(font);
         const auto foreground = index.data(Qt::ForegroundRole);
@@ -351,7 +340,7 @@ public:
             name = name.mid(2);
             painter->setPen(QColor(theme::kDim));
             painter->drawText(right, Qt::AlignVCenter | Qt::AlignLeft, "#");
-            right.setLeft(right.left() + QFontMetrics(font).horizontalAdvance("#") + 8);
+            right.setLeft(right.left() + QFontMetrics(font).horizontalAdvance("#") + 7);
         }
         painter->setPen(color);
         painter->drawText(right, Qt::AlignVCenter | Qt::AlignLeft,
@@ -379,27 +368,27 @@ public:
         if (!section.isEmpty()) {
             QRect header = row;
             header.setHeight(kHeader);
-            painter->setFont(monoFont(10.5, 1.4));
+            painter->setFont(monoFont(10, 1.4));
             painter->setPen(QColor(theme::kDim));
-            painter->drawText(header.adjusted(8, 0, 0, -6), Qt::AlignLeft | Qt::AlignBottom,
+            painter->drawText(header.adjusted(6, 0, 0, -6), Qt::AlignLeft | Qt::AlignBottom,
                               section);
             row.setTop(row.top() + kHeader);
         }
         if (option.state & (QStyle::State_MouseOver | QStyle::State_Selected)) {
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor("#2e3239"));
-            painter->drawRoundedRect(QRectF(row).adjusted(0, 2, 0, -2), 8, 8);
+            painter->drawRoundedRect(QRectF(row).adjusted(0, 1, 0, -1), 6, 6);
         }
         const bool present = index.data(kPresentRole).toBool();
         const auto icon = index.data(Qt::DecorationRole).value<QIcon>();
-        const QRect avatar(row.left() + 8, row.center().y() - 17, 34, 34);
+        const QRect avatar(row.left() + 6, row.center().y() - 13, 26, 26);
         painter->setOpacity(present ? 1.0 : 0.45);
         icon.paint(painter, avatar);
         painter->setOpacity(1.0);
-        const int left = avatar.right() + 11;
-        const int width = row.right() - 8 - left;
+        const int left = avatar.right() + 9;
+        const int width = row.right() - 6 - left;
         QFont name = option.font;
-        name.setPixelSize(14);
+        name.setPixelSize(13);
         name.setWeight(QFont::DemiBold);
         const QFontMetrics nameMetrics(name);
         const auto badge = index.data(kBadgeRole).toString();
@@ -407,7 +396,7 @@ public:
             ? 0 : QFontMetrics(monoFont(9.5, 0.6)).horizontalAdvance(badge) + 16;
         const auto label = nameMetrics.elidedText(index.data(Qt::DisplayRole).toString(),
                                                   Qt::ElideRight, qMax(0, width - badgeWidth));
-        const QRect nameRect(left, row.center().y() - 18, width, 20);
+        const QRect nameRect(left, row.center().y() - 16, width, 17);
         painter->setFont(name);
         const auto foreground = index.data(Qt::ForegroundRole);
         painter->setPen(present && foreground.isValid() ? foreground.value<QBrush>().color()
@@ -420,10 +409,10 @@ public:
                      QColor("#1a1d22"));
         }
         QFont small = option.font;
-        small.setPixelSize(12);
+        small.setPixelSize(11);
         painter->setFont(small);
         painter->setPen(QColor(theme::kMuted));
-        painter->drawText(QRect(left, row.center().y() + 1, width, 18),
+        painter->drawText(QRect(left, row.center().y() + 1, width, 15),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QFontMetrics(small).elidedText(index.data(kStateRole).toString(),
                                                          Qt::ElideRight, width));
@@ -431,8 +420,8 @@ public:
     }
 
 private:
-    static constexpr int kRow = 50;
-    static constexpr int kHeader = 30;
+    static constexpr int kRow = 40;
+    static constexpr int kHeader = 26;
 };
 
 QPixmap profileAvatar(const community::Member& member, int size, qreal scale) {
@@ -737,20 +726,20 @@ void CommunityPanel::buildUi() {
     topBar->setObjectName("topBar");
     topBar->setAttribute(Qt::WA_StyledBackground);
     auto* connection = new QHBoxLayout(topBar);
-    connection->setContentsMargins(16, 10, 16, 10);
-    connection->setSpacing(8);
+    connection->setContentsMargins(12, 7, 14, 7);
+    connection->setSpacing(6);
     auto* mark = new QLabel(topBar);
-    mark->setPixmap(theme::brandMark(22, devicePixelRatioF()));
+    mark->setPixmap(theme::brandMark(18, devicePixelRatioF()));
     auto* brand = new QLabel("disquisition", topBar);
     brand->setObjectName("brandName");
     connection->addWidget(mark);
     connection->addWidget(brand);
-    connection->addSpacing(20);
+    connection->addSpacing(14);
     name_ = new QLineEdit(this);
     name_->setObjectName("communityName");
     name_->setPlaceholderText("Your name");
     name_->setMaxLength(64);
-    name_->setFixedWidth(220);
+    name_->setFixedWidth(180);
     name_->setText(node_ && !node_->profile().name.isEmpty()
                        ? node_->profile().name
                        : QSettings().value("community/name").toString());
@@ -774,8 +763,8 @@ void CommunityPanel::buildUi() {
     side->setContentsMargins(0, 0, 0, 0);
     side->setSpacing(0);
     auto* actions = new QHBoxLayout;
-    actions->setContentsMargins(12, 12, 12, 8);
-    actions->setSpacing(8);
+    actions->setContentsMargins(10, 10, 10, 6);
+    actions->setSpacing(6);
     create_ = button("Create", "communityCreate", sidebar);
     join_ = button("Join", "communityJoin", sidebar);
     for (auto* action : {create_, join_})
@@ -786,15 +775,15 @@ void CommunityPanel::buildUi() {
     tree_ = new CommunityTree(sidebar);
     tree_->setObjectName("communityTree");
     tree_->setHeaderHidden(true);
-    tree_->setMinimumWidth(240);
-    tree_->setIndentation(14);
-    tree_->setIconSize(QSize(18, 18));
+    tree_->setMinimumWidth(200);
+    tree_->setIndentation(12);
+    tree_->setIconSize(QSize(16, 16));
     tree_->setItemDelegate(new ChannelDelegate(tree_));
     tree_->setMouseTracking(true);
     joining_ = new QWidget(sidebar);
     joining_->setObjectName("communityJoining");
     auto* joiningLayout = new QVBoxLayout(joining_);
-    joiningLayout->setContentsMargins(14, 4, 14, 6);
+    joiningLayout->setContentsMargins(12, 2, 12, 6);
     joiningLayout->setSpacing(5);
     auto* joiningLabel = new QLabel("Joining community…", joining_);
     joiningLabel->setObjectName("communityJoiningLabel");
@@ -812,13 +801,13 @@ void CommunityPanel::buildUi() {
     userCard->setObjectName("userCard");
     userCard->setAttribute(Qt::WA_StyledBackground);
     auto* cardRow = new QHBoxLayout(userCard);
-    cardRow->setContentsMargins(12, 10, 8, 10);
-    cardRow->setSpacing(10);
+    cardRow->setContentsMargins(10, 8, 6, 8);
+    cardRow->setSpacing(9);
     userAvatar_ = new QLabel(userCard);
-    userAvatar_->setFixedSize(34, 34);
+    userAvatar_->setFixedSize(28, 28);
     cardRow->addWidget(userAvatar_);
     auto* identity = new QVBoxLayout;
-    identity->setSpacing(1);
+    identity->setSpacing(0);
     userName_ = new QLabel(userCard);
     userName_->setObjectName("userCardName");
     userName_->setTextFormat(Qt::PlainText);
@@ -832,7 +821,7 @@ void CommunityPanel::buildUi() {
     settingsButton->setProperty("quiet", true);
     settingsButton->setIcon(theme::gearIcon(devicePixelRatioF()));
     settingsButton->setIconSize(QSize(18, 18));
-    settingsButton->setFixedSize(32, 32);
+    settingsButton->setFixedSize(28, 28);
     settingsButton->setToolTip("User Settings");
     settingsButton->setAccessibleName("User Settings");
     cardRow->addWidget(settingsButton);
@@ -883,20 +872,33 @@ void CommunityPanel::buildUi() {
     auto* conversation = new QWidget(split);
     conversation->setObjectName("conversation");
     conversation->setAttribute(Qt::WA_StyledBackground);
-    auto* chat = new QVBoxLayout(conversation);
+    auto* outer = new QVBoxLayout(conversation);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    views_ = new QStackedWidget(conversation);
+    outer->addWidget(views_, 1);
+    auto* chatPage = new QWidget(views_);
+    auto* chat = new QVBoxLayout(chatPage);
     chat->setContentsMargins(0, 0, 0, 0);
     chat->setSpacing(0);
-    auto* header = new QWidget(conversation);
+    views_->addWidget(chatPage);
+    auto* stagePage = new QWidget(views_);
+    stagePage->setObjectName("stagePage");
+    stagePage->setAttribute(Qt::WA_StyledBackground);
+    auto* stageLayout = new QVBoxLayout(stagePage);
+    stageLayout->setContentsMargins(14, 14, 14, 14);
+    views_->addWidget(stagePage);
+    auto* header = new QWidget(chatPage);
     header->setObjectName("channelHeader");
     header->setAttribute(Qt::WA_StyledBackground);
     auto* headingRow = new QHBoxLayout(header);
-    headingRow->setContentsMargins(24, 12, 18, 12);
-    headingRow->setSpacing(8);
+    headingRow->setContentsMargins(20, 8, 14, 8);
+    headingRow->setSpacing(6);
     auto* titles = new QVBoxLayout;
-    titles->setSpacing(1);
+    titles->setSpacing(0);
     heading_ = new QLabel("Your communities", header);
     heading_->setObjectName("channelHeading");
-    heading_->setTextFormat(Qt::PlainText);
+    heading_->setTextFormat(Qt::RichText);
     topic_ = new QLabel("Create a community or join with an invite link or QR image.", header);
     topic_->setObjectName("channelTopic");
     topic_->setTextFormat(Qt::PlainText);
@@ -913,28 +915,24 @@ void CommunityPanel::buildUi() {
     chat->addWidget(header);
     connect(invite_, &QPushButton::clicked, this, &CommunityPanel::invite);
     connect(manage_, &QPushButton::clicked, this, &CommunityPanel::manage);
-    auto* content = new QSplitter(conversation);
+    auto* content = new QSplitter(chatPage);
     content->setChildrenCollapsible(false);
     auto* column = new QWidget(content);
     auto* columnLayout = new QVBoxLayout(column);
     columnLayout->setContentsMargins(0, 0, 0, 0);
     columnLayout->setSpacing(0);
-    auto* center = new QSplitter(Qt::Vertical, column);
-    stage_ = new ScreenStage(center);
-    transcript_ = new QTextBrowser(center);
+    stage_ = new ScreenStage(stagePage);
+    stageLayout->addWidget(stage_);
+    transcript_ = new QTextBrowser(column);
     transcript_->setObjectName("communityTranscript");
     transcript_->setMinimumHeight(120);
-    transcript_->document()->setDocumentMargin(12);
-    center->addWidget(stage_);
-    center->addWidget(transcript_);
-    center->setStretchFactor(0, 2);
-    center->setStretchFactor(1, 1);
-    columnLayout->addWidget(center, 1);
+    transcript_->document()->setDocumentMargin(10);
+    columnLayout->addWidget(transcript_, 1);
     composerFrame_ = new QFrame(column);
     composerFrame_->setObjectName("composerFrame");
     auto* compose = new QHBoxLayout(composerFrame_);
-    compose->setContentsMargins(14, 4, 5, 4);
-    compose->setSpacing(6);
+    compose->setContentsMargins(10, 3, 4, 3);
+    compose->setSpacing(5);
     auto* prefix = new QLabel("#", composerFrame_);
     prefix->setObjectName("composerPrefix");
     composer_ = new QLineEdit(composerFrame_);
@@ -954,8 +952,8 @@ void CommunityPanel::buildUi() {
     compose->addWidget(gif_);
     compose->addWidget(send_);
     auto* composeArea = new QVBoxLayout;
-    composeArea->setContentsMargins(20, 6, 20, 14);
-    composeArea->setSpacing(6);
+    composeArea->setContentsMargins(16, 4, 16, 12);
+    composeArea->setSpacing(4);
     composeArea->addWidget(composerFrame_);
     status_ = new QLabel(column);
     status_->setObjectName("communityStatus");
@@ -966,9 +964,9 @@ void CommunityPanel::buildUi() {
     columnLayout->addLayout(composeArea);
     members_ = new QListWidget(content);
     members_->setObjectName("communityMembers");
-    members_->setMinimumWidth(210);
+    members_->setMinimumWidth(180);
     members_->setContextMenuPolicy(Qt::CustomContextMenu);
-    members_->setIconSize(QSize(34, 34));
+    members_->setIconSize(QSize(26, 26));
     members_->setItemDelegate(new MemberDelegate(members_));
     members_->setMouseTracking(true);
     members_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1001,14 +999,14 @@ void CommunityPanel::buildUi() {
     content->addWidget(column);
     content->addWidget(members_);
     content->setStretchFactor(0, 1);
-    content->setSizes({760, 230});
+    content->setSizes({800, 190});
     chat->addWidget(content, 1);
     voiceControls_ = new QWidget(conversation);
     voiceControls_->setObjectName("communityVoiceControls");
     voiceControls_->setAttribute(Qt::WA_StyledBackground);
     auto* voiceRow = new QHBoxLayout(voiceControls_);
-    voiceRow->setContentsMargins(20, 9, 16, 9);
-    voiceRow->setSpacing(8);
+    voiceRow->setContentsMargins(16, 6, 12, 6);
+    voiceRow->setSpacing(6);
     auto* voiceDot = new QLabel(voiceControls_);
     voiceDot->setPixmap(statusDot(theme::kOnline, devicePixelRatioF()));
     voiceStatus_ = new QLabel(voiceControls_);
@@ -1018,6 +1016,8 @@ void CommunityPanel::buildUi() {
     voiceDetail_->setObjectName("voiceDetail");
     voiceDetail_->setTextFormat(Qt::PlainText);
     voiceDetail_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    stageToggle_ = button("Watch stream", "communityStageToggle", voiceControls_);
+    stageToggle_->hide();
     voice_ = button("Leave voice", "communityVoice", voiceControls_);
     mute_ = button("Mute", "communityMute", voiceControls_);
     deafen_ = button("Deafen", "communityDeafen", voiceControls_);
@@ -1029,23 +1029,26 @@ void CommunityPanel::buildUi() {
     voiceRow->addWidget(voiceStatus_);
     voiceRow->addSpacing(6);
     voiceRow->addWidget(voiceDetail_, 1);
-    for (auto* action : {voice_, mute_, deafen_, share_}) {
+    for (auto* action : {stageToggle_, voice_, mute_, deafen_, share_}) {
         action->setProperty("compact", true);
         voiceRow->addWidget(action);
     }
-    chat->addWidget(voiceControls_);
+    outer->addWidget(voiceControls_);
     voiceControls_->hide();
     split->addWidget(sidebar);
     split->addWidget(conversation);
     split->setStretchFactor(1, 1);
-    split->setSizes({264, 976});
+    split->setSizes({228, 1012});
     layout->addWidget(split, 1);
     connect(voice_, &QPushButton::clicked, this, &CommunityPanel::leaveVoice);
     connect(mute_, &QPushButton::toggled, this, &CommunityPanel::voiceState);
     connect(deafen_, &QPushButton::toggled, this, &CommunityPanel::voiceState);
     connect(share_, &QPushButton::clicked, this, &CommunityPanel::share);
-    connect(stage_, &ScreenStage::watchRequested, this,
-            [this](const QString& peer) { watch(peer, true); });
+    connect(stage_, &ScreenStage::watchRequested, this, [this](const QString& peer) {
+        watch(peer, true);
+        openStage(true);
+    });
+    connect(stageToggle_, &QPushButton::clicked, this, [this] { openStage(!stageOpen_); });
     connect(stage_, &ScreenStage::stopWatchingRequested, this,
             [this](const QString& peer) { watch(peer, false); });
     connect(stage_, &ScreenStage::volumeChanged, this, [this](const QString& peer, int percent) {
@@ -2087,11 +2090,14 @@ void CommunityPanel::select(QTreeWidgetItem* item) {
     if (node_->communities().value(cid).channels.value(channel).type == "voice") {
         selectedVoiceCid_ = cid;
         selectedVoiceChannel_ = channel;
+        if (cid == voiceCid_ && channel == voiceChannel_)
+            openStage(true);
         refresh();
         return;
     }
     selectedVoiceCid_.clear();
     selectedVoiceChannel_.clear();
+    openStage(false);
     cid_ = cid;
     channel_ = channel;
     unread_[key(cid_, channel_)] = 0;
@@ -2180,7 +2186,7 @@ void CommunityPanel::refresh() {
         }
         if (self.name.isEmpty())
             self.name = name_->text().trimmed();
-        userAvatar_->setPixmap(profileAvatar(self, 34, devicePixelRatioF()));
+        userAvatar_->setPixmap(profileAvatar(self, 28, devicePixelRatioF()));
         userName_->setText(self.name.isEmpty() ? "Not connected" : self.name);
         const auto voiceModel = usable ? node_->communities().value(voiceCid_) : community::Model{};
         userState_->setText(!online_ ? "offline"
@@ -2236,6 +2242,8 @@ void CommunityPanel::refresh() {
             if (image.canRead() && image.size().width() <= 512 && image.size().height() <= 512)
                 root->setIcon(0, QIcon(QPixmap::fromImage(image.read())));
         }
+        if (root->icon(0).isNull())
+            root->setIcon(0, QIcon(theme::communityMark(model.name, 16, devicePixelRatioF())));
         for (const auto& channel : orderedChannels(model)) {
             const auto unread = unread_.value(key(model.id, channel.id));
             const auto count =
@@ -2263,7 +2271,7 @@ void CommunityPanel::refresh() {
                                                       node_->online(model.id).contains(member.id);
                                            }));
             if (channel.type == "voice")
-                child->setIcon(0, voiceChannelIcon(devicePixelRatioF()));
+                child->setIcon(0, theme::voiceIcon(devicePixelRatioF()));
             child->setData(0, Qt::UserRole, model.id);
             child->setData(0, Qt::UserRole + 1, channel.id);
             if (channel.type == "voice")
@@ -2306,19 +2314,19 @@ void CommunityPanel::refresh() {
                 participant->setData(0, Qt::UserRole, model.id);
                 // Tree item padding is outside the widget's content rectangle.
                 // Leave room for the avatar plus both the row and item insets.
-                participant->setSizeHint(0, QSize(160, 44));
+                participant->setSizeHint(0, QSize(160, 30));
                 auto* row = new QWidget(tree_);
                 row->setObjectName("voiceParticipantRow");
                 row->setAccessibleName(label + ", " + activity.join(", "));
                 auto* line = new QHBoxLayout(row);
-                line->setContentsMargins(2, 3, 6, 3);
-                line->setSpacing(6);
+                line->setContentsMargins(2, 1, 6, 1);
+                line->setSpacing(4);
                 auto* profile = button(QString(label).replace('&', "&&"), "voiceMemberProfile",
                                        row);
                 profile->setProperty("peer", peer.id);
-                profile->setIcon(QIcon(profileAvatar(peer, 28, devicePixelRatioF())));
-                profile->setIconSize(QSize(28, 28));
-                profile->setMinimumHeight(32);
+                profile->setIcon(QIcon(profileAvatar(peer, 20, devicePixelRatioF())));
+                profile->setIconSize(QSize(20, 20));
+                profile->setMinimumHeight(26);
                 profile->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
                 profile->setToolTip("View " + peer.name + "'s profile");
                 profile->setAccessibleName("View profile: " + label);
@@ -2337,8 +2345,15 @@ void CommunityPanel::refresh() {
                     indicator->setFixedSize(16, 16);
                     line->addWidget(indicator);
                 }
+                if (!state.muted && !state.deafened) {
+                    auto* mic = new QLabel(row);
+                    mic->setObjectName("voiceMic");
+                    mic->setPixmap(theme::micIcon(false, devicePixelRatioF()));
+                    mic->setFixedSize(16, 16);
+                    line->addWidget(mic);
+                }
                 participant->setSizeHint(0,
-                                         QSize(160, std::max(44, row->sizeHint().height() + 10)));
+                                         QSize(160, std::max(30, row->sizeHint().height() + 2)));
                 tree_->setItemWidget(participant, 0, row);
                 paintSpeaking(row, speaking_.contains(peer.id));
                 if (peer.id != node_->peerId()) {
@@ -2358,7 +2373,7 @@ void CommunityPanel::refresh() {
                 auto* join = button(voiceCid_.isEmpty() ? "Join voice" : "Switch to this channel",
                                     "communityJoinVoice", tree_);
                 join->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                action->setSizeHint(0, QSize(160, 36));
+                action->setSizeHint(0, QSize(160, 32));
                 tree_->setItemWidget(action, 0, join);
                 connect(join, &QPushButton::clicked, this, &CommunityPanel::joinVoice);
             }
@@ -2409,8 +2424,13 @@ void CommunityPanel::refresh() {
     const auto channel = model.channels.value(channel_);
     const bool member = model.isMember(node_->peerId());
     const bool textChannel = member && channel.type == "text";
-    const auto channelLabel = (channel.type == "text" ? "# " : "") + channel.name;
-    heading_->setText(model.id.isEmpty() ? "Your communities" : channelLabel);
+    heading_->setText(model.id.isEmpty()
+                          ? "Your communities"
+                          : (channel.type == "text"
+                                 ? QString("<span style='color:%1;font-weight:400'>#</span>&nbsp;")
+                                       .arg(theme::kDim)
+                                 : QString()) +
+                                channel.name.toHtmlEscaped());
     topic_->setText(model.id.isEmpty()
                         ? "Create a community or join with an invite link or QR image."
                         : !channel.topic.isEmpty()
@@ -2447,7 +2467,7 @@ void CommunityPanel::refresh() {
     for (const auto& peer : people) {
         const bool here = onlineHere.contains(peer.id);
         auto* item = new QListWidgetItem(peer.name, members_);
-        item->setIcon(QIcon(profileAvatar(peer, 34, devicePixelRatioF())));
+        item->setIcon(QIcon(profileAvatar(peer, 26, devicePixelRatioF())));
         item->setData(Qt::UserRole, peer.id);
         item->setData(kPresentRole, here);
         item->setToolTip("View " + peer.name + "'s profile");
@@ -2489,21 +2509,24 @@ void CommunityPanel::refresh() {
         }
         voiceStatus_->setText("Voice  ·  " + voiceModel.channels[voiceChannel_].name);
         QStringList inCall, sharers;
+        QList<QPixmap> audience;
         for (const auto& member : voiceModel.members) {
             const auto state = node_->presence(voiceCid_, member.id);
             if (state.voiceChannel != voiceChannel_ ||
                 !node_->online(voiceCid_).contains(member.id))
                 continue;
             inCall.append(member.name);
+            audience.append(profileAvatar(member, 20, devicePixelRatioF()));
             if (state.sharing)
                 sharers.append(member.name);
         }
-        auto detail = voiceModel.name + "  ·  " + inCall.join(", ");
+        auto detail = "|   " + inCall.join(", ");
         if (!sharers.isEmpty())
-            detail += "  ·  " + sharers.join(", ") + (sharers.size() == 1 ? " is" : " are") +
+            detail += "   |   " + sharers.join(", ") + (sharers.size() == 1 ? " is" : " are") +
                       " sharing";
         voiceDetail_->setText(detail);
         voiceDetail_->setToolTip(detail);
+        stage_->setAudience(audience);
         QSet<QString> active, streaming;
         // Presence is removed when the authenticated connection closes. A
         // metadata sync briefly clears readiness, but must not tear down video.
@@ -2564,6 +2587,22 @@ void CommunityPanel::refresh() {
     }
     else
         voiceStatus_->setText("Voice disconnected");
+    openStage(stageOpen_);
+}
+
+void CommunityPanel::openStage(bool open) {
+    stageOpen_ = open && stage_->count() > 0;
+    views_->setCurrentIndex(stageOpen_ ? 1 : 0);
+    QString sharer;
+    for (const auto& peer : streams_) {
+        sharer = memberName(voiceCid_, peer);
+        break;
+    }
+    stageToggle_->setText(stageOpen_        ? "Back to chat"
+                          : sharer.isEmpty() ? "View my share"
+                                             : "Watch " + sharer);
+    stageToggle_->setVisible(stage_->count() > 0);
+    setFlag(stageToggle_, "primary", !stageOpen_ && !streams_.isEmpty());
 }
 
 void CommunityPanel::openHistory() {
@@ -2655,7 +2694,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
     if (entry.system) {
         transcript_->append(
             "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
-            "<td width='48'></td><td style='color:#b7c0c6'><span style='font-family:"
+            "<td width='42'></td><td style='color:#b7c0c6'><span style='font-family:"
             "\"JetBrains Mono\";font-size:10px;color:#9dccca'>" +
             text(entry.message.sender).toUpper().toHtmlEscaped() + "</span>&nbsp;&nbsp;" +
             text(entry.message.body).toHtmlEscaped().replace('\n', "<br>") + "</td></tr></table>");
@@ -2673,7 +2712,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
     const auto imageUrl = QUrl("profile-avatar:" +
                                community::digest(member.name.toUtf8() + member.avatar));
     transcript_->document()->addResource(QTextDocument::ImageResource, imageUrl,
-                                         profileAvatar(member, 36, devicePixelRatioF()).toImage());
+                                         profileAvatar(member, 30, devicePixelRatioF()).toImage());
     const auto color = chatColor(text(entry.message.color)).name();
     const auto href = "profile://" + cid + '/' + peer;
     const auto link = [&](const QString& content) {
@@ -2740,13 +2779,13 @@ void CommunityPanel::showEntry(const Entry& entry) {
     html += body.mid(written).toHtmlEscaped();
     if (onlyMedia) html.clear();
     transcript_->append(
-        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:14px'><tr>"
-        "<td width='48' valign='top'" + QString(mentioned ? " bgcolor='#453d2c'" : "") + ">" +
-        link("<img src='" + imageUrl.toString() + "' width='36' height='36'>") +
+        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:12px'><tr>"
+        "<td width='42' valign='top'" + QString(mentioned ? " bgcolor='#453d2c'" : "") + ">" +
+        link("<img src='" + imageUrl.toString() + "' width='30' height='30'>") +
         "</td><td valign='top'" + (mentioned ? " bgcolor='#453d2c'" : "") +
         "><p style='margin:0 0 2px 0'>" +
         link("<span style='font-weight:600'>" + member.name.toHtmlEscaped() + "</span>") +
-        "&nbsp;&nbsp;<span style='color:#6f7a84;font-family:\"JetBrains Mono\";font-size:11px'>" +
+        "&nbsp;&nbsp;<span style='color:#6f7a84;font-family:\"JetBrains Mono\";font-size:10px'>" +
         when + "</span></p>" +
         "<p style='margin:0;color:" + theme::kMessage + "'>" + html.replace('\n', "<br>") +
         (entry.undelivered
