@@ -107,10 +107,9 @@ QLabel#connectionStatus { color: #8b959e; font-size: 12px; }
 QWidget#sidebar { background: #24272e; }
 QTreeWidget#communityTree { padding: 0 6px; show-decoration-selected: 0; selection-background-color: transparent; }
 QTreeWidget#communityTree::item { padding: 0; border-radius: 4px; }
-QTreeWidget#communityTree::item:hover { background: #2b2f36; }
-QTreeWidget#communityTree::item:selected { background: #36464a; }
+QTreeWidget#communityTree::item:hover, QTreeWidget#communityTree::item:selected { background: transparent; }
 QTreeWidget#communityTree::branch { background: transparent; }
-QTreeWidget#communityTree::branch:selected, QTreeWidget#communityTree::branch:hover { background: #24272e; }
+QTreeWidget#communityTree::branch:selected, QTreeWidget#communityTree::branch:hover { background: transparent; }
 QTreeWidget#communityTree::branch:has-children:closed { image: url(:/ui/chevron-right.png); }
 QTreeWidget#communityTree::branch:has-children:open { image: url(:/ui/chevron-down.png); }
 QPushButton#voiceMemberProfile { background: transparent; border: 0; padding: 0 2px; text-align: left;

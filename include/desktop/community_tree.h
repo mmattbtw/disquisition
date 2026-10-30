@@ -40,6 +40,9 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void drawRow(QPainter* painter, const QStyleOptionViewItem& option,
+                 const QModelIndex& index) const override;
+    bool viewportEvent(QEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
