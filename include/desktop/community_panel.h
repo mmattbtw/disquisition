@@ -100,6 +100,9 @@ private:
     void stopSharing();
     // Shows the screen share in place of the chat, while there is one to show.
     void openStage(bool open);
+    // Opens or closes the call view after a user action, updating the sidebar.
+    void showCall(bool open);
+    void refreshCall();
     void refreshPip();
     // Tells the call who is watching this user's share.
     void announceViewers();
@@ -172,6 +175,11 @@ private:
     QLabel* brandName_ = nullptr;
     QWidget* brandGap_ = nullptr;
     QStackedWidget* views_ = nullptr;
+    QLabel* callTitle_ = nullptr;
+    QLabel* callSubtitle_ = nullptr;
+    QPushButton* joinCall_ = nullptr;
+    QWidget* stageHolder_ = nullptr;
+    QWidget* callGrid_ = nullptr; // A CallGrid.
     QPushButton* stageToggle_ = nullptr;
     bool stageOpen_ = false;
     // A small live view of a share, shown over the chat while the stage is closed.

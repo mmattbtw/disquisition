@@ -736,6 +736,22 @@ int main(int argc, char** argv) {
     }));
     CHECK(speakingRow()->styleSheet().contains("QWidget#voiceParticipantRow"));
     CHECK(tree->grab().save("community-voice-speaking.png"));
+    {
+        // The call view lights up the same person's tile.
+        window.show();
+        QApplication::processEvents();
+        auto* grid = panel->findChild<QWidget*>("callGrid");
+        CHECK(grid);
+        const bool opened = !grid->isVisible();
+        if (opened)
+            panel->findChild<QPushButton*>("communityStageToggle")->click();
+        QApplication::processEvents();
+        CHECK(grid->isVisible());
+        CHECK(window.grab().save("community-call-speaking.png"));
+        if (opened)
+            panel->findChild<QPushButton*>("communityStageToggle")->click();
+        window.hide();
+    }
     for (int index = 0; index < 12; ++index)
         CHECK(remote.sendPacket(cid, voiceChannel, "audio",
                                 {{"bytes", QString::fromLatin1(QByteArray(640, 0).toBase64())}}) == 1);
