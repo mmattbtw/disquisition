@@ -178,8 +178,7 @@ private:
     QLabel* callTitle_ = nullptr;
     QLabel* callSubtitle_ = nullptr;
     QPushButton* joinCall_ = nullptr;
-    QWidget* stageHolder_ = nullptr;
-    QWidget* callGrid_ = nullptr; // A CallGrid.
+    ScreenStage* otherCall_ = nullptr;
     QPushButton* stageToggle_ = nullptr;
     bool stageOpen_ = false;
     // A small live view of a share, shown over the chat while the stage is closed.

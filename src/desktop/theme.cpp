@@ -189,6 +189,14 @@ QFrame#streamTile QPushButton#streamAudience { background: transparent; border: 
     font-weight: 500; padding: 2px 8px; }
 QFrame#streamTile QPushButton#streamAudience:hover { background: #22262d; border-color: #3a424c; color: #e6eae9; }
 QLabel#streamInvitation { color: #b7c0c6; font-size: 14px; }
+QWidget#streamHeader { background: transparent; }
+QFrame#streamTile QLabel#streamNameplate { background: rgba(42, 46, 54, 215); color: #edf0ef; font-size: 12px; font-weight: 600;
+    padding: 3px 8px; border-radius: 6px; }
+QFrame#streamTile QLabel#streamQuality { background: rgba(18, 20, 24, 200); color: #e6eae9; font-family: "JetBrains Mono", monospace;
+    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+QPushButton#stageStripToggle { background: #1f2228; border: 1px solid #3a424c; border-radius: 10px; color: #b7c0c6;
+    font-size: 11px; font-weight: 600; padding: 0 10px; }
+QPushButton#stageStripToggle:hover { background: #2c3038; color: #edf0ef; }
 QLabel#stageChip { color: #b7c0c6; font-size: 12px; border: 1px solid #3a424c; border-radius: 6px; padding: 3px 9px; }
 QLabel#stageChip[good="true"] { color: #93e08e; border-color: #3e6a3b; }
 QSlider#streamVolume::groove:horizontal { background: #33373f; height: 4px; border-radius: 2px; }

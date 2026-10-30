@@ -280,150 +280,6 @@ QLabel* fieldLabel(const QString& text, QWidget* parent) {
     return label;
 }
 
-struct CallParticipant {
-    QString id;
-    QString name;
-    QPixmap avatar;
-    bool muted = false;
-    bool deafened = false;
-    bool sharing = false;
-};
-
-// Everyone in a voice channel as 16:9 tiles, sized like a video call grid.
-// A tile glows green while its person is talking.
-class CallGrid final : public QWidget {
-public:
-    explicit CallGrid(std::function<void(const QString&, const QPoint&)> clicked,
-                      QWidget* parent)
-        : QWidget(parent), clicked_(std::move(clicked)) {
-        setObjectName("callGrid");
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    }
-    void setParticipants(const QList<CallParticipant>& people, const QSet<QString>& speaking) {
-        people_ = people;
-        speaking_ = speaking;
-        update();
-    }
-    void setSpeaking(const QString& peer, bool speaking) {
-        if (speaking)
-            speaking_.insert(peer);
-        else
-            speaking_.remove(peer);
-        update();
-    }
-    int count() const { return static_cast<int>(people_.size()); }
-    bool speaking(const QString& peer) const { return speaking_.contains(peer); }
-
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform);
-        if (people_.isEmpty()) {
-            painter.setPen(QColor(theme::kMuted));
-            painter.drawText(rect(), Qt::AlignCenter, "No one is in this channel yet.");
-            return;
-        }
-        const auto tiles = layoutTiles();
-        for (int i = 0; i < tiles.size(); ++i)
-            paintTile(painter, tiles[i], people_[i]);
-    }
-    void mouseReleaseEvent(QMouseEvent* event) override {
-        const auto tiles = layoutTiles();
-        for (int i = 0; i < tiles.size(); ++i)
-            if (tiles[i].contains(event->position()))
-                clicked_(people_[i].id, event->globalPosition().toPoint());
-    }
-
-private:
-    QList<QRectF> layoutTiles() const {
-        constexpr qreal kGap = 12, kInset = 8, kMaxWidth = 440;
-        const QRectF area = QRectF(rect()).adjusted(kInset, kInset, -kInset, -kInset);
-        const int n = static_cast<int>(people_.size());
-        int bestColumns = 1;
-        qreal bestWidth = 0;
-        for (int columns = 1; columns <= n; ++columns) {
-            const int rows = (n + columns - 1) / columns;
-            const qreal width =
-                std::min((area.width() - (columns - 1) * kGap) / columns,
-                         (area.height() - (rows - 1) * kGap) / rows * 16.0 / 9.0);
-            if (width > bestWidth + 0.5) {
-                bestWidth = width;
-                bestColumns = columns;
-            }
-        }
-        const qreal width = std::max<qreal>(0, std::min(bestWidth, kMaxWidth));
-        const qreal height = width * 9.0 / 16.0;
-        const int rows = (n + bestColumns - 1) / bestColumns;
-        const qreal top = area.center().y() - (rows * height + (rows - 1) * kGap) / 2;
-        QList<QRectF> tiles;
-        for (int i = 0; i < n; ++i) {
-            const int row = i / bestColumns;
-            // The last row is centered when it isn't full.
-            const int inRow = std::min(bestColumns, n - row * bestColumns);
-            const qreal left = area.center().x() - (inRow * width + (inRow - 1) * kGap) / 2;
-            tiles.append(QRectF(left + (i % bestColumns) * (width + kGap),
-                                top + row * (height + kGap), width, height));
-        }
-        return tiles;
-    }
-
-    void paintTile(QPainter& painter, const QRectF& tile, const CallParticipant& person) const {
-        const bool talking = speaking_.contains(person.id);
-        const qreal radius = 12;
-        if (talking) {
-            for (int i = 6; i >= 1; --i) {
-                painter.setPen(QPen(QColor(126, 217, 87, 70 - i * 10), 1));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(tile.adjusted(-i, -i, i, i), radius + i, radius + i);
-            }
-        }
-        QRadialGradient fill(tile.center(), tile.width() * 0.7);
-        fill.setColorAt(0, talking ? QColor("#26352a") : QColor("#22252c"));
-        fill.setColorAt(1, talking ? QColor("#1d2622") : QColor("#1c1f25"));
-        painter.setBrush(fill);
-        painter.setPen(QPen(talking ? QColor(theme::kOnline) : QColor("#30353d"), talking ? 2 : 1));
-        painter.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
-        const qreal side = std::min<qreal>(96, tile.height() * 0.42);
-        const QRectF avatar(tile.center().x() - side / 2, tile.center().y() - side / 2 - side * 0.12,
-                            side, side);
-        painter.drawPixmap(avatar.toRect(), person.avatar);
-        if (tile.height() < 60)
-            return;
-        QFont font = this->font();
-        font.setPixelSize(tile.height() < 110 ? 11 : 12);
-        font.setWeight(QFont::DemiBold);
-        painter.setFont(font);
-        const QFontMetricsF metrics(font);
-        const qreal pad = tile.height() < 110 ? 6 : 10;
-        const auto name = metrics.elidedText(person.name, Qt::ElideRight, tile.width() - pad * 2 - 52);
-        const QRectF label(tile.left() + pad, tile.bottom() - pad - metrics.height() - 4,
-                           metrics.horizontalAdvance(name) + 14, metrics.height() + 4);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor(18, 20, 24, 190));
-        painter.drawRoundedRect(label, 5, 5);
-        painter.setPen(QColor("#edf0ef"));
-        painter.drawText(label, Qt::AlignCenter, name);
-        QList<QPixmap> marks;
-        const qreal scale = devicePixelRatioF();
-        if (person.sharing)
-            marks.append(voiceIndicator("sharing screen"));
-        if (person.muted)
-            marks.append(theme::micIcon(true, scale));
-        if (person.deafened)
-            marks.append(voiceIndicator("deafened"));
-        qreal x = tile.right() - pad - 16;
-        for (const auto& mark : marks) {
-            painter.drawPixmap(QPointF(x, label.center().y() - 8), mark);
-            x -= 20;
-        }
-    }
-
-    std::function<void(const QString&, const QPoint&)> clicked_;
-    QList<CallParticipant> people_;
-    QSet<QString> speaking_;
-};
-
 // Moves the window when dragged, like a title bar, and zooms it on a double click.
 class DragBar final : public QWidget {
 public:
@@ -911,7 +767,7 @@ void CommunityPanel::setSpeaking(const QString& peer, bool speaking) {
         if (auto* row = tree_->itemWidget(*item, 0))
             paintSpeaking(row, speaking);
     }
-    static_cast<CallGrid*>(callGrid_)->setSpeaking(peer, speaking);
+    stage_->setSpeaking(peer, speaking);
 }
 
 void CommunityPanel::buildUi() {
@@ -1157,18 +1013,18 @@ void CommunityPanel::buildUi() {
     auto* columnLayout = new QVBoxLayout(column);
     columnLayout->setContentsMargins(0, 0, 0, 0);
     columnLayout->setSpacing(0);
-    stageHolder_ = new QWidget(stagePage);
-    auto* holderLayout = new QVBoxLayout(stageHolder_);
-    holderLayout->setContentsMargins(0, 0, 0, 0);
-    stage_ = new ScreenStage(stageHolder_);
-    holderLayout->addWidget(stage_);
-    stageLayout->addWidget(stageHolder_, 1);
-    callGrid_ = new CallGrid(
-        [this](const QString& peer, const QPoint& at) {
-            showProfile(selectedVoiceCid_.isEmpty() ? voiceCid_ : selectedVoiceCid_, peer, at);
-        },
-        stagePage);
-    stageLayout->addWidget(callGrid_, 1);
+    stage_ = new ScreenStage(stagePage);
+    stageLayout->addWidget(stage_, 1);
+    // Another channel's call has nobody's shares to show, only its people.
+    otherCall_ = new ScreenStage(stagePage);
+    otherCall_->setObjectName("otherCall");
+    stageLayout->addWidget(otherCall_, 1);
+    for (auto* call : {stage_, otherCall_})
+        connect(call, &ScreenStage::participantClicked, this,
+                [this](const QString& peer, const QPoint& at) {
+                    showProfile(selectedVoiceCid_.isEmpty() ? voiceCid_ : selectedVoiceCid_, peer,
+                                at);
+                });
     transcript_ = new QTextBrowser(column);
     transcript_->setObjectName("communityTranscript");
     transcript_->setMinimumHeight(120);
@@ -2907,7 +2763,7 @@ void CommunityPanel::refreshCall() {
     const auto model = node_->communities().value(selectedVoiceCid_);
     const auto channel = model.channels.value(selectedVoiceChannel_);
     const bool current = selectedVoiceCid_ == voiceCid_ && selectedVoiceChannel_ == voiceChannel_;
-    QList<CallParticipant> people;
+    QList<StageParticipant> people;
     const auto online = online_ ? node_->online(model.id) : QSet<QString>{};
     for (const auto& member : model.members) {
         const auto state = node_->presence(model.id, member.id);
@@ -2921,20 +2777,13 @@ void CommunityPanel::refreshCall() {
     std::sort(people.begin(), people.end(), [](const auto& a, const auto& b) {
         return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
     });
-    static_cast<CallGrid*>(callGrid_)->setParticipants(people, speaking_);
+    stage_->setVisible(current);
+    otherCall_->setVisible(!current);
+    (current ? stage_ : otherCall_)->setParticipants(people);
     callTitle_->setText(channel.name);
     callSubtitle_->setText(model.name + "  ·  " + QString::number(people.size()) + " in voice");
     joinCall_->setText(voiceCid_.isEmpty() ? "Join voice" : "Switch to this channel");
     joinCall_->setVisible(online_ && model.isMember(node_->peerId()) && !current);
-    // A share takes the room; the people in the call become a strip beneath it.
-    const bool sharing = current && stage_->count() > 0;
-    stageHolder_->setVisible(sharing);
-    if (sharing)
-        callGrid_->setFixedHeight(people.isEmpty() ? 0 : 104);
-    else {
-        callGrid_->setMinimumHeight(0);
-        callGrid_->setMaximumHeight(QWIDGETSIZE_MAX);
-    }
 }
 
 void CommunityPanel::announceViewers() {

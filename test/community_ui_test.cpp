@@ -740,13 +740,17 @@ int main(int argc, char** argv) {
         // The call view lights up the same person's tile.
         window.show();
         QApplication::processEvents();
-        auto* grid = panel->findChild<QWidget*>("callGrid");
-        CHECK(grid);
-        const bool opened = !grid->isVisible();
+        auto* call = panel->findChild<ScreenStage*>();
+        CHECK(call);
+        const bool opened = !call->isVisible();
         if (opened)
             panel->findChild<QPushButton*>("communityStageToggle")->click();
         QApplication::processEvents();
-        CHECK(grid->isVisible());
+        CHECK(call->isVisible());
+        bool glowing = false;
+        for (auto* person : call->findChildren<ParticipantTile*>())
+            glowing |= person->participant().id == remote.peerId() && person->speaking();
+        CHECK(glowing);
         CHECK(window.grab().save("community-call-speaking.png"));
         if (opened)
             panel->findChild<QPushButton*>("communityStageToggle")->click();
