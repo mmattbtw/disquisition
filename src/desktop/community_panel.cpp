@@ -2267,16 +2267,9 @@ void CommunityPanel::refresh() {
     connect_->setText(online_ ? "Disconnect" : "Connect");
     setFlag(connect_, "primary", !online_);
     name_->setEnabled(!online_);
-    if (usable && online_) {
-        const QUrl endpoint(node_->endpoint());
+    if (usable && online_)
         connectionStatus_->setText(
-            QString("<span style='color:%1'>●</span>&nbsp; Connected&nbsp; <span style='color:%2'>·"
-                    "</span>&nbsp; %3")
-                .arg(theme::kOnline, theme::kDim,
-                     (endpoint.scheme() == "relay" ? endpoint.authority()
-                                                   : "direct " + endpoint.authority())
-                         .toHtmlEscaped()));
-    }
+            QString("<span style='color:%1'>●</span>&nbsp; Connected").arg(theme::kOnline));
     else
         connectionStatus_->setText(
             QString("<span style='color:%1'>●</span>&nbsp; Offline").arg(theme::kDim));
