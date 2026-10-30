@@ -23,6 +23,7 @@
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
+#include <QFrame>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -867,6 +868,15 @@ int main(int argc, char** argv) {
     window.show();
     QApplication::processEvents();
     CHECK(window.grab().save("community-screen-share.png"));
+    // Back in the chat, the watched stream keeps playing in a small window.
+    auto* pip = panel->findChild<QFrame*>("streamPip");
+    CHECK(pip && pip->isHidden());
+    panel->findChild<QPushButton*>("communityStageToggle")->click();
+    QApplication::processEvents();
+    CHECK(pip->isVisible() && transcript->isVisible());
+    CHECK(window.grab().save("community-pip.png"));
+    pip->findChild<QPushButton*>("streamPipClose")->click();
+    CHECK(pip->isHidden());
     window.hide();
     // A viewer joining a static screen needs an immediately requested keyframe.
     video.clear();

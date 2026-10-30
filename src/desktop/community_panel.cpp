@@ -17,6 +17,7 @@
 #include <QFileDialog>
 #include <QFileOpenEvent>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImageReader>
 #include <QInputDialog>
@@ -27,6 +28,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QNetworkAccessManager>
 #include <QPainter>
 #include <QPainterPath>
@@ -263,6 +265,24 @@ QLabel* fieldLabel(const QString& text, QWidget* parent) {
     label->setFont(monoFont(11, 1.4));
     return label;
 }
+
+// Lets the whole picture-in-picture act as one button.
+class ClickFrame final : public QFrame {
+public:
+    ClickFrame(std::function<void()> clicked, QWidget* parent)
+        : QFrame(parent), clicked_(std::move(clicked)) {
+        setCursor(Qt::PointingHandCursor);
+    }
+
+protected:
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && rect().contains(event->position().toPoint()))
+            clicked_();
+    }
+
+private:
+    std::function<void()> clicked_;
+};
 
 class ChannelDelegate final : public QStyledItemDelegate {
 public:
@@ -615,7 +635,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     encoded += chunk;
                 auto image = decoders_[node_->peerId()].decode(frame, keyframe, encoded);
                 if (!image.isNull())
-                    stage_->showFrame(node_->peerId(), image, encoded.size());
+                    showFrame(node_->peerId(), image, encoded.size());
                 const auto watchers = watchers_;
                 for (const auto& peer : watchers)
                     attempt([&] {
@@ -962,6 +982,38 @@ void CommunityPanel::buildUi() {
     status_->hide();
     composeArea->addWidget(status_);
     columnLayout->addLayout(composeArea);
+    pip_ = new ClickFrame([this] { openStage(true); }, column);
+    pip_->setObjectName("streamPip");
+    pip_->setToolTip("Open the stream");
+    pip_->setFixedSize(304, 171);
+    auto* pipLayout = new QGridLayout(pip_);
+    pipLayout->setContentsMargins(1, 1, 1, 1);
+    pipView_ = new StreamView(pip_);
+    pipView_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    pipLayout->addWidget(pipView_, 0, 0);
+    auto* pipBar = new QHBoxLayout;
+    pipBar->setContentsMargins(8, 7, 6, 0);
+    pipBar->setSpacing(6);
+    auto* pipLive = new QLabel("LIVE", pip_);
+    pipLive->setObjectName("live");
+    pipName_ = new QLabel(pip_);
+    pipName_->setObjectName("pipName");
+    pipName_->setTextFormat(Qt::PlainText);
+    auto* pipClose = button(QString::fromUtf8("\u2715"), "streamPipClose", pip_);
+    pipClose->setToolTip("Hide");
+    pipClose->setAccessibleName("Hide picture in picture");
+    pipClose->setFixedSize(22, 22);
+    pipBar->addWidget(pipLive);
+    pipBar->addWidget(pipName_);
+    pipBar->addStretch(1);
+    pipBar->addWidget(pipClose, 0, Qt::AlignTop);
+    pipLayout->addLayout(pipBar, 0, 0, Qt::AlignTop);
+    pip_->hide();
+    connect(pipClose, &QPushButton::clicked, this, [this] {
+        pipDismissed_ = pipPeer_;
+        refreshPip();
+    });
+    transcript_->installEventFilter(this);
     members_ = new QListWidget(content);
     members_->setObjectName("communityMembers");
     members_->setMinimumWidth(180);
@@ -2603,6 +2655,46 @@ void CommunityPanel::openStage(bool open) {
                                              : "Watch " + sharer);
     stageToggle_->setVisible(stage_->count() > 0);
     setFlag(stageToggle_, "primary", !stageOpen_ && !streams_.isEmpty());
+    refreshPip();
+}
+
+void CommunityPanel::refreshPip() {
+    // Prefer a stream you chose to watch, then your own share.
+    QString peer;
+    for (const auto& candidate : std::as_const(streams_))
+        if (watching_.contains(candidate)) {
+            peer = candidate;
+            break;
+        }
+    if (peer.isEmpty() && capture_.running() && node_)
+        peer = node_->peerId();
+    if (peer != pipDismissed_)
+        pipDismissed_.clear();
+    const bool show = !stageOpen_ && !peer.isEmpty() && peer != pipDismissed_ &&
+                      stage_->drawing(peer) != nullptr;
+    if (show && peer != pipPeer_) {
+        pipView_->setDrawing(stage_->drawing(peer));
+        pipView_->setImage(stage_->image(peer));
+    }
+    pipPeer_ = show ? peer : QString();
+    if (show)
+        pipName_->setText(peer == node_->peerId() ? "Your screen" : memberName(voiceCid_, peer));
+    pip_->setVisible(show);
+    placePip();
+}
+
+void CommunityPanel::placePip() {
+    if (!pip_ || !pip_->isVisibleTo(pip_->parentWidget()))
+        return;
+    const QRect area = transcript_->geometry();
+    pip_->move(area.right() - pip_->width() - 14, area.bottom() - pip_->height() - 10);
+    pip_->raise();
+}
+
+void CommunityPanel::showFrame(const QString& peer, const QImage& image, qsizetype encodedBytes) {
+    stage_->showFrame(peer, image, encodedBytes);
+    if (peer == pipPeer_ && pip_->isVisible())
+        pipView_->setImage(image);
 }
 
 void CommunityPanel::openHistory() {
@@ -3034,7 +3126,7 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
             if (!image.isNull())
                 lastScreenFrames_[peer] = QDateTime::currentMSecsSinceEpoch();
             if (!image.isNull())
-                stage_->showFrame(peer, image, encoded.size());
+                showFrame(peer, image, encoded.size());
         }
     }
 }
@@ -3144,6 +3236,7 @@ void CommunityPanel::share() {
     startDrawing(node_->peerId(), true);
     presenterOverlay_ = std::make_unique<PresenterOverlay>(*dialog.chosen(), stage_->drawing(node_->peerId()), this);
     voiceState();
+    openStage(stageOpen_);
 }
 
 void CommunityPanel::stopSharing() {
@@ -3158,6 +3251,7 @@ void CommunityPanel::stopSharing() {
     }
     if (wasSharing)
         voiceState();
+    openStage(stageOpen_);
 }
 
 void CommunityPanel::watch(const QString& peer, bool enabled) {
@@ -3183,6 +3277,7 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
         }
         stage_->setWatching(peer, enabled);
     });
+    refreshPip();
 }
 
 void CommunityPanel::setStreamVolume(const QString& peer, int percent) {
@@ -3242,6 +3337,8 @@ void CommunityPanel::dropEvent(QDropEvent* event) {
 }
 
 bool CommunityPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == transcript_ && event->type() == QEvent::Resize)
+        placePip();
     if (watched == composer_ &&
         (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut))
         setFlag(composerFrame_, "focused", event->type() == QEvent::FocusIn);

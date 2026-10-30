@@ -405,6 +405,11 @@ void ScreenStage::setAudience(const QList<QPixmap>& avatars) {
         tile->setAudience(avatars);
 }
 
+QImage ScreenStage::image(const QString& name) const {
+    StreamTile* tile = find(name);
+    return tile ? tile->image() : QImage();
+}
+
 ScreenDrawing* ScreenStage::drawing(const QString& name) const {
     StreamTile* tile = find(name);
     return tile ? tile->drawing() : nullptr;

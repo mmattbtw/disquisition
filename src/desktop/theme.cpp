@@ -173,7 +173,14 @@ QFrame#streamTile QLabel { background: transparent; }
 QWidget#streamBar { background: #1a1d22; }
 QLabel#streamName { font-weight: 600; color: #edf0ef; }
 QLabel#streamSharing { color: #8b959e; }
-QFrame#streamTile QLabel#live { background: #ff3131; color: #ffffff; font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+QFrame#streamPip { background: #121418; border: 1px solid #4a525d; border-radius: 10px; }
+QFrame#streamPip QLabel { background: transparent; }
+QLabel#pipName { color: #edf0ef; font-size: 12px; font-weight: 600; background: rgba(18, 20, 24, 170);
+    border-radius: 4px; padding: 1px 6px; }
+QPushButton#streamPipClose { background: rgba(18, 20, 24, 170); border: 0; border-radius: 11px; color: #b7c0c6;
+    padding: 0; font-size: 11px; }
+QPushButton#streamPipClose:hover { background: #33373f; color: #ffffff; }
+QFrame#streamTile QLabel#live, QFrame#streamPip QLabel#live { background: #ff3131; color: #ffffff; font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
 QLabel#streamStats { color: #6f7a84; font-family: "JetBrains Mono", monospace; font-size: 11px; }
 QFrame#streamTile QPushButton { padding: 3px 10px; font-size: 12px; }
 QFrame#streamTile QPushButton#primary { padding: 6px 16px; font-size: 13px; }

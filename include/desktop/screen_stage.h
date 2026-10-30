@@ -121,6 +121,8 @@ public:
     void showFrame(const QString& name, const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing(const QString& name) const;
     int count() const { return static_cast<int>(tiles_.size()); }
+    // The newest frame of a stream, or a null image.
+    QImage image(const QString& name) const;
     void setAudience(const QList<QPixmap>& avatars);
 
 signals:

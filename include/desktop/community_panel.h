@@ -29,6 +29,7 @@ class ChatMedia;
 class GifPicker;
 class GifSearch;
 class ScreenStage;
+class StreamView;
 class NotificationCenter;
 class MentionCompleter;
 
@@ -95,6 +96,9 @@ private:
     void stopSharing();
     // Shows the screen share in place of the chat, while there is one to show.
     void openStage(bool open);
+    void refreshPip();
+    void placePip();
+    void showFrame(const QString& peer, const QImage& image, qsizetype encodedBytes);
     void watch(const QString& peer, bool enabled);
     void setStreamVolume(const QString& peer, int percent);
     void applyVoiceSettings(const QString& peer);
@@ -156,6 +160,12 @@ private:
     QStackedWidget* views_ = nullptr;
     QPushButton* stageToggle_ = nullptr;
     bool stageOpen_ = false;
+    // A small live view of a share, shown over the chat while the stage is closed.
+    QFrame* pip_ = nullptr;
+    StreamView* pipView_ = nullptr;
+    QLabel* pipName_ = nullptr;
+    QString pipPeer_;
+    QString pipDismissed_;
     QAction* leaveAction_ = nullptr;
     QWidget* joining_ = nullptr;
     QLabel* voiceStatus_ = nullptr;
