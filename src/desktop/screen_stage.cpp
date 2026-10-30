@@ -129,9 +129,13 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     footer->setContentsMargins(14, 8, 14, 10);
     footer->addWidget(drawingState_);
     footer->addStretch();
-    audience_ = new QLabel(this);
+    audience_ = new QPushButton(this);
     audience_->setObjectName("streamAudience");
+    audience_->setToolTip("See who is watching");
+    audience_->setCursor(Qt::PointingHandCursor);
+    audience_->hide();
     footer->addWidget(audience_);
+    connect(audience_, &QPushButton::clicked, this, &StreamTile::showAudience);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(1, 1, 1, 1);
@@ -166,16 +170,14 @@ void StreamTile::refreshDrawingState() {
     placeDrawingControls();
 }
 
-void StreamTile::setAudience(const QList<QPixmap>& avatars) {
-    constexpr int kSide = 20, kStep = 16, kShown = 5;
+void StreamTile::setAudience(const QList<QPixmap>& avatars, const QStringList& names) {
+    audienceAvatars_ = avatars;
+    audienceNames_ = names;
+    constexpr int kSide = 20, kStep = 15, kShown = 5;
     const int shown = qMin<int>(avatars.size(), kShown);
-    const QString more = avatars.size() > kShown ? "+" + QString::number(avatars.size() - kShown)
-                                                 : QString();
-    QFont font = audience_->font();
-    font.setPixelSize(11);
-    const int extra = more.isEmpty() ? 0 : QFontMetrics(font).horizontalAdvance(more) + 8;
     const qreal scale = devicePixelRatioF();
-    QPixmap stack(QSize(shown ? (shown - 1) * kStep + kSide + 2 + extra : 1, kSide + 2) * scale);
+    const QSize size(shown ? (shown - 1) * kStep + kSide + 2 : 1, kSide + 2);
+    QPixmap stack(size * scale);
     stack.setDevicePixelRatio(scale);
     stack.fill(Qt::transparent);
     QPainter painter(&stack);
@@ -187,15 +189,23 @@ void StreamTile::setAudience(const QList<QPixmap>& avatars) {
         painter.drawRoundedRect(tile.adjusted(-0.5, -0.5, 0.5, 0.5), 6, 6);
         painter.drawPixmap(tile.toRect(), avatars[i]);
     }
-    if (!more.isEmpty()) {
-        painter.setFont(font);
-        painter.setPen(QColor("#8b959e"));
-        painter.drawText(QRectF((shown - 1) * kStep + kSide + 8, 0, extra, kSide + 2),
-                         Qt::AlignLeft | Qt::AlignVCenter, more);
-    }
     painter.end();
-    audience_->setPixmap(stack);
-    audience_->setVisible(shown > 0);
+    audience_->setIcon(QIcon(stack));
+    audience_->setIconSize(size);
+    audience_->setText(QString("%1 watching").arg(avatars.size()));
+    audience_->setVisible(!avatars.isEmpty());
+}
+
+void StreamTile::showAudience() {
+    QMenu menu(this);
+    menu.setObjectName("streamAudienceList");
+    auto* heading = menu.addAction(QString::fromUtf8("WATCHING \u2014 %1").arg(audienceNames_.size()));
+    heading->setEnabled(false);
+    menu.addSeparator();
+    for (int i = 0; i < audienceNames_.size(); ++i)
+        menu.addAction(QIcon(audienceAvatars_.value(i)), audienceNames_[i]);
+    menu.exec(audience_->mapToGlobal(QPoint(audience_->width(), 0)) -
+              QPoint(menu.sizeHint().width(), menu.sizeHint().height() + 4));
 }
 
 void StreamTile::placeDrawingControls() {
@@ -328,7 +338,6 @@ void ScreenStage::addStream(const QString& name, bool own, const QString& label)
     connect(tile, &StreamTile::fullscreenClicked, this, [this, name] { toggleFullscreen(name); });
     connect(tile, &StreamTile::volumeChanged, this,
             [this, name](int percent) { emit volumeChanged(name, percent); });
-    tile->setAudience(audience_);
     // Your own share comes first, like in a call.
     if (own) {
         tiles_.prepend(tile);
@@ -399,10 +408,10 @@ StreamTile* ScreenStage::find(const QString& name) const {
     return nullptr;
 }
 
-void ScreenStage::setAudience(const QList<QPixmap>& avatars) {
-    audience_ = avatars;
-    for (StreamTile* tile : std::as_const(tiles_))
-        tile->setAudience(avatars);
+void ScreenStage::setAudience(const QString& name, const QList<QPixmap>& avatars,
+                              const QStringList& names) {
+    if (StreamTile* tile = find(name))
+        tile->setAudience(avatars, names);
 }
 
 QImage ScreenStage::image(const QString& name) const {

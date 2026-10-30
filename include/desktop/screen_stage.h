@@ -7,6 +7,7 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 #include "desktop/screen_drawing.h"
@@ -61,8 +62,9 @@ public:
     void setDetail(const QString& detail) { detail_ = detail; }
     void showFrame(const QImage& image, qsizetype encodedBytes);
     ScreenDrawing* drawing() const { return drawing_; }
-    // Everyone in the call, shown as overlapping avatars under the video.
-    void setAudience(const QList<QPixmap>& avatars);
+    // Who is watching, as overlapping avatars under the video that list
+    // their names when clicked.
+    void setAudience(const QList<QPixmap>& avatars, const QStringList& names);
 
 signals:
     void watchClicked();
@@ -77,6 +79,7 @@ protected:
 
 private:
     void refreshDrawingState();
+    void showAudience();
     void placeDrawingControls();
 
     QString name_;
@@ -92,7 +95,9 @@ private:
     DrawingControls* drawingControls_ = nullptr;
     QLabel* stats_ = nullptr;
     QLabel* drawingState_ = nullptr;
-    QLabel* audience_ = nullptr;
+    QPushButton* audience_ = nullptr;
+    QList<QPixmap> audienceAvatars_;
+    QStringList audienceNames_;
     QPushButton* focusButton_ = nullptr;
     QPushButton* fullscreenButton_ = nullptr;
     QPushButton* stopButton_ = nullptr;
@@ -123,7 +128,7 @@ public:
     int count() const { return static_cast<int>(tiles_.size()); }
     // The newest frame of a stream, or a null image.
     QImage image(const QString& name) const;
-    void setAudience(const QList<QPixmap>& avatars);
+    void setAudience(const QString& name, const QList<QPixmap>& avatars, const QStringList& names);
 
 signals:
     void watchRequested(const QString& name);
@@ -146,5 +151,4 @@ private:
     QPointer<StreamView> fullscreen_;
     QString fullscreenName_;
     QShortcut* escape_ = nullptr;
-    QList<QPixmap> audience_;
 };

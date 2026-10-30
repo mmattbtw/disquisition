@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+
 #include <QMap>
 #include <QThreadPool>
 #include <QWidget>
@@ -97,6 +99,9 @@ private:
     // Shows the screen share in place of the chat, while there is one to show.
     void openStage(bool open);
     void refreshPip();
+    // Tells the call who is watching this user's share.
+    void announceViewers();
+    void refreshAudience();
     void placePip();
     void showFrame(const QString& peer, const QImage& image, qsizetype encodedBytes);
     void watch(const QString& peer, bool enabled);
@@ -135,6 +140,8 @@ private:
     QSet<QString> streams_;
     QSet<QString> watching_;
     QSet<QString> watchers_;
+    // Who watches each remote share, as its sharer last announced.
+    QHash<QString, QSet<QString>> viewers_;
     QSet<QString> joiningCommunities_;
     QSet<QString> speaking_;
     QMap<QString, int> quietAudioFrames_;

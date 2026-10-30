@@ -1098,6 +1098,16 @@ bool Node::validPacket(const QString& cid, const QString& channel, const QString
         return target == peerId() && canonical(data).size() <= 24 * 1024;
     if (type == "screen")
         return remote.sharing && canonical(data).size() <= 24 * 1024;
+    // The sharer's list of who is watching, shown to everyone in the call.
+    if (type == "viewers") {
+        if (!remote.sharing || !data.value("peers").isArray())
+            return false;
+        const auto peers = data.value("peers").toArray();
+        return peers.size() <= kMaxMembers &&
+               std::all_of(peers.begin(), peers.end(),
+                           [](const QJsonValue& value) { return value.isString(); }) &&
+               canonical(data).size() <= 24 * 1024;
+    }
     if (type == "screen-audio") {
         const auto bytes = QByteArray::fromBase64(data.value("bytes").toString().toLatin1());
         return remote.sharing && !local.deafened && target == peerId() && !bytes.isEmpty() &&

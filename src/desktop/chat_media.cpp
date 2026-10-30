@@ -197,9 +197,21 @@ int ChatMedia::insert(Embed embed, const QImage& placeholder) {
     view_->document()->addResource(QTextDocument::ImageResource, resourceUrl(id),
                                    QPixmap::fromImage(placeholder));
     const QString name = resourceUrl(id).toString();
-    view_->append("<a href=\"" + name + "\"><img src=\"" + name + "\"></a>");
-    // The transcript only grows at its end, so this position stays valid.
-    embed.position = view_->document()->lastBlock().position();
+    const QString html = "<a href=\"" + name + "\"><img src=\"" + name + "\"></a>";
+    if (anchor_.isNull()) {
+        view_->append(html);
+        // The transcript only grows at its end, so this position stays valid.
+        embed.position = view_->document()->lastBlock().position();
+    }
+    else {
+        // Only the newest message takes embeds, so earlier positions stay valid.
+        QTextBlockFormat format = anchor_.blockFormat();
+        format.setTopMargin(4);
+        format.setBottomMargin(0);
+        anchor_.insertBlock(format);
+        embed.position = anchor_.block().position();
+        anchor_.insertHtml(html);
+    }
     embeds_.emplace(id, std::move(embed));
     return id;
 }

@@ -184,6 +184,9 @@ QFrame#streamTile QLabel#live, QFrame#streamPip QLabel#live { background: #ff313
 QLabel#streamStats { color: #6f7a84; font-family: "JetBrains Mono", monospace; font-size: 11px; }
 QFrame#streamTile QPushButton { padding: 3px 10px; font-size: 12px; }
 QFrame#streamTile QPushButton#primary { padding: 6px 16px; font-size: 13px; }
+QFrame#streamTile QPushButton#streamAudience { background: transparent; border: 1px solid transparent; color: #8b959e;
+    font-weight: 500; padding: 2px 8px; }
+QFrame#streamTile QPushButton#streamAudience:hover { background: #22262d; border-color: #3a424c; color: #e6eae9; }
 QLabel#streamInvitation { color: #b7c0c6; font-size: 14px; }
 QLabel#stageChip { color: #b7c0c6; font-size: 12px; border: 1px solid #3a424c; border-radius: 6px; padding: 3px 9px; }
 QLabel#stageChip[good="true"] { color: #93e08e; border-color: #3e6a3b; }

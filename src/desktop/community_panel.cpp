@@ -21,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QImageReader>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -50,6 +51,7 @@
 #include <QStyle>
 #include <QTextBrowser>
 #include <QTextDocument>
+#include <QTextTable>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
@@ -201,17 +203,26 @@ QPixmap statusDot(const QColor& color, qreal scale) {
     return image;
 }
 
+// Small bold capitals, as on the site's role and LIVE tags.
+QFont tagFont() {
+    QFont font("Inter");
+    font.setPixelSize(9);
+    font.setWeight(QFont::Bold);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0.8);
+    return font;
+}
+
 // Draws a small rounded tag and returns its width.
 int paintTag(QPainter* painter, const QRectF& area, const QString& text, const QColor& fill,
              const QColor& ink, const QColor& border = Qt::transparent) {
-    const auto font = monoFont(9.5, 0.6);
-    const int width = QFontMetrics(font).horizontalAdvance(text) + 10;
-    const QRectF tag(area.right() - width, area.center().y() - 8, width, 16);
+    const auto font = tagFont();
+    const int width = QFontMetrics(font).horizontalAdvance(text) + 9;
+    const QRectF tag(area.right() - width, area.center().y() - 7.5, width, 15);
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setPen(border == Qt::transparent ? Qt::NoPen : QPen(border, 1));
     painter->setBrush(fill);
-    painter->drawRoundedRect(tag.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+    painter->drawRoundedRect(tag.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
     painter->setFont(font);
     painter->setPen(ink);
     painter->drawText(tag, Qt::AlignCenter, text);
@@ -413,7 +424,7 @@ public:
         const QFontMetrics nameMetrics(name);
         const auto badge = index.data(kBadgeRole).toString();
         const int badgeWidth = badge.isEmpty()
-            ? 0 : QFontMetrics(monoFont(9.5, 0.6)).horizontalAdvance(badge) + 16;
+            ? 0 : QFontMetrics(tagFont()).horizontalAdvance(badge) + 15;
         const auto label = nameMetrics.elidedText(index.data(Qt::DisplayRole).toString(),
                                                   Qt::ElideRight, qMax(0, width - badgeWidth));
         const QRect nameRect(left, row.center().y() - 16, width, 17);
@@ -425,7 +436,7 @@ public:
         if (!badge.isEmpty()) {
             const int at = left + nameMetrics.horizontalAdvance(label) + 6 + badgeWidth - 6;
             paintTag(painter, QRectF(left, nameRect.top(), at - left, nameRect.height()), badge,
-                     badge == "OWNER" ? QColor("#d9eeec") : QColor("#ffe7a3"),
+                     badge == "OWNER" ? QColor("#a5dfdc") : QColor("#f2d27a"),
                      QColor("#1a1d22"));
         }
         QFont small = option.font;
@@ -2561,14 +2572,12 @@ void CommunityPanel::refresh() {
         }
         voiceStatus_->setText("Voice  ·  " + voiceModel.channels[voiceChannel_].name);
         QStringList inCall, sharers;
-        QList<QPixmap> audience;
         for (const auto& member : voiceModel.members) {
             const auto state = node_->presence(voiceCid_, member.id);
             if (state.voiceChannel != voiceChannel_ ||
                 !node_->online(voiceCid_).contains(member.id))
                 continue;
             inCall.append(member.name);
-            audience.append(profileAvatar(member, 20, devicePixelRatioF()));
             if (state.sharing)
                 sharers.append(member.name);
         }
@@ -2578,7 +2587,6 @@ void CommunityPanel::refresh() {
                       " sharing";
         voiceDetail_->setText(detail);
         voiceDetail_->setToolTip(detail);
-        stage_->setAudience(audience);
         QSet<QString> active, streaming;
         // Presence is removed when the authenticated connection closes. A
         // metadata sync briefly clears readiness, but must not tear down video.
@@ -2599,12 +2607,17 @@ void CommunityPanel::refresh() {
             setSpeaking(peer, false);
             quietAudioFrames_.remove(peer);
             lastAudioAt_.remove(peer);
-            watchers_.remove(peer);
+            if (watchers_.remove(peer))
+                announceViewers();
+            viewers_.remove(peer);
             for (const auto& [_, session] : drawings_)
                 session->peerChanged(peer, false);
         }
         for (const auto& peer : active - audioPeers_)
             applyVoiceSettings(peer);
+        // Newcomers need the current list of who is watching this share.
+        if (capture_.running() && !(active - audioPeers_).isEmpty())
+            announceViewers();
         audioPeers_ = active;
         for (const auto& peer : streams_ - streaming) {
             stopDrawing(peer);
@@ -2639,6 +2652,7 @@ void CommunityPanel::refresh() {
     }
     else
         voiceStatus_->setText("Voice disconnected");
+    refreshAudience();
     openStage(stageOpen_);
 }
 
@@ -2656,6 +2670,51 @@ void CommunityPanel::openStage(bool open) {
     stageToggle_->setVisible(stage_->count() > 0);
     setFlag(stageToggle_, "primary", !stageOpen_ && !streams_.isEmpty());
     refreshPip();
+}
+
+void CommunityPanel::announceViewers() {
+    if (!node_ || voiceCid_.isEmpty() || !capture_.running())
+        return;
+    QJsonArray peers;
+    for (const auto& peer : std::as_const(watchers_))
+        peers.append(peer);
+    attempt([&] { node_->sendPacket(voiceCid_, voiceChannel_, "viewers", {{"peers", peers}}); });
+    refreshAudience();
+}
+
+void CommunityPanel::refreshAudience() {
+    if (!node_ || voiceCid_.isEmpty())
+        return;
+    const auto model = node_->communities().value(voiceCid_);
+    const auto online = node_->online(voiceCid_);
+    const auto show = [&](const QString& stream, QSet<QString> peers) {
+        QList<community::Member> people;
+        for (const auto& peer : std::as_const(peers))
+            if (peer != stream && model.isMember(peer) &&
+                (peer == node_->peerId() || online.contains(peer)))
+                people.append(model.members.value(peer));
+        std::sort(people.begin(), people.end(), [](const auto& a, const auto& b) {
+            return QString::compare(a.name, b.name, Qt::CaseInsensitive) < 0;
+        });
+        QList<QPixmap> avatars;
+        QStringList names;
+        for (const auto& person : people) {
+            avatars.append(profileAvatar(person, 20, devicePixelRatioF()));
+            names.append(person.id == node_->peerId() ? person.name + " (you)" : person.name);
+        }
+        stage_->setAudience(stream, avatars, names);
+    };
+    if (capture_.running())
+        show(node_->peerId(), watchers_);
+    for (const auto& stream : std::as_const(streams_)) {
+        // Older clients never announce, so at least count yourself.
+        auto peers = viewers_.value(stream);
+        if (watching_.contains(stream))
+            peers.insert(node_->peerId());
+        else
+            peers.remove(node_->peerId());
+        show(stream, peers);
+    }
 }
 
 void CommunityPanel::refreshPip() {
@@ -2816,6 +2875,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
     const auto links = showMedia ? findMediaLinks(body) : QList<MediaLink>{};
     const bool onlyMedia = links.size() == 1 && body.trimmed() == links.first().text;
     const auto mentions = findMentions(body, memberNames(cid));
+    const bool mediaOnly = onlyMedia || (body.trimmed().isEmpty() && !entry.image.isEmpty());
     const bool mentioned = peer != node_->peerId() &&
         mentionOf(mentions, memberName(cid, node_->peerId())) != Mentioned::No;
     struct Span {
@@ -2879,16 +2939,26 @@ void CommunityPanel::showEntry(const Entry& entry) {
         link("<span style='font-weight:600'>" + member.name.toHtmlEscaped() + "</span>") +
         "&nbsp;&nbsp;<span style='color:#6f7a84;font-family:\"JetBrains Mono\";font-size:10px'>" +
         when + "</span></p>" +
-        "<p style='margin:0;color:" + theme::kMessage + "'>" + html.replace('\n', "<br>") +
-        (entry.undelivered
-             ? "&nbsp;&nbsp;<span style='color:#d4ae77;font-size:12px'>not delivered · no peers "
-               "connected</span>"
-             : "") +
-        "</p></td></tr></table>");
+        (mediaOnly && !entry.undelivered
+             ? QString()
+             : "<p style='margin:0;color:" + QString(theme::kMessage) + "'>" +
+                   html.replace('\n', "<br>") +
+                   (entry.undelivered
+                        ? "&nbsp;&nbsp;<span style='color:#d4ae77;font-size:12px'>not delivered · "
+                          "no peers connected</span>"
+                        : "") +
+                   "</p>") +
+        "</td></tr></table>");
+    // Media sits in the message's text column, under the name or the text.
+    const auto frames = transcript_->document()->rootFrame()->childFrames();
+    auto* table = frames.isEmpty() ? nullptr : qobject_cast<QTextTable*>(frames.last());
+    if (table)
+        media_->setAnchor(table->cellAt(0, table->columns() - 1).lastCursorPosition());
     if (!entry.image.isEmpty())
         media_->appendImage(entry.image);
     for (const auto& link : links)
         media_->appendRemote(link.url);
+    media_->setAnchor(QTextCursor());
 }
 
 void CommunityPanel::render() {
@@ -3100,12 +3170,25 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         if (session != drawings_.end()) session->second->receive(peer, payload);
     }
     else if (type == "watch" && cid == voiceCid_ && channel == voiceChannel_) {
+        const auto before = watchers_.size();
         if (data.value("enabled").toBool() && capture_.running()) {
             watchers_.insert(peer);
             capture_.requestKeyframe();
         }
         else
             watchers_.remove(peer);
+        if (watchers_.size() != before)
+            announceViewers();
+        refreshAudience();
+    }
+    else if (type == "viewers" && cid == voiceCid_ && channel == voiceChannel_) {
+        QSet<QString> watching;
+        const auto model = node_->communities().value(cid);
+        for (const auto& value : data.value("peers").toArray())
+            if (model.isMember(value.toString()))
+                watching.insert(value.toString());
+        viewers_[peer] = watching;
+        refreshAudience();
     }
     else if (type == "screen-audio" && watching_.contains(peer) && cid == voiceCid_ &&
              channel == voiceChannel_ && !deafen_->isChecked()) {
@@ -3277,6 +3360,7 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
         }
         stage_->setWatching(peer, enabled);
     });
+    refreshAudience();
     refreshPip();
 }
 

@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QRect>
 #include <QSize>
+#include <QTextCursor>
 #include <QUrl>
 #include <deque>
 #include <map>
@@ -47,6 +48,9 @@ public:
     // Appends image bytes, such as an upload. Returns false, and appends
     // nothing, when the bytes are not a displayable image.
     bool appendImage(const QByteArray& bytes);
+    // Puts the next embeds in paragraphs after `cursor`, such as inside the
+    // newest message, instead of at the end. A null cursor appends again.
+    void setAnchor(const QTextCursor& cursor) { anchor_ = cursor; }
     // Forgets every embed. Call it after clearing the transcript.
     void clear();
 
@@ -73,6 +77,8 @@ private:
     static QUrl resourceUrl(int id);
 
     QTextBrowser* view_;
+
+    QTextCursor anchor_;
     QWidget* window_;
     MediaFetcher* fetcher_;
     std::map<int, Embed> embeds_;

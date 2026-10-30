@@ -852,6 +852,9 @@ int main(int argc, char** argv) {
     for (const auto* label : tile->findChildren<QLabel*>())
         CHECK(!label->text().contains(remote.peerId()));
     CHECK(tile->displayName() == "Bob");
+    // Only people watching appear under the stream: here, just this viewer.
+    auto* audience = tile->findChild<QPushButton*>("streamAudience");
+    CHECK(audience && until([&] { return audience->text() == "1 watching"; }));
     // Encode real video, deliver it through the peer transport, and verify that
     // the panel replaces its waiting state without screen or camera access.
     H264Encoder encoder;
