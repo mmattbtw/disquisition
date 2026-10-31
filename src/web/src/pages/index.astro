@@ -1,34 +1,518 @@
 ---
+import { Image, getImage } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Logo from '../components/Logo.astro';
+import CollaborationStage from '../components/CollaborationStage.tsx';
+import heroShot from '../assets/screenshots/app-hero.png';
+import drawingShot from '../assets/screenshots/app-drawing.png';
+import chatShot from '../assets/screenshots/app-chat.png';
+import inviteShot from '../assets/screenshots/app-invite.png';
+
+const heroImage = await getImage({
+	src: heroShot,
+	width: 2200,
+	format: 'webp',
+	quality: 84,
+});
+const drawingImage = await getImage({
+	src: drawingShot,
+	width: 2000,
+	format: 'webp',
+	quality: 84,
+});
+
 const latestRelease = 'https://github.com/mmattbtw/disquisition/releases/latest';
 const downloads = [
-	{ label: 'Download for macOS, Apple silicon', file: 'disquisition-desktop-macos-arm64.dmg' },
-	{ label: 'Download for Windows, x64', file: 'disquisition-desktop-windows-x64.zip' },
-	{ label: 'Download for Linux, x64', file: 'disquisition-desktop-linux-x64.tar.gz' },
+	{
+		os: 'mac',
+		name: 'macOS',
+		arch: 'Apple silicon',
+		file: 'disquisition-desktop-macos-arm64.dmg',
+		cta: 'Download .dmg',
+		req: 'macOS 13 or later',
+		url: `${latestRelease}/download/disquisition-desktop-macos-arm64.dmg`,
+	},
+	{
+		os: 'windows',
+		name: 'Windows',
+		arch: 'x64',
+		file: 'disquisition-desktop-windows-x64.zip',
+		cta: 'Download .zip',
+		req: 'Windows 10 or later',
+		url: `${latestRelease}/download/disquisition-desktop-windows-x64.zip`,
+	},
+	{
+		os: 'linux',
+		name: 'Linux',
+		arch: 'x64',
+		file: 'disquisition-desktop-linux-x64.tar.gz',
+		cta: 'Download .tar.gz',
+		req: 'Needs a Qt 6.8 runtime',
+		url: `${latestRelease}/download/disquisition-desktop-linux-x64.tar.gz`,
+	},
 ];
+
+const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff', '#ff66c4', '#a5dfdc'];
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
-		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>disquisition</title>
-	</head>
-	<body>
-		<main>
-			<h1>disquisition</h1>
-			<h2>Download the desktop client</h2>
-			<p>Get the latest successful build from main.</p>
-			<ul>
-				{downloads.map(({ label, file }) => (
-					<li><a href={`${latestRelease}/download/${file}`}>{label}</a></li>
-				))}
-			</ul>
-			<p>Linux requires a compatible Qt 6.8 runtime.</p>
-			<p><a href={latestRelease}>View the latest release and build details</a></p>
-		</main>
-	</body>
-</html>
+<Base>
+	<Nav />
+
+	<main id="main">
+		<section class="hero">
+			<div class="wrap hero-inner">
+				<h1 class="hero-title">
+					<span class="line">
+						Group chat that <span class="mark mark-under">lives<svg class="drawn" viewBox="0 0 220 26" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M4 19C38 8 92 5 138 8c28 2 56 6 78 3" stroke="#9dccca" stroke-width="4.5"></path></svg><span class="scribble-cursor" style="--tag-color:#9dccca; right:-10px; bottom:-0.06em"><svg viewBox="0 0 17 22" aria-hidden="true"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#9dccca" stroke="#16181d" stroke-width="1.4" stroke-linejoin="round"></path></svg><span class="tag">maya</span></span></span>
+					</span>
+					<span class="line">
+						on <span class="mark mark-circle">your devices<svg class="drawn delay" viewBox="0 0 320 96" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M16 50C16 24 86 8 164 10c78 2 140 17 138 40-2 23-72 37-150 37C74 87 14 73 16 50" stroke="#ff66c4" stroke-width="3.4"></path></svg><span class="scribble-cursor delay" style="--tag-color:#ff66c4; right:-4px; bottom:-0.18em"><svg viewBox="0 0 17 22" aria-hidden="true"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ff66c4" stroke="#16181d" stroke-width="1.4" stroke-linejoin="round"></path></svg><span class="tag">june</span></span></span>.
+					</span>
+				</h1>
+
+				<p class="hero-sub">
+					disquisition is a desktop community app with text channels, voice, and screen
+					sharing you can draw on together. Communities are hosted by their members — no
+					central server, no feed, no algorithm.
+				</p>
+
+				<div class="hero-actions">
+					<a
+						class="btn btn-primary"
+						href={`${latestRelease}/download/disquisition-desktop-macos-arm64.dmg`}
+						data-download-primary
+						data-mac={`${latestRelease}/download/disquisition-desktop-macos-arm64.dmg`}
+						data-windows={`${latestRelease}/download/disquisition-desktop-windows-x64.zip`}
+						data-linux={`${latestRelease}/download/disquisition-desktop-linux-x64.tar.gz`}
+					>
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+							<path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5" stroke-linecap="round" stroke-linejoin="round"></path>
+							<path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round"></path>
+						</svg>
+						<span data-download-label>Download for macOS</span>
+					</a>
+					<a
+						class="btn btn-ghost"
+						href="https://github.com/mmattbtw/disquisition"
+						target="_blank"
+						rel="noreferrer"
+					>
+						<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+							<path d="M12 .8a11.3 11.3 0 00-3.57 22c.57.1.78-.25.78-.55v-2.1c-3.16.68-3.83-1.34-3.83-1.34-.52-1.31-1.27-1.66-1.27-1.66-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.53-2.52-.29-5.18-1.26-5.18-5.62 0-1.24.45-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.9 10.9 0 015.68 0c2.17-1.46 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.66 5.33-5.2 5.61.41.36.78 1.05.78 2.13v3.16c0 .3.2.66.79.55A11.3 11.3 0 0012 .8z"></path>
+						</svg>
+						View on GitHub
+					</a>
+				</div>
+
+				<div class="hero-note">
+					<span>
+						<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 8.5l3.2 3.2 7.8-8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+						Free &amp; open source
+					</span>
+					<span class="dot-sep" aria-hidden="true"></span>
+					<span>macOS, Windows &amp; Linux</span>
+					<span class="dot-sep" aria-hidden="true"></span>
+					<span>No account needed</span>
+				</div>
+			</div>
+
+			<div class="wrap stage-shell">
+				<div class="stage-frame">
+					<CollaborationStage
+						client:idle
+						src={heroImage.src}
+						alt="The disquisition desktop app: a voice channel, a shared cover design with several people drawing on it, and chat side by side."
+						width={1440}
+						height={900}
+					/>
+				</div>
+			</div>
+		</section>
+
+		<section id="features" class="section">
+			<div class="wrap">
+				<div class="section-head reveal">
+										<h2 class="section-title">Small-group software, not a platform.</h2>
+					<p class="section-sub">
+						Text, voice, screen sharing, and all the little things that make a group feel
+						like a place — without a feed, an algorithm, or an account in the middle.
+					</p>
+				</div>
+
+				<div class="bento">
+					<article class="card w7 reveal" style="--reveal-delay:40ms">
+						<h3>A community, hosted by its members.</h3>
+						<p>
+							Every member can host. If the owner goes offline, another member takes over —
+							the community stays up. Peers connect directly; the relay only steps in when
+							networks get in the way.
+						</p>
+						<div class="visual">
+							<svg
+								class="mesh"
+								viewBox="0 0 560 232"
+								role="img"
+								aria-label="Four member devices connected directly and through a relay"
+							>
+								<path class="link live" d="M158 60C232 22 330 20 404 50"></path>
+								<path class="link live" d="M162 178C244 210 330 210 400 176"></path>
+								<path class="link" d="M154 72c36 8 58 18 86 28"></path>
+								<path class="link" d="M408 64c-32 10-52 20-74 32"></path>
+								<path class="link" d="M154 158c34-6 58-14 86-24"></path>
+								<path class="link" d="M406 168c-30-8-52-16-72-26"></path>
+
+								<rect class="node you" x="22" y="36" width="132" height="48" rx="10"></rect>
+								<circle cx="42" cy="60" r="5" fill="#9dccca"></circle>
+								<text class="node-label" x="54" y="58">maya</text>
+								<text class="node-sub" x="54" y="72">hosting now</text>
+
+								<rect class="node" x="404" y="26" width="132" height="48" rx="10"></rect>
+								<circle cx="424" cy="50" r="5" fill="#ffde59"></circle>
+								<text class="node-label" x="436" y="48">theo</text>
+								<text class="node-sub" x="436" y="62">direct</text>
+
+								<rect class="node" x="26" y="154" width="132" height="48" rx="10"></rect>
+								<circle cx="46" cy="178" r="5" fill="#ff66c4"></circle>
+								<text class="node-label" x="58" y="176">june</text>
+								<text class="node-sub" x="58" y="190">via relay</text>
+
+								<rect class="node" x="402" y="152" width="132" height="48" rx="10"></rect>
+								<circle cx="422" cy="176" r="5" fill="#7ed957"></circle>
+								<text class="node-label" x="434" y="174">kofi</text>
+								<text class="node-sub" x="434" y="188">direct</text>
+
+								<rect class="node" x="228" y="84" width="104" height="56" rx="12"></rect>
+								<text class="relay-label" x="280" y="118" text-anchor="middle">relay</text>
+
+								<g transform="translate(263 56)">
+									<rect class="lock" x="0" y="3" width="12" height="9" rx="2"></rect>
+									<path d="M3 3V1.8a3 3 0 016 0V3" fill="none" stroke="#55626b" stroke-width="1"></path>
+								</g>
+								<g transform="translate(263 170)">
+									<rect class="lock" x="0" y="3" width="12" height="9" rx="2"></rect>
+									<path d="M3 3V1.8a3 3 0 016 0V3" fill="none" stroke="#55626b" stroke-width="1"></path>
+								</g>
+							</svg>
+							<div class="mesh-legend">
+								<span><i class="d-direct"></i> direct</span>
+								<span><i class="d-relay"></i> via relay</span>
+							</div>
+						</div>
+					</article>
+
+					<article class="card w5 reveal" style="--reveal-delay:100ms">
+						<h3>Voice that feels like a room.</h3>
+						<p>
+							Drop into a channel, share a screen, and nudge anyone's volume without leaving
+							the conversation. No call links, no waiting rooms.
+						</p>
+						<div class="visual">
+							<div class="voice-mock" aria-hidden="true">
+								<div class="vm-head">
+
+									Lounge
+									<span class="wave"><i></i><i></i><i></i><i></i></span>
+									<span class="pill">4 in voice</span>
+								</div>
+								<div class="vm-share">
+									<div class="vm-share-art">
+										<span class="v1"></span><span class="v2"></span><span class="v3"></span><span class="v4"></span>
+										<span class="vword">make<br />noise</span>
+									</div>
+									<div class="vm-share-meta">june is sharing <b>cover-v3.fig</b></div>
+								</div>
+								<div class="vm-people">
+									<span class="vm-person speaking"><span class="face" style="background:#9dccca">M</span>maya</span>
+									<span class="vm-person"><span class="face" style="background:#ffde59">T</span>theo</span>
+									<span class="vm-person"><span class="face" style="background:#ff66c4">J</span>june</span>
+									<span class="vm-person"><span class="face" style="background:#7ed957">K</span>kofi</span>
+								</div>
+								<div class="vm-bar">
+									<span class="vm-btn"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="1.5" width="4" height="7" rx="2"></rect><path d="M3 7a4 4 0 008 0M7 11v2"></path></svg></span>
+									<span class="vm-btn"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6v2a5 5 0 0010 0V6"></path><rect x="1" y="4" width="2.6" height="5" rx="1"></rect><rect x="10.4" y="4" width="2.6" height="5" rx="1"></rect></svg></span>
+									<span class="vm-btn share"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="11" height="7.5" rx="1"></rect><path d="M5 12.5h4"></path></svg> Share screen</span>
+								</div>
+							</div>
+						</div>
+					</article>
+
+					<article class="card w5 reveal" style="--reveal-delay:40ms">
+						<h3>Invites are just… links.</h3>
+						<p>
+							One link or QR code. No accounts, no onboarding funnel. The community decides
+							who can join, invite others, and draw on shares.
+						</p>
+						<div class="visual">
+							<div class="shot invite">
+								<Image
+									src={inviteShot}
+									alt="The invite dialog in disquisition, with an invite link and a QR code."
+									width={820}
+									height={620}
+									format="webp"
+									quality={82}
+									loading="lazy"
+								/>
+							</div>
+						</div>
+					</article>
+
+					<article class="card w7 reveal" style="--reveal-delay:100ms">
+						<h3>Chat that feels hand-made.</h3>
+						<p>
+							Colored names, mentions, images, GIFs, and profiles. Messages are live by
+							default; save them to a local file on your own device when you want a record.
+						</p>
+						<div class="visual">
+							<div class="shot chat">
+								<Image
+									src={chatShot}
+									alt="A text channel in disquisition with colorful member names, a shared image, and a mention."
+									width={900}
+									height={620}
+									format="webp"
+									quality={82}
+									loading="lazy"
+								/>
+							</div>
+						</div>
+					</article>
+				</div>
+			</div>
+		</section>
+
+		<section id="drawing" class="drawing">
+			<div class="wrap">
+				<div class="drawing-head reveal">
+					<div class="left">
+												<h2 class="section-title">Everyone gets a pen. Even on your screen.</h2>
+						<p class="section-sub">
+							Turn on drawing for a share and everyone watching can point, circle, underline,
+							and erase — each stroke in their chat color, with their name at the cursor.
+						</p>
+					</div>
+				</div>
+
+				<div class="drawing-shot reveal" style="--reveal-delay:80ms">
+					<img
+						src={drawingImage.src}
+						alt="A disquisition screen share covered in five people's colored pen strokes and named cursors."
+						width={1280}
+						height={800}
+						loading="lazy"
+						decoding="async"
+					/>
+					<div class="floating-note">
+						<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7V4a2 2 0 014 0v3m0 0V3a2 2 0 014 0v4m0 0V5a2 2 0 014 0v5a5 5 0 01-5 5H9a5 5 0 01-5-5V8a2 2 0 014 0"></path></svg>
+						<div>
+							<b>Drawing is off by default.</b> The sharer turns it on for each stream — and can
+							ban a pen mid-sentence.
+						</div>
+					</div>
+				</div>
+
+				<div class="draw-features">
+					<div class="draw-feature reveal">
+						<span class="n">01</span>
+						<h3>Pens, erasers, lasers.</h3>
+						<p>
+							Everyone watching gets a pen, eraser, and laser. Erase a whole stroke, undo your
+							last line, or use the laser when you just need to point.
+						</p>
+					</div>
+					<div class="draw-feature reveal" style="--reveal-delay:80ms">
+						<span class="n">02</span>
+						<h3>Names follow the cursor.</h3>
+						<p>
+							Each stroke uses your chat color, and a name tag follows the tip until you stop.
+							Ink stays aligned when the video resizes or goes fullscreen.
+						</p>
+					</div>
+					<div class="draw-feature reveal" style="--reveal-delay:160ms">
+						<span class="n">03</span>
+						<h3>The sharer stays in charge.</h3>
+						<p>
+							Drawing starts off for every share. The sharer can ban a pen mid-stream, clear
+							everything, or turn it off — the ink clears when the share ends.
+						</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section id="privacy" class="section">
+			<div class="wrap privacy-grid">
+				<div class="reveal">
+										<h2 class="section-title">Your messages don't need a landlord.</h2>
+					<p class="section-sub">
+						Communities live on member devices. Peers connect with authenticated TLS and signed
+						metadata, and the relay only forwards encrypted traffic when a direct connection
+						isn't possible.
+					</p>
+
+					<div class="privacy-points">
+						<div class="ppoint">
+							<span class="ico">
+								<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 7.5L8 3l5.5 4.5V13a1 1 0 01-1 1h-9a1 1 0 01-1-1V7.5z"></path><path d="M6 14V9.5h4V14"></path></svg>
+							</span>
+							<div>
+								<div class="t">Hosted by members</div>
+								<div class="d">No central community server. Any online member can host, and ownership survives the owner closing their laptop.</div>
+							</div>
+						</div>
+						<div class="ppoint">
+							<span class="ico">
+								<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="2"></rect><path d="M5.5 7V5a2.5 2.5 0 015 0v2"></path></svg>
+							</span>
+							<div>
+								<div class="t">Encrypted connections</div>
+								<div class="d">Peer traffic uses authenticated TLS and signed metadata. The relay sees ciphertext, not your conversation.</div>
+							</div>
+						</div>
+						<div class="ppoint">
+							<span class="ico">
+								<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="8" cy="4" rx="5" ry="2"></ellipse><path d="M3 4v4c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8v4c0 1.1 2.2 2 5 2s5-.9 5-2V8"></path></svg>
+							</span>
+							<div>
+								<div class="t">Local history, opt-in</div>
+								<div class="d">Chat is live-only by default. Turn on saving to keep messages in a local SQLite file on your own device.</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="manifesto reveal" style="--reveal-delay:120ms">
+										<p class="big">
+						No feed.<br />
+						No algorithm.<br />
+						<span class="mark mark-circle wide">No account.<svg class="drawn" viewBox="0 0 280 90" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M14 46C16 20 84 6 156 8c72 2 116 16 114 38-2 22-64 36-132 36C70 82 12 68 14 46" stroke="#ffde59" stroke-width="3.4"></path></svg></span>
+					</p>
+					<p class="small">
+						Just your people, on your devices. Built in the open — read every line on <a href="https://github.com/mmattbtw/disquisition" target="_blank" rel="noreferrer">GitHub</a>.
+					</p>
+					<Logo size={168} />
+				</div>
+			</div>
+		</section>
+
+		<section id="download" class="download">
+			<div class="wrap">
+				<div class="download-head reveal">
+										<h2 class="section-title">Take your community with you.</h2>
+					<p class="section-sub">
+						Free and open source. Pick your platform, open the app, pick a name, then create a
+						community or join with an invite.
+					</p>
+				</div>
+
+				<div class="download-grid">
+					{downloads.map((item, i) => (
+						<article class="dl-card reveal" data-os-card={item.os} style={`--reveal-delay:${i * 70}ms`}>
+							<span class="tag">your platform</span>
+							<div class="os">
+								<span class="glyph">
+									{item.os === 'mac' && (
+										<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+											<path d="M16.6 12.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.4.8-.7 0-1.8-.8-3-.8-1.5 0-2.9.9-3.7 2.3-1.6 2.7-.4 6.7 1.1 8.9.7 1.1 1.6 2.3 2.8 2.2 1.1 0 1.5-.7 2.9-.7 1.3 0 1.7.7 2.9.7 1.2 0 1.9-1.1 2.6-2.2.8-1.2 1.2-2.4 1.2-2.5-.1 0-2.1-.8-2.1-3.6zM14.4 5.9c.6-.7 1-1.7.9-2.7-.9 0-2 .6-2.6 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 2-.5 2.6-1.2z" />
+										</svg>
+									)}
+									{item.os === 'windows' && (
+										<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+											<path d="M3 5.7l7.4-1v6.7H3V5.7zm8.6-1.2L21 3.2v8.2h-9.4V4.5zM3 12.6h7.4v6.7L3 18.3v-5.7zm8.6 0H21v8.2l-9.4-1.3v-6.9z" />
+										</svg>
+									)}
+									{item.os === 'linux' && (
+										<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+											<ellipse cx="12" cy="15.2" rx="4.6" ry="6.2"></ellipse>
+											<circle cx="12" cy="7" r="3.4"></circle>
+											<ellipse cx="8.4" cy="20.3" rx="2.5" ry="1.2"></ellipse>
+											<ellipse cx="15.6" cy="20.3" rx="2.5" ry="1.2"></ellipse>
+											<circle cx="10.7" cy="6.6" r=".65" fill="#161a20"></circle>
+											<circle cx="13.3" cy="6.6" r=".65" fill="#161a20"></circle>
+											<path d="M12 8.2l1.2 1.1L12 9.9l-1.2-.6z" fill="#ff751f"></path>
+										</svg>
+									)}
+								</span>
+								<div>
+									<div class="name">{item.name}</div>
+									<div class="arch">{item.arch}</div>
+								</div>
+							</div>
+							<div class="file">{item.file}</div>
+							<a class="btn btn-primary" href={item.url}>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round"></path></svg>
+								{item.cta}
+							</a>
+							<div class="req">{item.req}</div>
+						</article>
+					))}
+				</div>
+
+				<div class="download-foot">
+					<span>
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .8a11.3 11.3 0 00-3.57 22c.57.1.78-.25.78-.55v-2.1c-3.16.68-3.83-1.34-3.83-1.34-.52-1.31-1.27-1.66-1.27-1.66-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.53-2.52-.29-5.18-1.26-5.18-5.62 0-1.24.45-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.9 10.9 0 015.68 0c2.17-1.46 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.66 5.33-5.2 5.61.41.36.78 1.05.78 2.13v3.16c0 .3.2.66.79.55A11.3 11.3 0 0012 .8z"></path></svg>
+						<a href={latestRelease} target="_blank" rel="noreferrer">Latest release &amp; build details</a>
+					</span>
+					<span class="dot-sep" aria-hidden="true"></span>
+					<span><a href="https://github.com/mmattbtw/disquisition/blob/main/docs/desktop.md" target="_blank" rel="noreferrer">Desktop guide</a></span>
+					<span class="dot-sep" aria-hidden="true"></span>
+					<span>Linux downloads need a Qt 6.8 runtime.</span>
+				</div>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap">
+			<div class="footer-grid">
+				<div class="footer-brand">
+					<a class="brand" href="/" aria-label="disquisition home">
+						<Logo size={25} />
+						<span>disquisition</span>
+					</a>
+					<p>
+						A desktop community app for small groups. Text channels, voice, and screen
+						sharing you can draw on together.
+					</p>
+				</div>
+
+				<div class="footer-col">
+					<h4>Product</h4>
+					<a href="#features">Features</a>
+					<a href="#drawing">Screen drawing</a>
+					<a href="#privacy">Privacy</a>
+					<a href="#download">Download</a>
+				</div>
+
+				<div class="footer-col">
+					<h4>Docs</h4>
+					<a href="https://github.com/mmattbtw/disquisition/blob/main/docs/desktop.md" target="_blank" rel="noreferrer">Desktop guide</a>
+					<a href="https://github.com/mmattbtw/disquisition/blob/main/docs/communities.md" target="_blank" rel="noreferrer">Communities</a>
+					<a href="https://github.com/mmattbtw/disquisition/blob/main/docs/networking.md" target="_blank" rel="noreferrer">Networking</a>
+					<a href="https://github.com/mmattbtw/disquisition/blob/main/docs/building.md" target="_blank" rel="noreferrer">Build from source</a>
+				</div>
+
+				<div class="footer-col">
+					<h4>Elsewhere</h4>
+					<a href="https://github.com/mmattbtw/disquisition" target="_blank" rel="noreferrer">GitHub</a>
+					<a href={latestRelease} target="_blank" rel="noreferrer">Releases</a>
+					<a href="https://github.com/mmattbtw/disquisition/issues" target="_blank" rel="noreferrer">Issues</a>
+					<a href="https://github.com/mmattbtw/disquisition/graphs/contributors" target="_blank" rel="noreferrer">Contributors</a>
+				</div>
+			</div>
+
+			<div class="footer-bottom">
+				<div class="left">
+					<span class="petals" aria-hidden="true">
+						{petals.map((petal) => <i style={`--petal:${petal}`}></i>)}
+					</span>
+					<span>© 2026 disquisition. Made by Natural Intelligence.</span>
+				</div>
+				<div>
+					<a href="https://github.com/mmattbtw/disquisition" target="_blank" rel="noreferrer">Source on GitHub</a>
+				</div>
+			</div>
+		</div>
+	</footer>
+</Base>

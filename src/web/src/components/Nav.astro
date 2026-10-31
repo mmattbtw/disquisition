@@ -1,0 +1,38 @@
+---
+import Logo from './Logo.astro';
+---
+
+<header class="nav">
+	<div class="wrap nav-inner">
+		<a class="brand" href="/" aria-label="disquisition home">
+			<Logo size={27} />
+			<span>disquisition</span>
+		</a>
+
+		<nav class="nav-links" aria-label="Main">
+			<a href="#features">Features</a>
+			<a href="#drawing">Drawing</a>
+			<a href="#privacy">Privacy</a>
+			<a href="#download">Download</a>
+		</nav>
+
+		<div class="nav-right">
+			<a
+				class="icon-link"
+				href="https://github.com/mmattbtw/disquisition"
+				target="_blank"
+				rel="noreferrer"
+				aria-label="disquisition on GitHub"
+			>
+				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+					<path
+						d="M12 .8a11.3 11.3 0 00-3.57 22c.57.1.78-.25.78-.55v-2.1c-3.16.68-3.83-1.34-3.83-1.34-.52-1.31-1.27-1.66-1.27-1.66-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.53-2.52-.29-5.18-1.26-5.18-5.62 0-1.24.45-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.9 10.9 0 015.68 0c2.17-1.46 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.66 5.33-5.2 5.61.41.36.78 1.05.78 2.13v3.16c0 .3.2.66.79.55A11.3 11.3 0 0012 .8z"
+					/>
+				</svg>
+			</a>
+			<a class="btn btn-primary btn-small" href="#download">
+				Download
+			</a>
+		</div>
+	</div>
+</header>
