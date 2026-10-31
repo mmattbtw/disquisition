@@ -213,22 +213,24 @@ int main(int argc, char** argv) {
     // Presets save by name; custom HEX colors survive picker cancellation and reopening.
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
+        auto* colors = dialog->findChild<QWidget*>("userChatColor");
         auto* hex = dialog->findChild<QLineEdit*>("userChatColorHex");
-        CHECK(colors && colors->count() == 8 && !colors->isEditable());
-        CHECK(colors->currentData().toString() == QSettings().value("community/color").toString());
+        CHECK(colors && colors->findChildren<QPushButton*>(Qt::FindDirectChildrenOnly).size() == 9);
+        auto* current = dialog->findChild<QPushButton*>(
+            "userChatColor_" + QSettings().value("community/color").toString());
+        CHECK(current && current->isChecked());
         CHECK(!hex->isVisible());
-        colors->setCurrentIndex(colors->findData("peach"));
+        dialog->findChild<QPushButton*>("userChatColor_peach")->click();
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
     CHECK(QSettings().value("community/color").toString() == "peach");
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
         auto* hex = dialog->findChild<QLineEdit*>("userChatColorHex");
-        CHECK(colors->currentData().toString() == "peach");
-        colors->setCurrentIndex(colors->count() - 1);
+        CHECK(dialog->findChild<QPushButton*>("userChatColor_peach")->isChecked());
+        dialog->findChild<QPushButton*>("userChatColorCustom")->click();
+        CHECK(!dialog->findChild<QPushButton*>("userChatColor_peach")->isChecked());
         CHECK(hex->isVisible());
         hex->setText("#xyz123");
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
@@ -257,11 +259,10 @@ int main(int argc, char** argv) {
     CHECK(QSettings().value("community/color").toString() == "#a1b2c3");
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        auto* colors = dialog->findChild<QComboBox*>("userChatColor");
-        CHECK(colors->currentIndex() == colors->count() - 1);
+        CHECK(dialog->findChild<QPushButton*>("userChatColorCustom")->isChecked());
         CHECK(dialog->findChild<QLineEdit*>("userChatColorHex")->text() == "#A1B2C3");
         CHECK(dialog->grab().save("community-custom-color-settings.png"));
-        colors->setCurrentIndex(colors->findData("pink"));
+        dialog->findChild<QPushButton*>("userChatColor_pink")->click();
         dialog->reject();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();

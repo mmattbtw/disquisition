@@ -387,50 +387,44 @@ QIcon toolIcon(const QString& kind) {
     return icon;
 }
 
-// A round ink color. The chosen one wears a light ring; the custom swatch is a
-// color wheel until a custom color is picked.
-class Swatch final : public QPushButton {
-public:
-    Swatch(const QString& name, QWidget* parent) : QPushButton(parent) {
-        setObjectName("drawingSwatch");
-        setCheckable(true);
-        setFixedSize(22, 22);
-        setCursor(Qt::PointingHandCursor);
-        setAccessibleName(name);
-        setToolTip(name);
-    }
-    void setColor(const QColor& color) {
-        color_ = color;
-        update();
-    }
+} // namespace
 
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        const QPointF center = QRectF(rect()).center();
-        if (isChecked()) {
-            painter.setPen(QPen(QColor("#effff8"), 1.5));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawEllipse(center, 9.6, 9.6);
-        }
-        QBrush fill(color_);
-        if (!color_.isValid()) {
-            QConicalGradient wheel(center, 90);
-            for (int i = 0; i <= 6; ++i)
-                wheel.setColorAt(i / 6.0, QColor::fromHsvF(std::fmod(i / 6.0, 1.0), 0.65, 1.0));
-            fill = QBrush(wheel);
-        }
-        painter.setPen(QPen(QColor(255, 255, 255, 50), 1.2));
-        painter.setBrush(fill);
-        const qreal radius = underMouse() && !isChecked() ? 7.4 : 6.8;
-        painter.drawEllipse(center, radius, radius);
+ColorSwatch::ColorSwatch(const QString& name, QWidget* parent) : QPushButton(parent) {
+    setCheckable(true);
+    setFixedSize(22, 22);
+    setCursor(Qt::PointingHandCursor);
+    setAccessibleName(name);
+    setToolTip(name);
+}
+
+void ColorSwatch::setColor(const QColor& color) {
+    color_ = color;
+    update();
+}
+
+void ColorSwatch::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QPointF center = QRectF(rect()).center();
+    if (isChecked()) {
+        painter.setPen(QPen(QColor("#effff8"), 1.5));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(center, 9.6, 9.6);
     }
+    QBrush fill(color_);
+    if (!color_.isValid()) {
+        QConicalGradient wheel(center, 90);
+        for (int i = 0; i <= 6; ++i)
+            wheel.setColorAt(i / 6.0, QColor::fromHsvF(std::fmod(i / 6.0, 1.0), 0.65, 1.0));
+        fill = QBrush(wheel);
+    }
+    painter.setPen(QPen(QColor(255, 255, 255, 50), 1.2));
+    painter.setBrush(fill);
+    const qreal radius = underMouse() && !isChecked() ? 7.4 : 6.8;
+    painter.drawEllipse(center, radius, radius);
+}
 
-private:
-    QColor color_;
-};
-
+namespace {
 QFrame* separator(QWidget* parent) {
     auto* line = new QFrame(parent);
     line->setObjectName("drawingSeparator");
@@ -493,11 +487,11 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     auto* colorsLine = separator(this);
     row->addWidget(colorsLine);
     // Swatch 0 follows the chat color, 1-6 are the presets and the last is custom.
-    QList<Swatch*> swatches;
+    QList<ColorSwatch*> swatches;
     const QStringList names{"chat color", "red", "yellow", "green", "blue", "purple", "white",
                             "custom color"};
     for (int i = 0; i < names.size(); ++i) {
-        auto* swatch = new Swatch(names[i], this);
+        auto* swatch = new ColorSwatch(names[i], this);
         swatch->setObjectName(QString("drawingSwatch%1").arg(i));
         if (i > 0 && i <= chat::kPenColorCount)
             swatch->setColor(screenPenColor(i - 1));

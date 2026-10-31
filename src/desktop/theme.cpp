@@ -152,6 +152,7 @@ QFrame#inviteQr { background: #f4efe4; border-radius: 10px; }
 QFrame#inviteQr QLabel { background: transparent; color: #3b4148; font-family: "JetBrains Mono", monospace; font-size: 10px; }
 QLabel#settingsDescription { color: #8b959e; }
 QLabel#settingsHeading { font-family: "Cal Sans", Inter, sans-serif; font-size: 22px; color: #edf0ef; margin-bottom: 6px; }
+QLineEdit#userChatColorHex { font-family: "JetBrains Mono", monospace; }
 QListWidget#userSettingsCategories, QListWidget#communityManageCategories {
     background: #1f2228; border-right: 1px solid #33373f; padding: 14px 8px; }
 QListWidget#userSettingsCategories::item, QListWidget#communityManageCategories::item {
