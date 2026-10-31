@@ -170,7 +170,7 @@ export default function CollaborationStage({ src, alt, width, height }: Props) {
 		const { w, h } = sizeRef.current;
 		const scale = Math.max(w, h) / 1440;
 		ctx.save();
-		ctx.globalCompositeOperation = 'source-over';
+		ctx.globalCompositeOperation = 'erase' in stroke && stroke.erase ? 'destination-out' : 'source-over';
 		ctx.strokeStyle = stroke.color;
 		ctx.lineWidth = Math.max(1.4, stroke.width * Math.max(0.55, scale));
 		ctx.beginPath();
