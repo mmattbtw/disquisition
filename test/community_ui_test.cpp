@@ -732,9 +732,13 @@ int main(int argc, char** argv) {
     CHECK(node->presence(cid, node->peerId()).voiceChannel == voiceChannel);
     CHECK(voiceStatus->text().contains("Lounge"));
     const auto openTextChannel = [&] {
-        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+        // Selecting rebuilds the tree, so stop iterating before selecting.
+        QTreeWidgetItem* channel = nullptr;
+        for (QTreeWidgetItemIterator it(tree); *it && !channel; ++it)
             if ((*it)->data(0, Qt::UserRole + 1).toString() == textChannel)
-                tree->setCurrentItem(*it);
+                channel = *it;
+        if (channel)
+            tree->setCurrentItem(channel);
         QApplication::processEvents();
     };
     // Talking peers light up their row while audio keeps arriving.
