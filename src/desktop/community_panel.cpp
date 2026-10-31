@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QAudio>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QClipboard>
@@ -1322,36 +1323,53 @@ void CommunityPanel::settings() {
         return form;
     };
     auto* userForm = page("User", "Your profile is shared with members of your communities.");
-    auto* color = new QComboBox(&dialog);
-    color->setObjectName("userChatColor");
-    color->setAccessibleName("Chat color");
-    for (const auto& name : kChatColors) {
-        QPixmap swatch(12, 12);
-        swatch.fill(chatColor(name));
-        color->addItem(QIcon(swatch), name, name);
+    // The presets, then a color wheel for a custom HEX color, as in the drawing toolbar.
+    auto* colorRow = new QWidget(&dialog);
+    colorRow->setObjectName("userChatColor");
+    colorRow->setAccessibleName("Chat color");
+    auto* colorLayout = new QHBoxLayout(colorRow);
+    colorLayout->setContentsMargins(0, 0, 0, 0);
+    colorLayout->setSpacing(2);
+    auto* colorGroup = new QButtonGroup(colorRow);
+    for (int i = 0; i < kChatColors.size(); ++i) {
+        auto* swatch = new ColorSwatch(kChatColors[i], colorRow);
+        swatch->setObjectName("userChatColor_" + kChatColors[i]);
+        swatch->setColor(chatColor(kChatColors[i]));
+        swatch->setChecked(kChatColors[i] == messageColor_);
+        colorGroup->addButton(swatch, i);
+        colorLayout->addWidget(swatch);
     }
-    color->addItem("Custom…", QString());
-    const auto presetIndex = color->findData(messageColor_);
-    color->setCurrentIndex(presetIndex >= 0 ? presetIndex : color->count() - 1);
-    userForm->addRow("Chat color", color);
-    auto* customColor = new QWidget(&dialog);
-    auto* customLayout = new QHBoxLayout(customColor);
-    customLayout->setContentsMargins(0, 0, 0, 0);
-    auto* hexColor = new QLineEdit(chatColor(messageColor_).name(QColor::HexRgb).toUpper(), customColor);
+    auto* customSwatch = new ColorSwatch("custom color", colorRow);
+    customSwatch->setObjectName("userChatColorCustom");
+    customSwatch->setChecked(!kChatColors.contains(messageColor_));
+    if (customSwatch->isChecked()) customSwatch->setColor(chatColor(messageColor_));
+    colorGroup->addButton(customSwatch, kChatColors.size());
+    colorLayout->addWidget(customSwatch);
+    colorLayout->addSpacing(6);
+    auto* hexColor = new QLineEdit(chatColor(messageColor_).name(QColor::HexRgb).toUpper(), colorRow);
     hexColor->setObjectName("userChatColorHex");
     hexColor->setAccessibleName("Hex chat color");
     hexColor->setPlaceholderText("#RRGGBB");
+    hexColor->setMaxLength(7);
+    hexColor->setFixedWidth(96);
     hexColor->setToolTip("Enter a color as #RRGGBB.");
-    auto* pickColor = new QPushButton("Pick color…", customColor);
+    auto* pickColor = new QPushButton("Pick color…", colorRow);
     pickColor->setObjectName("userChatColorPicker");
-    customLayout->addWidget(hexColor, 1);
-    customLayout->addWidget(pickColor);
-    userForm->addRow("Custom color", customColor);
+    setFlag(pickColor, "compact", true);
+    colorLayout->addWidget(hexColor);
+    colorLayout->addWidget(pickColor);
+    colorLayout->addStretch();
+    userForm->addRow("Chat color", colorRow);
     const auto updateCustomColor = [=] {
-        userForm->setRowVisible(customColor, color->currentData().toString().isEmpty());
+        hexColor->setVisible(customSwatch->isChecked());
+        pickColor->setVisible(customSwatch->isChecked());
     };
-    connect(color, &QComboBox::currentIndexChanged, &dialog, updateCustomColor);
+    connect(colorGroup, &QButtonGroup::idToggled, &dialog, updateCustomColor);
     updateCustomColor();
+    connect(hexColor, &QLineEdit::textChanged, &dialog, [=](const QString& text) {
+        if (QRegularExpression("^#[0-9a-fA-F]{6}$").match(text.trimmed()).hasMatch())
+            customSwatch->setColor(QColor(text.trimmed()));
+    });
     connect(pickColor, &QPushButton::clicked, &dialog, [&] {
         const auto current = hexColor->text().trimmed();
         const auto selected = QColorDialog::getColor(
@@ -1610,11 +1628,10 @@ void CommunityPanel::settings() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
-            const auto chosenColor = color->currentData().toString().isEmpty()
-                                         ? hexColor->text().trimmed().toLower()
-                                         : color->currentData().toString();
-            if (color->currentData().toString().isEmpty() &&
-                !QRegularExpression("^#[0-9a-f]{6}$").match(chosenColor).hasMatch())
+            const bool customColor = customSwatch->isChecked();
+            const auto chosenColor = customColor ? hexColor->text().trimmed().toLower()
+                                                 : kChatColors.value(colorGroup->checkedId());
+            if (customColor && !QRegularExpression("^#[0-9a-f]{6}$").match(chosenColor).hasMatch())
                 throw std::runtime_error("Enter a valid HEX color in the form #RRGGBB.");
             const auto sprites = spriteEditor->sprites();
             if (unlocked && sprites.enabled && !sprites.complete())
