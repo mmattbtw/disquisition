@@ -517,6 +517,12 @@ if(BUILD_TESTING AND TARGET desktop_update)
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen)
+  add_executable(volume_menu_test test/volume_menu_test.cpp)
+  target_link_libraries(volume_menu_test PRIVATE desktop_screen)
+  add_test(NAME volume_menu_test COMMAND volume_menu_test)
+  set_tests_properties(volume_menu_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
+
   add_executable(screen_drawing_test test/screen_drawing_test.cpp)
   target_link_libraries(screen_drawing_test PRIVATE desktop_screen)
   add_test(NAME screen_drawing_test COMMAND screen_drawing_test)
