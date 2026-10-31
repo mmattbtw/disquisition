@@ -941,12 +941,13 @@ int main(int argc, char** argv) {
     CHECK(tile->image().pixelColor(100, 100).red() > 150);
     // Stopping the screen subscription leaves the camera subscribed.
     stage->stopWatchingRequested(remote.peerId());
-    H264Encoder faceEncoder;
+    // Reuse the one encoder: on Windows, each encoder opened on this thread
+    // tries Media Foundation, which leaves COM uninitialized here once too often.
     QImage face(320, 180, QImage::Format_RGB32);
     face.fill(QColor("#3a78d8"));
     QByteArray faceVideo;
     bool faceKeyframe = false;
-    CHECK(faceEncoder.encode(face, face.size(), 30, 0, faceVideo, faceKeyframe) && faceKeyframe);
+    CHECK(encoder.encode(face, face.size(), 30, 16, faceVideo, faceKeyframe, true) && faceKeyframe);
     CHECK(remote.sendScreenFrame(cid, voiceChannel, node->peerId(), 2, {faceVideo}, true, true));
     CHECK(until([&] { return cameraOf(remote.peerId()).pixelColor(100, 100).blue() > 150; }));
     stage->watchRequested(remote.peerId());
