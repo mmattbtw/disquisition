@@ -612,16 +612,18 @@ void Node::read(Link* link) {
             return;
         }
         if (link->merging)
-            return; // Leave further frames in the bounded socket buffer until validation finishes.
-        link->buffer += link->socket->readAll();
-        if (link->buffer.size() > 3 * kMaxPacketBytes)
-            throw std::runtime_error("community receive buffer exceeded");
+            return; // Leave further frames in the socket until validation finishes.
         QJsonObject message;
-        while (takeFrame(link->buffer, message)) {
-            handle(link, message);
-            if (!links_.contains(link) || link->merging)
-                return;
-        }
+        // Take only what fits the receive bound. A merge pause can leave more
+        // decrypted data queued than the socket's read buffer size.
+        do {
+            link->buffer += link->socket->read(3 * kMaxPacketBytes - link->buffer.size());
+            while (takeFrame(link->buffer, message)) {
+                handle(link, message);
+                if (!links_.contains(link) || link->merging)
+                    return;
+            }
+        } while (link->socket->bytesAvailable() > 0);
     }
     catch (const std::exception& error) {
         emit errorOccurred(QString::fromUtf8(error.what()));

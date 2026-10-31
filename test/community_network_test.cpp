@@ -9,6 +9,7 @@
 #include <QThread>
 #include <QThreadPool>
 #include <QSemaphore>
+#include <algorithm>
 #include <cstdio>
 #include <functional>
 
@@ -189,6 +190,51 @@ void metadataValidationYieldsToTheEventLoop() {
     CHECK(b.start("bob", "127.0.0.1"));
     CHECK(until([&] { return b.communities()[cid].name == "stopped during sync" &&
                              !b.synchronizing(cid); }));
+}
+
+// Data queued behind a snapshot during validation can exceed the socket's read
+// buffer size. Resuming must stay within the receive bound, not drop the peer.
+void dataQueuedDuringValidationResumesWithinBound() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1"));
+    CHECK(b.start("bob", "127.0.0.1"));
+    const QStringList ids{a.createCommunity("first"), a.createCommunity("second")};
+    for (const auto& cid : ids) {
+        b.joinCommunity(a.invite(cid));
+        CHECK(until([&] { return b.communities().contains(cid) && !b.synchronizing(cid); }));
+    }
+    b.stop();
+    CHECK(until([&] { return a.connectionCount() == 0; }));
+    // Each picture change adds a 44 KB operation to both histories.
+    QByteArray avatar(32 * 1024, '\0');
+    for (int i = 1; i <= 24; ++i) {
+        avatar.fill(char(i));
+        a.setProfile({"alice", {}, avatar});
+    }
+    auto* pool = QThreadPool::globalInstance();
+    const int threads = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore started, release;
+    pool->start([&] { started.release(); release.acquire(); });
+    CHECK(started.tryAcquire(1, 5000));
+    QString error;
+    QObject::connect(&b, &Node::errorOccurred, [&](const QString& message) { error = message; });
+    CHECK(b.start("bob", "127.0.0.1"));
+    // Let the second snapshot arrive while the first waits for validation.
+    bool timerRan = false;
+    QTimer::singleShot(2000, &a, [&] { timerRan = true; });
+    CHECK(until([&] { return timerRan; }));
+    release.release();
+    CHECK(until([&] {
+        return std::all_of(ids.begin(), ids.end(), [&](const QString& cid) {
+            return b.communities()[cid].members.value(a.peerId()).avatar == avatar &&
+                   !b.synchronizing(cid);
+        });
+    }));
+    CHECK(error.isEmpty());
+    pool->waitForDone();
+    pool->setMaxThreadCount(threads);
 }
 
 void relayRejectsInvalidAndRetiredOptions() {
@@ -1021,6 +1067,7 @@ int main(int argc, char** argv) {
     }
     if (metadataOnly) {
         metadataValidationYieldsToTheEventLoop();
+        dataQueuedDuringValidationResumesWithinBound();
         std::puts("community_metadata_sync_test: ok");
         return 0;
     }
