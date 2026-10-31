@@ -595,6 +595,48 @@ void voiceMovesRequireAdminAndPreserveMuteState() {
     CHECK(!b.presence(cid, b.peerId()).sharing);
 }
 
+void rejoinToleratesAnInFlightSnapshot() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    diagnostics(b);
+    const auto cid = a.createCommunity("in-flight update");
+    const auto invitation = a.invite(cid);
+    b.joinCommunity(invitation);
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    QStringList errors;
+    int joined = 0;
+    QObject::connect(&b, &Node::errorOccurred,
+                     [&](const QString& message) { errors.append(message); });
+    QObject::connect(&b, &Node::joined, [&](const QString&) { ++joined; });
+    const auto sockets = b.findChildren<QSslSocket*>();
+    CHECK(sockets.size() == 1);
+    auto* socket = sockets.front();
+    socket->blockSignals(true);
+    a.edit(cid, "rename", {{"name", "in-flight update"}});
+    CHECK(until([&] {
+        auto buffered = socket->peek(socket->bytesAvailable());
+        QJsonObject message;
+        while (takeFrame(buffered, message))
+            if (message.value("type") == "state-end" && message.value("community") == cid)
+                return true;
+        return false;
+    }));
+    // A metadata snapshot from before the leave arrives during the new join.
+    b.edit(cid, "leave", {});
+    b.joinCommunity(invitation);
+    socket->blockSignals(false);
+    CHECK(QMetaObject::invokeMethod(socket, "readyRead", Qt::DirectConnection));
+    CHECK(errors.isEmpty());
+    CHECK(joined == 0 && b.pendingCommunities().contains(cid));
+    CHECK(until([&] { return a.online(cid).size() == 2 && b.online(cid).size() == 2; }));
+    CHECK(errors.isEmpty() && joined == 1);
+    CHECK(a.connectionCount() == 1 && b.connectionCount() == 1);
+}
+
 void repeatedRejoinUsesExistingPeerConnection() {
     QTemporaryDir ad, bd;
     Node a(ad.path()), b(bd.path());
@@ -887,6 +929,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "TLS backend unavailable: %s\n", backend.toUtf8().constData());
         return 77;
     }
+    rejoinToleratesAnInFlightSnapshot();
     stalledAuthenticatedMetadataDoesNotBlockAdmissionsForever();
     stalledUnauthenticatedMemberDoesNotBlockAdmissions();
     localAuthorityDoesNotDependOnPeerSynchronization();
