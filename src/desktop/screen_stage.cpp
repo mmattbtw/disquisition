@@ -12,11 +12,34 @@
 #include <QShortcut>
 #include <QStackedWidget>
 #include <QStyle>
+#include <QTimer>
 #include <QVBoxLayout>
+#include <QWindowStateChangeEvent>
 
 #include <cmath>
 
 #include "desktop/volume_menu.h"
+
+namespace {
+
+class FullscreenWindow final : public QWidget {
+public:
+    explicit FullscreenWindow(QWidget* parent) : QWidget(parent, Qt::Window) {}
+
+protected:
+    void changeEvent(QEvent* event) override {
+        QWidget::changeEvent(event);
+        if (event->type() == QEvent::WindowStateChange &&
+            static_cast<QWindowStateChangeEvent*>(event)->oldState().testFlag(Qt::WindowFullScreen) &&
+            !isFullScreen()) {
+            // The macOS green button leaves fullscreen without closing the viewer.
+            // Close after the native state-change callback has returned.
+            QTimer::singleShot(0, this, &QWidget::close);
+        }
+    }
+};
+
+} // namespace
 
 StreamView::StreamView(QWidget* parent) : DrawingCanvas(parent) {
     setMinimumSize(160, 90);
@@ -632,7 +655,7 @@ void ScreenStage::toggleFullscreen(const QString& name) {
         return;
     }
     // A child window, so it closes along with the app.
-    auto* window = new QWidget(this, Qt::Window);
+    auto* window = new FullscreenWindow(this);
     window->setAttribute(Qt::WA_DeleteOnClose);
     window->setWindowTitle(tile->displayName() + "'s screen");
     auto* layout = new QVBoxLayout(window);

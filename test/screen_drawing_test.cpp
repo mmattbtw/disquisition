@@ -226,6 +226,35 @@ void testClosingFullscreenRestoresEscape() {
     CHECK(!stage->findChild<QShortcut*>()->isEnabled());
 }
 
+void testLeavingFullscreenClosesViewer() {
+    ScreenStage stage;
+    stage.addStream("alice", true);
+    auto* tile = stage.findChild<StreamTile*>();
+    CHECK(tile);
+    tile->fullscreenClicked();
+    QPointer<QWidget> fullscreen;
+    for (auto* widget : QApplication::topLevelWidgets()) {
+        if (widget->windowTitle() == "alice's screen")
+            fullscreen = widget;
+    }
+    CHECK(fullscreen && fullscreen->isFullScreen());
+    fullscreen->showNormal(); // the state change made by the macOS green button
+    QApplication::processEvents();
+    QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(!fullscreen);
+    CHECK(!stage.findChild<QShortcut*>()->isEnabled());
+    CHECK(stage.findChild<StreamTile*>() == tile);
+    // A later Fullscreen click must open a fresh viewer, not toggle a stale one off.
+    tile->fullscreenClicked();
+    for (auto* widget : QApplication::topLevelWidgets()) {
+        if (widget->windowTitle() == "alice's screen")
+            fullscreen = widget;
+    }
+    CHECK(fullscreen && fullscreen->isFullScreen());
+    fullscreen->close();
+    QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+}
+
 void testClientOwnedDrawing() {
     ScreenDrawing own, viewer, late;
     ScreenDrawingSession host("alice", "alice", &own, true);
@@ -876,6 +905,7 @@ int main(int argc, char** argv) {
     testEscapeFromAnotherControl();
     testEscapeFromPresenterWindows();
     testClosingFullscreenRestoresEscape();
+    testLeavingFullscreenClosesViewer();
     testClientOwnedDrawing();
     testEditingAndIdentity();
     testUndoOwnStrokes();
