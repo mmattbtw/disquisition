@@ -19,6 +19,7 @@ struct Presence {
     bool muted = false;
     bool deafened = false;
     bool sharing = false;
+    bool camera = false;
 };
 
 // One event-loop-owned peer registry across all communities. Relay tunnels
@@ -51,9 +52,9 @@ public:
                    QJsonObject data);
     // Congestion may skip a frame, but never just its remaining chunks.
     bool sendScreenFrame(const QString& community, const QString& channel, const QString& peer,
-                         quint32 frame, const QList<QByteArray>& chunks, bool keyframe);
+                         quint32 frame, const QList<QByteArray>& chunks, bool keyframe, bool camera = false);
     void setVoice(const QString& community, const QString& channel, bool muted = false,
-                  bool deafened = false, bool sharing = false);
+                  bool deafened = false, bool sharing = false, bool camera = false);
     void moveVoice(const QString& community, const QString& peer, const QString& channel);
     QSet<QString> online(const QString& community) const;
     QString host(const QString& community) const;
