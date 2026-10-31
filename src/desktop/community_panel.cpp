@@ -3,10 +3,12 @@
 #include <QAction>
 #include <QAudio>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QColorDialog>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
@@ -83,6 +85,7 @@ const QString kDefaultRelay = QStringLiteral("relay.disquisition.app");
 const QStringList kChatColors{"pink", "mint", "butter", "periwinkle", "lilac", "aqua", "peach"};
 bool validChatColor(const QString& value) {
     if (kChatColors.contains(value)) return true;
+    if (QRegularExpression("^#[0-9a-fA-F]{6}$").match(value).hasMatch()) return true;
     if (value.isEmpty() || value.size() > 3) return false;
     for (const auto character : value)
         if (character < QLatin1Char('0') || character > QLatin1Char('9')) return false;
@@ -1320,10 +1323,60 @@ void CommunityPanel::settings() {
         return form;
     };
     auto* userForm = page("User", "Your profile is shared with members of your communities.");
-    auto* color = new QLineEdit(messageColor_, &dialog);
-    color->setObjectName("userChatColor");
-    color->setToolTip("pink, mint, butter, periwinkle, lilac, aqua, peach, or an allowed 0-255 color");
-    userForm->addRow("Chat color", color);
+    // The presets, then a color wheel for a custom HEX color, as in the drawing toolbar.
+    auto* colorRow = new QWidget(&dialog);
+    colorRow->setObjectName("userChatColor");
+    colorRow->setAccessibleName("Chat color");
+    auto* colorLayout = new QHBoxLayout(colorRow);
+    colorLayout->setContentsMargins(0, 0, 0, 0);
+    colorLayout->setSpacing(2);
+    auto* colorGroup = new QButtonGroup(colorRow);
+    for (int i = 0; i < kChatColors.size(); ++i) {
+        auto* swatch = new ColorSwatch(kChatColors[i], colorRow);
+        swatch->setObjectName("userChatColor_" + kChatColors[i]);
+        swatch->setColor(chatColor(kChatColors[i]));
+        swatch->setChecked(kChatColors[i] == messageColor_);
+        colorGroup->addButton(swatch, i);
+        colorLayout->addWidget(swatch);
+    }
+    auto* customSwatch = new ColorSwatch("custom color", colorRow);
+    customSwatch->setObjectName("userChatColorCustom");
+    customSwatch->setChecked(!kChatColors.contains(messageColor_));
+    if (customSwatch->isChecked()) customSwatch->setColor(chatColor(messageColor_));
+    colorGroup->addButton(customSwatch, kChatColors.size());
+    colorLayout->addWidget(customSwatch);
+    colorLayout->addSpacing(6);
+    auto* hexColor = new QLineEdit(chatColor(messageColor_).name(QColor::HexRgb).toUpper(), colorRow);
+    hexColor->setObjectName("userChatColorHex");
+    hexColor->setAccessibleName("Hex chat color");
+    hexColor->setPlaceholderText("#RRGGBB");
+    hexColor->setMaxLength(7);
+    hexColor->setFixedWidth(96);
+    hexColor->setToolTip("Enter a color as #RRGGBB.");
+    auto* pickColor = new QPushButton("Pick color…", colorRow);
+    pickColor->setObjectName("userChatColorPicker");
+    setFlag(pickColor, "compact", true);
+    colorLayout->addWidget(hexColor);
+    colorLayout->addWidget(pickColor);
+    colorLayout->addStretch();
+    userForm->addRow("Chat color", colorRow);
+    const auto updateCustomColor = [=] {
+        hexColor->setVisible(customSwatch->isChecked());
+        pickColor->setVisible(customSwatch->isChecked());
+    };
+    connect(colorGroup, &QButtonGroup::idToggled, &dialog, updateCustomColor);
+    updateCustomColor();
+    connect(hexColor, &QLineEdit::textChanged, &dialog, [=](const QString& text) {
+        if (QRegularExpression("^#[0-9a-fA-F]{6}$").match(text.trimmed()).hasMatch())
+            customSwatch->setColor(QColor(text.trimmed()));
+    });
+    connect(pickColor, &QPushButton::clicked, &dialog, [&] {
+        const auto current = hexColor->text().trimmed();
+        const auto selected = QColorDialog::getColor(
+            validChatColor(current) ? chatColor(current) : chatColor(messageColor_),
+            &dialog, "Chat color", QColorDialog::DontUseNativeDialog);
+        if (selected.isValid()) hexColor->setText(selected.name(QColor::HexRgb).toUpper());
+    });
     auto* showPenguins = new QCheckBox("Show desktop penguins for this community", &dialog);
     showPenguins->setObjectName("communityShowPenguins");
     showPenguins->setChecked(penguinsAction_->isChecked());
@@ -1575,8 +1628,11 @@ void CommunityPanel::settings() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
-            if (!validChatColor(color->text().trimmed().toLower()))
-                throw std::runtime_error("Choose a valid chat color. Use /color for available colors.");
+            const bool customColor = customSwatch->isChecked();
+            const auto chosenColor = customColor ? hexColor->text().trimmed().toLower()
+                                                 : kChatColors.value(colorGroup->checkedId());
+            if (customColor && !QRegularExpression("^#[0-9a-f]{6}$").match(chosenColor).hasMatch())
+                throw std::runtime_error("Enter a valid HEX color in the form #RRGGBB.");
             const auto sprites = spriteEditor->sprites();
             if (unlocked && sprites.enabled && !sprites.complete())
                 throw std::runtime_error("Upload both a standing and walking image, or turn custom sprites off.");
@@ -1604,7 +1660,7 @@ void CommunityPanel::settings() {
             node_->setProfile(profile);
             name_->setText(profile.name);
             saved.setValue("community/name", profile.name);
-            runCommand("/color " + color->text().trimmed());
+            runCommand("/color " + chosenColor);
             saved.setValue("voice/pushToTalk", ptt->isChecked());
             if (pttKey->key()) {
                 saved.setValue("voice/pushToTalkKey", *pttKey->key());
@@ -3685,7 +3741,7 @@ void CommunityPanel::runCommand(const QString& command) {
     if (name == "/color") {
         if (argument.isEmpty()) {
             commandReply("Color", "Current color: " + messageColor_ +
-                "\nColors: pink, mint, butter, periwinkle, lilac, aqua, peach. Use /color <name or 0-255>.");
+                "\nColors: pink, mint, butter, periwinkle, lilac, aqua, peach. Use /color <name, #RRGGBB, or 0-255>.");
         } else if (!validChatColor(argument.toLower())) {
             commandReply("Color", "Unknown or reserved color: " + argument + ". Try /color for available colors.");
             return;
@@ -3698,7 +3754,7 @@ void CommunityPanel::runCommand(const QString& command) {
             refresh();
         }
     } else if (name == "/help") {
-        commandReply("Help", "/users  list online members\n/color <name or 0-255>  set your name color\n"
+        commandReply("Help", "/users  list online members\n/color <name, #RRGGBB, or 0-255>  set your name color\n"
             "/voice  join the selected voice channel\n/leavevoice  leave voice\n"
             "/mute, /unmute, /deafen, /undeafen  control voice\n/gif [search]  choose a GIF\n"
             "/clear  clear this channel on this device\n/save  open User Settings\n"

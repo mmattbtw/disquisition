@@ -4,6 +4,7 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QPointer>
+#include <QPushButton>
 #include <QSet>
 #include <QTimer>
 #include <QWidget>
@@ -114,6 +115,21 @@ private:
     QList<chat::ScreenDraw> segments_;
     QSet<QString> received_;
     std::uint32_t nextSegmentId_ = 0;
+};
+
+// A round color dot, shared by the drawing toolbar and the chat color setting.
+// The chosen one wears a light ring; an invalid color paints a color wheel, for
+// a custom color not yet picked.
+class ColorSwatch final : public QPushButton {
+public:
+    ColorSwatch(const QString& name, QWidget* parent);
+    void setColor(const QColor& color);
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+
+private:
+    QColor color_;
 };
 
 class DrawingControls final : public QWidget {
