@@ -416,11 +416,11 @@
   .member .info { min-width: 0; flex: 1; }
   .member .nn { font-size: 12px; color: #d7dcda; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
   .member .role { font-size: 8px; text-transform: uppercase; letter-spacing: .06em; color: #20262c; background: #b9c3c7; padding: 1px 3px; font-weight: 800; }
-  .member .role.owner { background: var(--accent); }
-  .member .role.mod { background: #d9c58a; }
+  .member .role.owner { background: #a5dfdc; }
+  .member .role.admin { background: #f2d27a; }
   .member .sub { font-size: 10px; color: #7f8891; white-space: nowrap; display: flex; align-items: center; gap: 4px; margin-top: 1px; }
-  .member .sub.sharing { color: #ffb3b3; }
-  .member .sub.voice { color: #9dccca; }
+  .member .sub.sharing { color: #ec97b7; }
+  .member .sub.voice { color: #8fc7c2; }
   .member .state { color: #7b848d; display: flex; gap: 5px; }
   .member .state svg { width: 12px; height: 12px; }
 
@@ -463,7 +463,9 @@
   .dialog-header h2 { font-family: CalSans, sans-serif; font-weight: 400; font-size: 25px; color: #eef1ef; margin: 4px 0 3px; }
   .dialog-header p { margin: 0; font-size: 12px; color: #97a1a8; }
   .dialog-body { display: flex; gap: 22px; padding: 18px 22px; }
-  .dialog-body .left { flex: 1; min-width: 0; }
+  .dialog-body .left { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+  .dialog-body .left .linkrow { align-self: stretch; }
+  .save-qr { margin-top: auto; height: 28px; font-size: 12px; }
   .label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #8d979f; font-weight: 700; margin-bottom: 6px; }
   .linkrow { display: flex; gap: 6px; }
   .linkrow .link {
@@ -474,16 +476,6 @@
   }
   .linkrow .btn { height: 34px; }
   .hint { font-size: 11px; color: #8d979f; margin-top: 8px; line-height: 1.5; }
-  .perm { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; }
-  .checkbox {
-    width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px;
-    border: 1px solid #7c8791; background: #282c34;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .checkbox.on { background: var(--accent); border-color: var(--accent); color: #20262c; }
-  .checkbox svg { width: 10px; height: 10px; }
-  .perm .pt { font-size: 12px; color: #d3d8d6; }
-  .perm .ps { font-size: 10.5px; color: #8d979f; margin-top: 1px; line-height: 1.4; }
   .qr-wrap { flex: 0 0 172px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
   .qr { width: 150px; height: 150px; background: #f2f4ef; padding: 9px; }
   .qr-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(25, 1fr); grid-template-rows: repeat(25, 1fr); }
@@ -519,10 +511,9 @@
     </div>
     <div class="connectbar">
       <div class="field">maya <span class="caret"></span></div>
-      <button class="btn primary">Connect</button>
-      <button class="btn ghost">User Settings</button>
+      <button class="btn">Disconnect</button>
       <div class="spacer"></div>
-      <div class="conn"><span class="dot"></span> Connected <span style="color:#4f5c60">·</span> relay.disquisition.app</div>
+      <div class="conn"><span class="dot"></span> Connected</div>
     </div>
     <div class="shell">
       <aside class="sidebar">
@@ -695,15 +686,15 @@
 
           <aside class="members">
             <div class="group">Online <span>— 6</span></div>
-            <div class="member"><span class="av maya">M</span><div class="info"><div class="nn">maya <span class="role owner">owner</span></div><div class="sub voice">in voice · hosting</div></div></div>
-            <div class="member"><span class="av june">J</span><div class="info"><div class="nn">june <span class="role mod">mod</span></div><div class="sub sharing">sharing screen · drawing</div></div></div>
-            <div class="member"><span class="av theo">T</span><div class="info"><div class="nn">theo</div><div class="sub voice">in voice</div></div><div class="state"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4" y="1" width="4" height="6" rx="2"/><path d="M2.5 5.5a3.5 3.5 0 007 0M6 9v2"/></svg></div></div>
-            <div class="member"><span class="av kofi">K</span><div class="info"><div class="nn">kofi</div><div class="sub voice">in voice</div></div></div>
-            <div class="member"><span class="av priya">P</span><div class="info"><div class="nn">priya</div><div class="sub">watching</div></div></div>
-            <div class="member"><span class="av sam">S</span><div class="info"><div class="nn">sam</div><div class="sub">watching</div></div></div>
+            <div class="member"><span class="av maya">M</span><div class="info"><div class="nn">maya <span class="role owner">owner</span></div><div class="sub voice">in voice · Lounge</div></div></div>
+            <div class="member"><span class="av june">J</span><div class="info"><div class="nn">june <span class="role admin">admin</span></div><div class="sub sharing">sharing screen</div></div></div>
+            <div class="member"><span class="av theo">T</span><div class="info"><div class="nn">theo</div><div class="sub voice">in voice · Lounge</div></div><div class="state"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4" y="1" width="4" height="6" rx="2"/><path d="M2.5 5.5a3.5 3.5 0 007 0M6 9v2"/></svg></div></div>
+            <div class="member"><span class="av kofi">K</span><div class="info"><div class="nn">kofi</div><div class="sub voice">in voice · Lounge</div></div></div>
+            <div class="member"><span class="av priya">P</span><div class="info"><div class="nn">priya</div><div class="sub">online</div></div></div>
+            <div class="member"><span class="av sam">S</span><div class="info"><div class="nn">sam</div><div class="sub">online</div></div></div>
             <div class="group" style="margin-top:12px;padding-top:10px;border-top:1px solid #353c45">Offline <span>— 2</span></div>
-            <div class="member"><span class="av noor">N</span><div class="info"><div class="nn" style="color:#8d959e">noor</div><div class="sub">last seen yesterday</div></div></div>
-            <div class="member"><span class="av" style="background:#3a4048;color:#8d959e">A</span><div class="info"><div class="nn" style="color:#8d959e">ari</div><div class="sub">last seen 3d ago</div></div></div>
+            <div class="member"><span class="av noor">N</span><div class="info"><div class="nn" style="color:#8d959e">noor</div><div class="sub">offline</div></div></div>
+            <div class="member"><span class="av" style="background:#3a4048;color:#8d959e">A</span><div class="info"><div class="nn" style="color:#8d959e">ari</div><div class="sub">offline</div></div></div>
           </aside>
         </div>
 
@@ -816,39 +807,26 @@
   <div class="modal-scene">
     <div class="dialog">
       <div class="dialog-header">
-        <div class="eyebrow">The Studio</div>
         <h2>Invite people in</h2>
-        <p>Share a link or a QR code. No server, no sign-up — the community comes with you.</p>
+        <p>Share a link or a QR code to bring people into The Studio.</p>
       </div>
       <div class="dialog-body">
         <div class="left">
           <div class="label">Invite link</div>
           <div class="linkrow">
-            <div class="link">disquisition.app/i/7f3k-9maya-q2</div>
+            <div class="link">disquisition://join/eyJjb2RlIjoiN2YzazltYXlhcTIiLCJjb21tdW5pdHkiOiJzdHVkaW8i</div>
             <button class="btn primary">Copy</button>
           </div>
-          <div class="hint">Anyone with this link can join as a member while the community exists. Revoke it any time.</div>
-          <div class="perm">
-            <span class="checkbox on"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 5.2l2.2 2.2 4.8-5"/></svg></span>
-            <div><div class="pt">Let new members draw on screen shares</div><div class="ps">The sharer still controls it per stream.</div></div>
-          </div>
-          <div class="perm">
-            <span class="checkbox on"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 5.2l2.2 2.2 4.8-5"/></svg></span>
-            <div><div class="pt">Can join voice and share screen</div><div class="ps">Admins can mute, move, or remove people.</div></div>
-          </div>
-          <div class="perm">
-            <span class="checkbox"></span>
-            <div><div class="pt">Invite others</div><div class="ps">Members can create their own invite links.</div></div>
-          </div>
+          <div class="hint">Anyone with this link can join as a member while the community exists.</div>
+          <button class="btn save-qr">Save QR image</button>
         </div>
         <div class="qr-wrap">
           <div class="qr"><div class="qr-grid" id="qr"></div></div>
-          <div class="qs">Scan to join<br>expires with the community</div>
+          <div class="qs">scan to join</div>
         </div>
       </div>
       <div class="dialog-footer">
         <div class="note">Invites are signed with the community's key.</div>
-        <button class="btn ghost">Cancel</button>
         <button class="btn primary">Done</button>
       </div>
     </div>
