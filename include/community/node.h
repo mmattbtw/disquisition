@@ -84,6 +84,7 @@ private:
     void encrypted(Link* link);
     void read(Link* link);
     void handle(Link* link, const QJsonObject& message);
+    void mergeSnapshot(Link* link, const QString& community, const QJsonObject& snapshot);
     void send(Link* link, QJsonObject message);
     static qint64 writeBacklog(const Link* link);
     void queueVideo(Link* link, const QJsonObject& message);

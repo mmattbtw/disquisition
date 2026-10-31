@@ -1,6 +1,8 @@
 #include "community/node.h"
 
 #include <QDateTime>
+#include <QFutureWatcher>
+#include <QtConcurrentRun>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QNetworkInterface>
@@ -76,6 +78,7 @@ struct Node::Link {
     bool tls = false;
     bool awaitingTls = false;
     bool hello = false;
+    bool merging = false;
     qint64 started = now();
     qint64 touched = now();
     QByteArray buffer;
@@ -94,6 +97,7 @@ struct Node::Link {
         int count = 0;
         qsizetype bytes = 0;
         qint64 started = now();
+        bool complete = false;
     };
     QMap<QString, Snapshot> snapshots;
 };
@@ -607,21 +611,118 @@ void Node::read(Link* link) {
             }
             return;
         }
-        link->buffer += link->socket->readAll();
-        if (link->buffer.size() > 3 * kMaxPacketBytes)
-            throw std::runtime_error("community receive buffer exceeded");
+        if (link->merging)
+            return; // Leave further frames in the socket until validation finishes.
         QJsonObject message;
-        while (takeFrame(link->buffer, message)) {
-            handle(link, message);
-            if (!links_.contains(link))
-                return;
-        }
+        // Take only what fits the receive bound. A merge pause can leave more
+        // decrypted data queued than the socket's read buffer size.
+        do {
+            link->buffer += link->socket->read(3 * kMaxPacketBytes - link->buffer.size());
+            while (takeFrame(link->buffer, message)) {
+                handle(link, message);
+                if (!links_.contains(link) || link->merging)
+                    return;
+            }
+        } while (link->socket->bytesAvailable() > 0);
     }
     catch (const std::exception& error) {
         emit errorOccurred(QString::fromUtf8(error.what()));
         if (links_.contains(link))
             link->socket->abort();
     }
+}
+
+void Node::mergeSnapshot(Link* link, const QString& cid, const QJsonObject& object) {
+    // Only value copies cross threads. Socket, store and UI callbacks stay on this event loop.
+    const auto base = models_.value(cid);
+    const auto revision = base.id.isEmpty() ? QString{} : base.revision();
+    struct Result {
+        Model candidate;
+        bool hasChanges = true;
+        QString error;
+    };
+    auto* watcher = new QFutureWatcher<Result>(link->socket);
+    link->merging = true;
+    connect(watcher, &QFutureWatcher<Result>::finished, this,
+            [this, link, socket = QPointer<QSslSocket>(link->socket), cid, object, revision, watcher] {
+        if (!socket || !links_.contains(link) || link->socket != socket)
+            return;
+        auto result = watcher->result();
+        watcher->deleteLater();
+        try {
+            if (!result.error.isEmpty())
+                throw std::runtime_error(result.error.toStdString());
+            // Local edits and other peers may have advanced the model during validation.
+            const auto current = models_.contains(cid) ? models_[cid].revision() : QString{};
+            if (current != revision) {
+                mergeSnapshot(link, cid, object);
+                return;
+            }
+            link->snapshots.remove(cid);
+            auto candidate = std::move(result.candidate);
+            const bool hasChanges = result.hasChanges;
+            if (!candidate.isMember(link->peer) && !link->allowed.contains(cid))
+                throw std::runtime_error("snapshot sender is not a member");
+            const bool joining = pending_.contains(cid);
+            const bool admitted = candidate.isMember(peerId());
+            // A retained community can receive an older snapshot while rejoining.
+            // Merge its history, but keep the join pending until membership is proven.
+            if (joining && !admitted && !models_.contains(cid))
+                throw std::runtime_error("admission proof was not accepted");
+            if (hasChanges)
+                save(std::move(candidate));
+            if (joining && admitted) {
+                pending_.remove(cid);
+                joining_.remove(cid);
+                joinStarted_.remove(cid);
+                persistPending();
+                emit joined(cid);
+            }
+            link->claimed.insert(cid);
+            if (writable(link, cid)) {
+                link->allowed.insert(cid);
+                link->ready.insert(cid);
+                link->synchronizing.remove(cid);
+                send(link,
+                     {{"type", "synced"}, {"community", cid}, {"revision", models_[cid].revision()}});
+                send(link, presenceObject(cid, mine_.value(cid)));
+            }
+            else {
+                link->allowed.remove(cid);
+                link->ready.remove(cid);
+                link->synchronizing.remove(cid);
+            }
+            if (hasChanges)
+                broadcastState(cid);
+            publishProfile(cid);
+            emit changed();
+            link->merging = false;
+            // Resume buffered frames even if no further readyRead signal arrives.
+            QTimer::singleShot(0, this, [this, link, socket] {
+                if (socket && links_.contains(link) && link->socket == socket)
+                    read(link);
+            });
+        }
+        catch (const std::exception& error) {
+            emit errorOccurred(QString::fromUtf8(error.what()));
+            if (links_.contains(link))
+                link->socket->abort();
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([base, object, cid]() mutable {
+        Result result;
+        try {
+            result.candidate = base;
+            if (base.id.isEmpty())
+                result.candidate = Model::fromJson(object, cid, object.value("owner").toString());
+            else
+                result.hasChanges = result.candidate.merge(object);
+        }
+        catch (const std::exception& error) {
+            result.error = QString::fromUtf8(error.what());
+        }
+        return result;
+    }));
 }
 
 bool Node::writable(Link* link, const QString& cid) const {
@@ -826,54 +927,13 @@ void Node::handle(Link* link, const QJsonObject& message) {
     if (type == "state-end") {
         if (!link->snapshots.contains(cid))
             throw std::runtime_error("snapshot was not started");
-        const auto snapshot = link->snapshots.take(cid);
+        const auto snapshot = link->snapshots.value(cid);
         if (snapshot.operations.size() != snapshot.count)
             throw std::runtime_error("incomplete community snapshot");
         const QJsonObject object{
             {"v", 1}, {"id", cid}, {"owner", snapshot.owner}, {"operations", snapshot.operations}};
-        bool hasChanges = true;
-        Model candidate;
-        if (models_.contains(cid)) {
-            candidate = models_[cid];
-            hasChanges = candidate.merge(object);
-        }
-        else
-            candidate = Model::fromJson(object, cid, pending_[cid].owner);
-        if (!candidate.isMember(link->peer) && !link->allowed.contains(cid))
-            throw std::runtime_error("snapshot sender is not a member");
-        const bool joining = pending_.contains(cid);
-        const bool admitted = candidate.isMember(peerId());
-        // A retained community can receive an older snapshot while rejoining.
-        // Merge its history, but keep the join pending until membership is proven.
-        if (joining && !admitted && !models_.contains(cid))
-            throw std::runtime_error("admission proof was not accepted");
-        if (hasChanges)
-            save(std::move(candidate));
-        if (joining && admitted) {
-            pending_.remove(cid);
-            joining_.remove(cid);
-            joinStarted_.remove(cid);
-            persistPending();
-            emit joined(cid);
-        }
-        link->claimed.insert(cid);
-        if (writable(link, cid)) {
-            link->allowed.insert(cid);
-            link->ready.insert(cid);
-            link->synchronizing.remove(cid);
-            send(link,
-                 {{"type", "synced"}, {"community", cid}, {"revision", models_[cid].revision()}});
-            send(link, presenceObject(cid, mine_.value(cid)));
-        }
-        else {
-            link->allowed.remove(cid);
-            link->ready.remove(cid);
-            link->synchronizing.remove(cid);
-        }
-        if (hasChanges)
-            broadcastState(cid);
-        publishProfile(cid);
-        emit changed();
+        link->snapshots[cid].complete = true;
+        mergeSnapshot(link, cid, object);
         return;
     }
     if (type == "synced") {
@@ -1314,7 +1374,7 @@ void Node::tick() {
                 continue;
             bool stalled = false;
             for (const auto& snapshot : link->snapshots)
-                if (now() - snapshot.started > 20000)
+                if (!snapshot.complete && now() - snapshot.started > 20000)
                     stalled = true;
             if ((!link->hello && now() - link->started > 10000) ||
                 (link->hello && now() - link->touched > 35000) || stalled) {
