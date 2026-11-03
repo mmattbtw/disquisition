@@ -67,6 +67,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         statusBar()->addPermanentWidget(updateLabel_);
         statusBar()->addPermanentWidget(updateProgress_);
         statusBar()->addPermanentWidget(updateButton_);
+        // The bar only holds update progress, so it stays out of the way
+        // until there is something to show.
+        statusBar()->hide();
     }
     connect(updater_, &Updater::stateChanged, this, &MainWindow::showUpdateState);
     connect(updater_, &Updater::downloadProgress, updateProgress_, &QProgressBar::setValue);
@@ -119,13 +122,17 @@ void MainWindow::showUpdateState() {
         updateLabel_->setToolTip(build + nextStart);
         updateProgress_->setValue(state == State::Downloading ? 0 : 100);
     }
-    updateButton_->setVisible(state == State::Ready || state == State::ManualInstall);
+    const bool actionable = state == State::Ready || state == State::ManualInstall;
+    updateButton_->setVisible(actionable);
     if (state == State::Ready) {
         updateButton_->setText("Update Ready");
         updateButton_->setToolTip(build + nextStart + " Click to restart now.");
     } else if (state == State::ManualInstall) {
         updateButton_->setText("Download Update");
         updateButton_->setToolTip(build + " cannot be installed in this folder.");
+    }
+    if (updater_->enabled()) {
+        statusBar()->setVisible(working || actionable);
     }
 
     if (!updateCheckRequested_ || state == State::Idle || state == State::Checking) {
