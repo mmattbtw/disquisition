@@ -19,12 +19,12 @@ Get the desktop app from the [latest release](https://github.com/mmattbtw/disqui
 Open the desktop app, enter a name and select Connect, then create a
 community or join with an invite. See the [community guide](docs/communities.md)
 for direct connections, relay setup, hosting, and permissions.
-Linux downloads need a compatible Qt 6.8 runtime.
+Linux downloads need a compatible Qt 6.12 runtime.
 See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
 
-Install a C++20 compiler, CMake 3.16+, Qt 6.6+, OpenSSL 3+, SQLite 3.24+,
+Install a C++20 compiler, CMake 3.16+, Qt 6.12+, OpenSSL 3+, SQLite 3.24+,
 FFmpeg development libraries, and pkg-config. The first desktop configure also
 needs Git and network access for the pinned QR-code library.
 On macOS with Homebrew:

@@ -27,16 +27,12 @@ jobs:
           - os: ubuntu-24.04
             artifact: disquisition-desktop-linux-x64
             openssl-root: ''
-            qt: '6.8.3'
           - os: macos-15
             artifact: disquisition-desktop-macos-arm64
             openssl-root: /opt/homebrew/opt/openssl@3
-            # 6.9+ draws the window under a transparent title bar.
-            qt: '6.12.0'
           - os: windows-2022
             artifact: disquisition-desktop-windows-x64
             openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
-            qt: '6.8.3'
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +46,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ matrix.qt }}
+          version: '6.12.0'
           modules: qtmultimedia
           cache: true
           setup-python: false

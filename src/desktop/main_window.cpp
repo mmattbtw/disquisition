@@ -83,7 +83,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     updater_->setAutomatic(QSettings().value("updates/automatic", true).toBool());
     setStyleSheet(theme::styleSheet());
-#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+#if defined(Q_OS_MACOS)
     // Draw the app under a transparent title bar, keeping the system's window
     // buttons, so the window chrome matches the rest of the app.
     setWindowFlag(Qt::ExpandedClientAreaHint);
@@ -95,7 +95,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
-#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+#if defined(Q_OS_MACOS)
     // The panel's own title row replaces the one macOS draws.
     hideNativeWindowTitle(this);
 #endif
