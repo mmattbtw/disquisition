@@ -71,7 +71,7 @@ done
   if (( missing > 0 )); then
     printf 'See the [workflow run](%s) for the build logs.\n\n' "$run_url"
   fi
-  printf 'macOS and Windows bundle Qt. Linux requires a compatible Qt 6.8 runtime.\n\n'
+  printf 'macOS and Windows bundle Qt. Linux requires a compatible Qt 6.12 runtime.\n\n'
   printf 'Downloads are GitHub Actions ZIP artifacts. Extract them to get the installer or archive. They require signing in to GitHub and expire with artifact retention.\n\n'
   printf '<sub>[Workflow run](%s) · commit `%s`</sub>\n' "$run_url" "$sha"
 } > "$temp_dir/body.md"

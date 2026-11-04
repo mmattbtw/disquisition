@@ -155,8 +155,9 @@ storage are independent of this option.
 
 ## Build and verification
 
-Community support needs Qt 6.6+ Core/Network and OpenSSL 3+. The desktop also
-uses the existing Qt Multimedia/FFmpeg dependencies. QR support fetches a pinned
+Community support needs Qt Core/Network (6.10+ for the desktop, 6.2+ for a
+relay-only build) and OpenSSL 3+. The desktop also uses the existing Qt
+Multimedia/FFmpeg dependencies. QR support fetches a pinned
 ZXing-C++ release and links it statically. `-DBUILD_DESKTOP_APP=OFF` builds the
 relay and core tests without multimedia dependencies. Use `-DBUILD_RELAY=OFF`
 for desktop-only builds.

@@ -9,7 +9,7 @@ For a local build, see [building and packaging](building.md#desktop-app).
 ## Install
 
 The macOS DMG and Windows archive include Qt. The Linux archive requires a
-compatible Qt 6.8 runtime. On macOS, open the DMG, drag disquisition into
+compatible Qt 6.12 runtime. On macOS, open the DMG, drag disquisition into
 Applications, and eject the disk image.
 
 ## Connect and join a community

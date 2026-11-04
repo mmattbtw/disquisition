@@ -27,12 +27,16 @@ jobs:
           - os: ubuntu-24.04
             artifact: disquisition-desktop-linux-x64
             openssl-root: ''
+            qt: '6.12.0'
           - os: macos-15
             artifact: disquisition-desktop-macos-arm64
             openssl-root: /opt/homebrew/opt/openssl@3
+            qt: '6.12.0'
           - os: windows-2022
             artifact: disquisition-desktop-windows-x64
             openssl-root: 'C:/vcpkg/installed/x64-windows-static-md'
+            # aqtinstall 3.3 cannot read the Windows download layout Qt 6.11+ uses.
+            qt: '6.10.3'
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +50,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: ${{ matrix.qt }}
           modules: qtmultimedia
           cache: true
           setup-python: false

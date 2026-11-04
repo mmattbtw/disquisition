@@ -5,7 +5,7 @@ Run commands from the repository root unless a section says otherwise.
 ## Requirements
 
 Both the desktop app and relay need a C++20 compiler, CMake 3.16+, and OpenSSL 3+
-Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.6+.
+Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.10+.
 
 The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
 and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, `libswresample`,
