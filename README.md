@@ -24,7 +24,7 @@ See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
 ## Build
 
-Install a C++20 compiler, CMake 3.16+, Qt 6.12+, OpenSSL 3+, SQLite 3.24+,
+Install a C++20 compiler, CMake 3.16+, Qt 6.10+, OpenSSL 3+, SQLite 3.24+,
 FFmpeg development libraries, and pkg-config. The first desktop configure also
 needs Git and network access for the pinned QR-code library.
 On macOS with Homebrew:
