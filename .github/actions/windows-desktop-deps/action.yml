@@ -1,0 +1,72 @@
+name: Windows desktop dependencies
+description: >
+  Install OpenSSL, SQLite, pkgconf and FFmpeg for the desktop app, and set up
+  the MSVC developer environment so CMake can use Ninja. Install Qt first.
+
+runs:
+  using: composite
+  steps:
+    # The caches below hold binaries built with the runner image's MSVC and
+    # vcpkg ports tree, so key them on the image: a cache from an older image
+    # would otherwise keep restoring stale binaries and never be replaced.
+    - name: Identify Windows runner image
+      id: image
+      shell: pwsh
+      run: |
+        "id=$env:ImageOS-$env:ImageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    # Cache the installed tree rather than vcpkg's binary cache: even when every
+    # package is cached, vcpkg install spends ~40s fetching CMake and hashing the compiler.
+    - name: Restore vcpkg packages
+      id: vcpkg-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: C:/vcpkg/installed
+        key: vcpkg-installed-${{ steps.image.outputs.id }}-openssl-sqlite3-pkgconf
+
+    - name: Install vcpkg packages
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install pkgconf:x64-windows sqlite3:x64-windows
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Save as soon as the packages are built, so a later build failure doesn't discard them.
+    - name: Save vcpkg packages
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: C:/vcpkg/installed
+        key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+    - name: Use vcpkg pkg-config
+      shell: pwsh
+      run: |
+        $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
+        "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+        "$installed/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Install prebuilt FFmpeg
+      shell: pwsh
+      run: |
+        # Use a retained monthly LGPL shared build, including headers and MSVC import libraries.
+        $release = 'autobuild-2026-09-30-13-08'
+        $package = 'ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-shared-8.1'
+        $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+        Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/$release/$package.zip" -OutFile $archive
+        $expectedHash = '3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a'
+        if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+          throw 'FFmpeg archive checksum mismatch'
+        }
+        Expand-Archive $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'ffmpeg')
+        $ffmpeg = Join-Path $env:RUNNER_TEMP "ffmpeg/$package"
+        "FFMPEG_ROOT=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
+        "$ffmpeg/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    # Ninja needs the MSVC developer environment. The Visual Studio generator
+    # spends about a minute in MSBuild just detecting the compiler.
+    - name: Set up MSVC
+      uses: ilammy/msvc-dev-cmd@v1

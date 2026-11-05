@@ -24,13 +24,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Desktop dependencies (Qt Multimedia, FFmpeg) make CMake build the
+        # desktop app and its tests here too. The desktop workflow builds
+        # without tests, so this workflow is the only place they run.
         include:
           - os: ubuntu-latest
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libsqlite3-dev libssl-dev
+              sudo apt-get install -y libsqlite3-dev libssl-dev libxcb1-dev pkg-config libavcodec-dev libavutil-dev libpulse-dev libswresample-dev libswscale-dev
           - os: macos-latest
-            deps: brew install openssl@3
+            deps: brew install openssl@3 sqlite ffmpeg pkgconf
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -40,10 +43,11 @@ jobs:
         if: ${{ matrix.deps != '' }}
         run: ${{ matrix.deps }}
 
-      - name: Install Qt for communities
+      - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.12.0'
+          modules: qtmultimedia
           cache: true
 
       - name: Configure
@@ -54,6 +58,45 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  # Builds like the Windows desktop release (Release, same Qt and libraries),
+  # since its static OpenSSL has no matching debug-runtime build here.
+  test-windows:
+    name: test (windows-2022)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # install-qt-action otherwise picks the newest Python, which on Windows is
+      # 3.15 and has no py7zr dependency wheels yet, so they compile every run.
+      - name: Set up Python for Qt installer
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          # aqtinstall 3.3 cannot read the Windows download layout Qt 6.11+ uses.
+          version: '6.10.3'
+          modules: qtmultimedia
+          cache: true
+          setup-python: false
+
+      - name: Install Windows desktop dependencies
+        uses: ./.github/actions/windows-desktop-deps
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_RELAY=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="C:/vcpkg/installed/x64-windows-static-md" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Each test uses its own temp files and OS-assigned ports, so they can run together.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
 
   # AddressSanitizer and UndefinedBehaviorSanitizer turn silent memory bugs
   # (use-after-free, overflows, leaks, undefined behavior) into test failures.

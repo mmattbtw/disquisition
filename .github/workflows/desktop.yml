@@ -17,9 +17,6 @@ jobs:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       # Matches the main-<run number> release tag. 0 disables updates.
       DISQUISITION_BUILD_NUMBER: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_number || 0 }}
-      # MSVC reads extra flags from CL; /MP compiles each project's sources in
-      # parallel instead of one file at a time. Other compilers ignore it.
-      CL: /MP
     strategy:
       fail-fast: false
       matrix:
@@ -65,88 +62,26 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl@3 sqlite ffmpeg pkgconf
 
-      # The Windows caches below hold binaries built with the runner image's MSVC
-      # and vcpkg ports tree, so key them on the image: a cache from an older
-      # image would otherwise keep restoring stale binaries and never be replaced.
-      - name: Identify Windows runner image
-        id: image
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          "id=$env:ImageOS-$env:ImageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      # Cache the installed tree rather than vcpkg's binary cache: even when every
-      # package is cached, vcpkg install spends ~40s fetching CMake and hashing the compiler.
-      - name: Restore Windows vcpkg packages
-        id: vcpkg-cache
-        if: runner.os == 'Windows'
-        uses: actions/cache/restore@v4
-        with:
-          path: C:/vcpkg/installed
-          key: vcpkg-installed-${{ steps.image.outputs.id }}-openssl-sqlite3-pkgconf
-
       - name: Install Windows desktop dependencies
-        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install openssl:x64-windows-static-md
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & (Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe') install pkgconf:x64-windows sqlite3:x64-windows
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # Save as soon as the packages are built, so a later build failure doesn't discard them.
-      - name: Save Windows vcpkg packages
-        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: C:/vcpkg/installed
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
-
-      - name: Use vcpkg pkg-config
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed/x64-windows'
-          "PKG_CONFIG=$installed/tools/pkgconf/pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "$installed/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        uses: ./.github/actions/windows-desktop-deps
 
-      - name: Install prebuilt Windows FFmpeg
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Use a retained monthly LGPL shared build, including headers and MSVC import libraries.
-          $release = 'autobuild-2026-09-30-13-08'
-          $package = 'ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-shared-8.1'
-          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
-          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/$release/$package.zip" -OutFile $archive
-          $expectedHash = '3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a'
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
-            throw 'FFmpeg archive checksum mismatch'
-          }
-          Expand-Archive $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'ffmpeg')
-          $ffmpeg = Join-Path $env:RUNNER_TEMP "ffmpeg/$package"
-          "FFMPEG_ROOT=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "$ffmpeg/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append
-
+      # The test workflow builds and runs the tests on every platform.
       - name: Configure
         if: runner.os != 'Windows'
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$env:DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$env:DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
 
-      - name: Build desktop and all tests
+      - name: Build desktop
         run: cmake --build build --config Release --parallel
-
-      - name: Test community and media behavior
-        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Package Linux build
         if: runner.os == 'Linux'
@@ -171,12 +106,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
-          Copy-Item build/Release/disquisition-desktop.exe dist/
+          Copy-Item build/disquisition-desktop.exe dist/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" dist/
           New-Item -ItemType Directory -Path dist/licenses | Out-Null
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/share/openssl/copyright" dist/licenses/OpenSSL.LICENSE
           Copy-Item build/_deps/community_zxing-src/LICENSE dist/licenses/ZXing.LICENSE
-          windeployqt --release --no-translations dist/disquisition-desktop.exe
+          # The MSVC environment makes windeployqt add the VC++ redistributable
+          # installer; keep the archive as it was without that environment.
+          windeployqt --release --no-translations --no-compiler-runtime dist/disquisition-desktop.exe
           Copy-Item "$env:FFMPEG_ROOT/bin/*.dll" dist/
           Copy-Item "$env:FFMPEG_ROOT/LICENSE.txt" dist/licenses/FFmpeg.LICENSE
           Compress-Archive -Path dist/* -DestinationPath disquisition-desktop-windows-x64.zip
