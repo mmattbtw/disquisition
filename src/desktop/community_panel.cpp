@@ -1440,10 +1440,13 @@ void CommunityPanel::settings() {
     const bool unlocked = saved.value("penguins/unlocked", false).toBool();
     for (QWidget* widget : QList<QWidget*>{showPenguins, wander, idle, spriteEditor})
         userForm->setRowVisible(widget, unlocked);
-    wander->setEnabled(showPenguins->isChecked());
-    idle->setEnabled(showPenguins->isChecked());
-    connect(showPenguins, &QCheckBox::toggled, wander, &QWidget::setEnabled);
-    connect(showPenguins, &QCheckBox::toggled, idle, &QWidget::setEnabled);
+    // Penguin options only matter while penguins are shown.
+    const auto updatePenguinRows = [=] {
+        for (QWidget* widget : QList<QWidget*>{wander, idle, spriteEditor})
+            userForm->setRowVisible(widget, unlocked && showPenguins->isChecked());
+    };
+    connect(showPenguins, &QCheckBox::toggled, &dialog, updatePenguinRows);
+    updatePenguinRows();
     auto* audioForm = page("Audio", "Choose your microphone, output device, and how you talk.");
     auto* notificationForm = page("Notifications",
                                   "Choose which messages and activity get your attention.");
@@ -1677,7 +1680,8 @@ void CommunityPanel::settings() {
             if (customColor && !QRegularExpression("^#[0-9a-f]{6}$").match(chosenColor).hasMatch())
                 throw std::runtime_error("Enter a valid HEX color in the form #RRGGBB.");
             const auto sprites = spriteEditor->sprites();
-            if (unlocked && sprites.enabled && !sprites.complete())
+            const bool editSprites = unlocked && showPenguins->isChecked();
+            if (editSprites && sprites.enabled && !sprites.complete())
                 throw std::runtime_error("Upload both a standing and walking image, or turn custom sprites off.");
             const community::Profile profile{displayName->text().trimmed(), bio->toPlainText(),
                                              avatar};
@@ -1745,7 +1749,7 @@ void CommunityPanel::settings() {
             saved.setValue("messages/file", path->text().trimmed());
             saved.setValue("messages/maximum", maximum->text().trimmed());
             if (unlocked) {
-                sprites.save(saved);
+                if (editSprites) sprites.save(saved);
                 penguinsAction_->setChecked(showPenguins->isChecked());
                 saved.setValue("penguins/wander", wander->isChecked());
                 saved.setValue("penguins/idleMinutes", idle->value());
