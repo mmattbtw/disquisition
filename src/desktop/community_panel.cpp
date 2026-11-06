@@ -40,6 +40,8 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QCameraDevice>
+#include <QMediaDevices>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -131,7 +133,9 @@ QPixmap voiceIndicator(const QString& kind) {
     image.fill(Qt::transparent);
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(kind == "sharing screen" ? QColor("#9dccca") : QColor("#aebcbf"), 1.5));
+    painter.setPen(QPen(kind == "sharing screen" || kind == "camera on" ? QColor("#9dccca")
+                                                                     : QColor("#aebcbf"),
+                        1.5));
     if (kind == "muted") {
         painter.drawRoundedRect(QRectF(6, 1, 4, 8), 2, 2);
         painter.drawArc(QRectF(4, 4, 8, 7), 180 * 16, 180 * 16);
@@ -154,12 +158,17 @@ QPixmap voiceIndicator(const QString& kind) {
         speaker.closeSubpath();
         painter.drawPath(speaker);
     }
+    else if (kind == "camera on") {
+        painter.drawRoundedRect(QRectF(1.5, 4, 9, 8), 2, 2);
+        painter.drawPolygon(QPolygonF({QPointF(10.5, 7), QPointF(14.5, 4.5), QPointF(14.5, 11.5),
+                                       QPointF(10.5, 9)}));
+    }
     else {
         painter.drawRect(QRectF(2, 2, 12, 9));
         painter.drawLine(8, 11, 8, 14);
         painter.drawLine(5, 14, 11, 14);
     }
-    if (kind != "sharing screen")
+    if (kind != "sharing screen" && kind != "camera on")
         painter.drawLine(2, 1, 14, 15);
     return image;
 }
@@ -585,6 +594,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     // from the previous channel before refreshing the existing audio session.
                     // Stop capture before stopSharing so it cannot republish the
                     // previous voice channel while applying the administrator's move.
+                    stopCamera(false);
                     capture_.stop();
                     stopSharing();
                     const auto watching = watching_;
@@ -594,6 +604,10 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                         stage_->removeStream(peer);
                         screenAudio_.remove(peer);
                     }
+                    for (const auto& peer : cameras_)
+                        stage_->setCameraFrame(peer, {});
+                    cameras_.clear();
+                    cameraWatching_.clear();
                     streams_.clear();
                     watching_.clear();
                     lastScreenFrames_.clear();
@@ -656,6 +670,27 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         if (node_ && !voiceCid_.isEmpty())
             setSpeaking(node_->peerId(), speaking);
     });
+    cameraCapture_.setMaxSize({1280, 720});
+    cameraCapture_.setFrameRate(30);
+    cameraCapture_.setBacklogProbe([this] { return node_ ? node_->mediaBacklog() : qint64(0); });
+    connect(&cameraCapture_, &ScreenCapture::frameReady, this,
+            [this](quint32 frame, const QList<QByteArray>& chunks, bool keyframe) {
+        if (!online_ || voiceCid_.isEmpty()) return;
+        const auto id = "camera/" + node_->peerId();
+        QByteArray encoded;
+        for (const auto& chunk : chunks) encoded += chunk;
+        const auto image = decoders_[id].decode(frame, keyframe, encoded);
+        if (!image.isNull())
+            stage_->setCameraFrame(node_->peerId(), image);
+        const auto watchers = cameraWatchers_;
+        for (const auto& peer : watchers)
+            attempt([&] { node_->sendScreenFrame(voiceCid_, voiceChannel_, peer, frame,
+                                               chunks, keyframe, true); });
+    });
+    connect(&cameraCapture_, &ScreenCapture::errorOccurred, this, [this](const QString& error) {
+        stopCamera();
+        noteError("Camera: " + error);
+    });
     capture_.setBacklogProbe([this] { return node_ ? node_->mediaBacklog() : qint64(0); });
     connect(&capture_, &ScreenCapture::frameReady, this,
             [this](quint32 frame, const QList<QByteArray>& chunks, bool keyframe) {
@@ -679,6 +714,12 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         if (!online_ || voiceCid_.isEmpty())
             return;
         const auto now = QDateTime::currentMSecsSinceEpoch();
+        for (const auto& peer : cameraWatching_)
+            if (node_->online(voiceCid_).contains(peer) &&
+                node_->presence(voiceCid_, peer).camera &&
+                now - lastScreenFrames_.value("camera/" + peer) > 5000)
+                attempt([&] { node_->sendPacket(voiceCid_, voiceChannel_, "watch-camera",
+                                               {{"target", peer}, {"enabled", true}}); });
         for (const auto& peer : watching_)
             if (node_->online(voiceCid_).contains(peer) &&
                 node_->presence(voiceCid_, peer).sharing &&
@@ -1156,6 +1197,7 @@ void CommunityPanel::buildUi() {
     mute_ = button("Mute", "communityMute", voiceControls_);
     deafen_ = button("Deafen", "communityDeafen", voiceControls_);
     share_ = button("Share screen", "communityShare", voiceControls_);
+    camera_ = button("Turn camera on", "communityCamera", voiceControls_);
     share_->setProperty("primary", true);
     mute_->setCheckable(true);
     deafen_->setCheckable(true);
@@ -1163,7 +1205,7 @@ void CommunityPanel::buildUi() {
     voiceRow->addWidget(voiceStatus_);
     voiceRow->addSpacing(6);
     voiceRow->addWidget(voiceDetail_, 1);
-    for (auto* action : {stageToggle_, voice_, mute_, deafen_, share_}) {
+    for (auto* action : {stageToggle_, voice_, mute_, deafen_, camera_, share_}) {
         action->setProperty("compact", true);
         voiceRow->addWidget(action);
     }
@@ -1178,6 +1220,7 @@ void CommunityPanel::buildUi() {
     connect(mute_, &QPushButton::toggled, this, &CommunityPanel::voiceState);
     connect(deafen_, &QPushButton::toggled, this, &CommunityPanel::voiceState);
     connect(share_, &QPushButton::clicked, this, &CommunityPanel::share);
+    connect(camera_, &QPushButton::clicked, this, &CommunityPanel::toggleCamera);
     connect(stage_, &ScreenStage::watchRequested, this, [this](const QString& peer) {
         watch(peer, true);
         showCall(true);
@@ -2274,7 +2317,7 @@ void CommunityPanel::refresh() {
             currentVoiceChannel = voiceChannel_;
             if (node_->presence(currentVoiceCid, node_->peerId()).voiceChannel.isEmpty())
                 node_->setVoice(currentVoiceCid, currentVoiceChannel, mute_->isChecked(),
-                                deafen_->isChecked(), capture_.running());
+                                deafen_->isChecked(), capture_.running(), cameraCapture_.running());
         }
         else {
             leaveVoice();
@@ -2290,7 +2333,7 @@ void CommunityPanel::refresh() {
         if (!presence.deafened && !QSettings().value("voice/pushToTalk", false).toBool())
             mute_->setChecked(presence.muted);
     }
-    for (auto* action : {invite_, manage_, send_, image_, gif_, voice_, mute_, deafen_, share_})
+    for (auto* action : {invite_, manage_, send_, image_, gif_, voice_, mute_, deafen_, share_, camera_})
         action->setEnabled(false);
     const bool composerFocused = composer_->hasFocus();
     composer_->setEnabled(false);
@@ -2425,6 +2468,8 @@ void CommunityPanel::refresh() {
                     activity.append("deafened");
                 if (state.sharing)
                     activity.append("sharing screen");
+                if (state.camera)
+                    activity.append("camera on");
                 if (QSettings().value("community/voiceMuted/" + peer.id, false).toBool())
                     activity.append("muted by you");
                 auto label = peer.name;
@@ -2616,6 +2661,11 @@ void CommunityPanel::refresh() {
     mute_->setEnabled(inVoice && !deafen_->isChecked());
     deafen_->setEnabled(inVoice);
     share_->setEnabled(inVoice);
+    camera_->setEnabled(inVoice);
+    camera_->setText(cameraPending_              ? "Cancel camera"
+                     : cameraCapture_.running() ? "Turn camera off"
+                                                : "Turn camera on");
+    setFlag(camera_, "danger", cameraCapture_.running());
     share_->setText(capture_.running() ? "Stop sharing" : "Share screen");
     setFlag(share_, "primary", !capture_.running());
     setFlag(share_, "danger", capture_.running());
@@ -2641,7 +2691,7 @@ void CommunityPanel::refresh() {
                                     (sharers.size() == 1 ? " is" : " are") + " sharing";
         voiceDetail_->setText(detail);
         voiceDetail_->setToolTip(detail);
-        QSet<QString> active, streaming;
+        QSet<QString> active, streaming, cameras;
         // Presence is removed when the authenticated connection closes. A
         // metadata sync briefly clears readiness, but must not tear down video.
         for (const auto& peer : voiceModel.members.keys()) {
@@ -2654,6 +2704,7 @@ void CommunityPanel::refresh() {
                 }
                 if (state.sharing)
                     streaming.insert(peer);
+                if (state.camera) cameras.insert(peer);
             }
         }
         for (const auto& peer : audioPeers_ - active) {
@@ -2664,6 +2715,7 @@ void CommunityPanel::refresh() {
             if (watchers_.remove(peer))
                 announceViewers();
             viewers_.remove(peer);
+            cameraWatchers_.remove(peer);
             for (const auto& [_, session] : drawings_)
                 session->peerChanged(peer, false);
         }
@@ -2693,6 +2745,17 @@ void CommunityPanel::refresh() {
             if (watching_.contains(peer))
                 watch(peer, true);
         }
+        for (const auto& peer : cameras_ - cameras) {
+            const auto id = "camera/" + peer;
+            stage_->setCameraFrame(peer, {});
+            cameraWatching_.remove(peer);
+            decoders_.erase(id);
+            frames_.remove(id);
+            lastScreenFrames_.remove(id);
+        }
+        for (const auto& peer : cameras - cameras_)
+            watchCamera(peer);
+        cameras_ = cameras;
         streams_ = streaming;
         for (const auto& peer : streams_)
             stage_->setDisplayName(peer, memberName(voiceCid_, peer));
@@ -3289,6 +3352,12 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
         const auto session = drawings_.find(QString::fromStdString(payload.fields[0]));
         if (session != drawings_.end()) session->second->receive(peer, payload);
     }
+    else if (type == "watch-camera" && cid == voiceCid_ && channel == voiceChannel_) {
+        if (data.value("enabled").toBool() && cameraCapture_.running()) {
+            cameraWatchers_.insert(peer);
+            cameraCapture_.requestKeyframe();
+        } else cameraWatchers_.remove(peer);
+    }
     else if (type == "watch" && cid == voiceCid_ && channel == voiceChannel_) {
         const auto before = watchers_.size();
         if (data.value("enabled").toBool() && capture_.running()) {
@@ -3314,7 +3383,8 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
              channel == voiceChannel_ && !deafen_->isChecked()) {
         screenAudio_.play(peer, QByteArray::fromBase64(data.value("bytes").toString().toLatin1()));
     }
-    else if (type == "screen" && watching_.contains(peer) && cid == voiceCid_ &&
+    else if (((type == "screen" && watching_.contains(peer)) ||
+              (type == "camera" && cameraWatching_.contains(peer))) && cid == voiceCid_ &&
              channel == voiceChannel_) {
         const auto frame = data.value("frame").toDouble(-1);
         const auto index = data.value("index").toInt(-1), count = data.value("count").toInt();
@@ -3323,13 +3393,15 @@ void CommunityPanel::receive(const QString& cid, const QString& channel, const Q
             count > kMaxScreenChunks || index >= count || chunk.size() > kScreenChunkBytes)
             return;
         QByteArray encoded;
-        if (frames_.add(peer, quint32(frame), index, count, chunk, encoded)) {
-            const auto image = decoders_[peer].decode(quint32(frame),
+        const auto id = type == "camera" ? "camera/" + peer : peer;
+        if (frames_.add(id, quint32(frame), index, count, chunk, encoded)) {
+            const auto image = decoders_[id].decode(quint32(frame),
                                                       data.value("keyframe").toBool(), encoded);
             if (!image.isNull())
-                lastScreenFrames_[peer] = QDateTime::currentMSecsSinceEpoch();
+                lastScreenFrames_[id] = QDateTime::currentMSecsSinceEpoch();
             if (!image.isNull())
-                showFrame(peer, image, encoded.size());
+                type == "camera" ? stage_->setCameraFrame(peer, image)
+                                 : showFrame(peer, image, encoded.size());
         }
     }
 }
@@ -3376,7 +3448,7 @@ void CommunityPanel::voiceState() {
     audio_.setDeafened(deafen_->isChecked());
     attempt([&] {
         node_->setVoice(voiceCid_, voiceChannel_, silent,
-                        deafen_->isChecked(), capture_.running());
+                        deafen_->isChecked(), capture_.running(), cameraCapture_.running());
     });
     refresh();
 }
@@ -3389,6 +3461,7 @@ void CommunityPanel::leaveVoice() {
     voiceCid_.clear();
     pushToTalk_.stop();
     voiceChannel_.clear();
+    stopCamera(false);
     stopSharing();
     if (node_ && online_ && !previous.isEmpty())
         attempt([&] { node_->setVoice(previous, {}); });
@@ -3402,6 +3475,10 @@ void CommunityPanel::leaveVoice() {
         stage_->removeStream(peer);
         screenAudio_.remove(peer);
     }
+    for (const auto& peer : cameras_)
+        stage_->setCameraFrame(peer, {});
+    cameras_.clear();
+    cameraWatching_.clear();
     streams_.clear();
     watching_.clear();
     lastScreenFrames_.clear();
@@ -3414,6 +3491,99 @@ void CommunityPanel::leaveVoice() {
         deafen_->setChecked(false);
     }
     refresh();
+}
+
+void CommunityPanel::toggleCamera() {
+    if (cameraCapture_.running() || cameraPending_) {
+        stopCamera();
+        return;
+    }
+    if (!online_ || voiceCid_.isEmpty()) return;
+    cameraPending_ = true;
+    const auto request = ++cameraRequest_;
+    const auto cid = voiceCid_, channel = voiceChannel_;
+    refresh();
+    requestCameraAccess(this, [this, request, cid, channel](bool granted) {
+        if (request != cameraRequest_) return;
+        if (!granted) {
+            cameraPending_ = false;
+            refresh();
+            QMessageBox dialog(QMessageBox::Warning, "Camera access",
+                               "Camera access is disabled. Allow camera access in your system settings, then try again.",
+                               QMessageBox::Cancel, this);
+            dialog.setObjectName("cameraPermissionDenied");
+#if defined(Q_OS_MACOS)
+            auto* settings = dialog.addButton("Open Camera Settings", QMessageBox::ActionRole);
+            dialog.exec();
+            if (dialog.clickedButton() == settings)
+                QDesktopServices::openUrl(QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"));
+#else
+            dialog.exec();
+#endif
+            return;
+        }
+        const auto devices = QMediaDevices::videoInputs();
+        if (devices.isEmpty()) {
+            cameraPending_ = false;
+            refresh();
+            noteError("No camera is available.");
+            return;
+        }
+        auto device = QMediaDevices::defaultVideoInput();
+        if (devices.size() > 1) {
+            QStringList choices;
+            int selected = 0;
+            for (int i = 0; i < devices.size(); ++i) {
+                choices.append(QString::number(i + 1) + ". " + devices[i].description());
+                if (devices[i] == device) selected = i;
+            }
+            bool accepted = false;
+            const auto choice = QInputDialog::getItem(this, "Camera", "Choose a camera", choices,
+                                                      selected, false, &accepted);
+            if (!accepted) {
+                if (request == cameraRequest_) { cameraPending_ = false; refresh(); }
+                return;
+            }
+            device = devices[choices.indexOf(choice)];
+        }
+        // A permission prompt or picker may outlive the voice session.
+        if (request != cameraRequest_ || !online_ || voiceCid_ != cid || voiceChannel_ != channel)
+            return;
+        cameraPending_ = false;
+        if (!cameraCapture_.startCamera(device)) {
+            refresh();
+            noteError("Could not start the camera.");
+            return;
+        }
+        voiceState();
+    });
+}
+
+void CommunityPanel::stopCamera(bool updatePresence) {
+    ++cameraRequest_;
+    cameraPending_ = false;
+    const bool wasRunning = cameraCapture_.running();
+    cameraCapture_.stop();
+    cameraWatchers_.clear();
+    if (node_) {
+        stage_->setCameraFrame(node_->peerId(), {});
+        decoders_.erase("camera/" + node_->peerId());
+    }
+    if (updatePresence) {
+        if (wasRunning) voiceState();
+        else refresh();
+    }
+}
+
+// Cameras play in their owner's call tile, so everyone in the call gets them.
+void CommunityPanel::watchCamera(const QString& peer) {
+    if (voiceCid_.isEmpty()) return;
+    attempt([&] {
+        node_->sendPacket(voiceCid_, voiceChannel_, "watch-camera",
+                          {{"target", peer}, {"enabled", true}});
+        cameraWatching_.insert(peer);
+        streamRetry_.start();
+    });
 }
 
 void CommunityPanel::share() {
@@ -3475,7 +3645,7 @@ void CommunityPanel::watch(const QString& peer, bool enabled) {
             decoders_.erase(peer);
             frames_.remove(peer);
             screenAudio_.remove(peer);
-            if (watching_.isEmpty())
+            if (watching_.isEmpty() && cameraWatching_.isEmpty())
                 streamRetry_.stop();
         }
         stage_->setWatching(peer, enabled);

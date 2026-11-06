@@ -197,6 +197,25 @@ connect to communities. The app keeps retrying known peers automatically.
 A lost relay connection retries automatically without pressing Connect again.
 Voice membership is retained, and watched streams resume when the peer returns.
 
+## Facecam
+
+After joining a voice channel, choose **Turn camera on**. Allow camera access
+when prompted, then choose a device if you have more than one. Your camera
+replaces your picture in your tile in the call. People in the same voice
+channel with an updated app see your camera in your tile automatically.
+
+Camera and screen sharing work simultaneously. **Turn camera off** stops only
+your camera; **Stop sharing** stops only your screen share. Leaving voice or
+being moved to another channel turns the camera off. It stays off until you
+turn it on again. Mute and deafen affect sound, so use **Turn camera off** to
+stop sending video.
+
+Camera video uses the same encrypted peer connections as screen sharing,
+at up to 1280×720 and 30 fps. On macOS, camera access is under System Settings
+> Privacy & Security > Camera for the app's channel name. The first camera attempt
+shows the native permission prompt. If access was previously denied, choose
+**Open Camera Settings** in the access dialog to enable it.
+
 ## Screen sharing
 
 Choose share screen after joining, then pick what to stream:

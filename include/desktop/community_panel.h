@@ -109,6 +109,9 @@ private:
     void refreshAudience();
     void placePip();
     void showFrame(const QString& peer, const QImage& image, qsizetype encodedBytes);
+    void toggleCamera();
+    void stopCamera(bool updatePresence = true);
+    void watchCamera(const QString& peer);
     void watch(const QString& peer, bool enabled);
     void setStreamVolume(const QString& peer, int percent);
     void applyVoiceSettings(const QString& peer);
@@ -147,6 +150,9 @@ private:
     QSet<QString> watchers_;
     // Who watches each remote share, as its sharer last announced.
     QHash<QString, QSet<QString>> viewers_;
+    QSet<QString> cameras_, cameraWatching_, cameraWatchers_;
+    bool cameraPending_ = false;
+    quint64 cameraRequest_ = 0;
     QSet<QString> joiningCommunities_;
     QSet<QString> speaking_;
     QMap<QString, int> quietAudioFrames_;
@@ -203,6 +209,7 @@ private:
     QPushButton* mute_ = nullptr;
     QPushButton* deafen_ = nullptr;
     QPushButton* share_ = nullptr;
+    QPushButton* camera_ = nullptr;
     ChatMedia* media_ = nullptr;
     GifPicker* gifPicker_ = nullptr;
     GifSearch* gifSearch_ = nullptr;
@@ -215,6 +222,7 @@ private:
     std::unique_ptr<PresenterOverlay> presenterOverlay_;
     RelayAudio audio_;
     ScreenCapture capture_;
+    ScreenCapture cameraCapture_;
     ScreenAudioPlayer screenAudio_;
     ImageAssembler images_;
     ScreenFrameAssembler frames_;

@@ -29,6 +29,8 @@
             <array><string>disquisition</string></array>
         </dict>
     </array>
+    <key>NSCameraUsageDescription</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME} uses your camera when you turn on facecam in a voice channel.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>${MACOSX_BUNDLE_BUNDLE_NAME} uses your microphone when you join the group voice call.</string>
 </dict>

@@ -21,6 +21,8 @@
 #include "desktop/share_source.h"
 #include "desktop/system_audio_capture.h"
 
+class QCamera;
+class QCameraDevice;
 class QMediaCaptureSession;
 class QScreen;
 class QScreenCapture;
@@ -50,6 +52,7 @@ public:
     explicit ScreenCapture(QObject* parent = nullptr);
     ~ScreenCapture() override;
     bool start(const ShareSource& source, bool shareAudio);
+    bool startCamera(const QCameraDevice& device);
     void stop();
     bool running() const;
     // The encoder in use, such as "h264_nvenc".
@@ -86,6 +89,7 @@ private:
     quint64 generation_ = 0;
     // Set while sharing a screen whose frames leave out the mouse pointer.
     QPointer<QScreen> screen_;
+    QCamera* camera_ = nullptr;
     QScreenCapture* screenCapture_ = nullptr;
     QWindowCapture* windowCapture_ = nullptr;
     QMediaCaptureSession* session_ = nullptr;

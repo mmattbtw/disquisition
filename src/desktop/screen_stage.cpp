@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QShortcut>
 #include <QStackedWidget>
@@ -348,6 +349,13 @@ void ParticipantTile::setSpeaking(bool speaking) {
     update();
 }
 
+void ParticipantTile::setVideo(const QImage& image) {
+    if (video_.isNull() && image.isNull())
+        return;
+    video_ = image;
+    update();
+}
+
 void ParticipantTile::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton)
         emit clicked(event->globalPosition().toPoint());
@@ -380,14 +388,31 @@ void ParticipantTile::paintEvent(QPaintEvent*) {
     QLinearGradient fill(tile.topLeft(), tile.bottomRight());
     fill.setColorAt(0, tint.lighter(118));
     fill.setColorAt(1, tint);
-    painter.setBrush(fill);
+    const QRectF frame = tile.adjusted(0.5, 0.5, -0.5, -0.5);
+    if (video_.isNull()) {
+        painter.setBrush(fill);
+        painter.setPen(Qt::NoPen);
+        painter.drawRoundedRect(frame, radius, radius);
+        const qreal side = std::min<qreal>(104, tile.height() * 0.4);
+        const QRectF avatar(tile.center().x() - side / 2,
+                            tile.center().y() - side / 2 - side * 0.08, side, side);
+        painter.drawPixmap(avatar.toRect(), person_.avatar);
+    }
+    else {
+        // The camera fills the tile, cropped rather than letterboxed.
+        QPainterPath clip;
+        clip.addRoundedRect(frame, radius, radius);
+        painter.save();
+        painter.setClipPath(clip);
+        const QSizeF size = QSizeF(video_.size()).scaled(tile.size(), Qt::KeepAspectRatioByExpanding);
+        painter.drawImage(QRectF(tile.center() - QPointF(size.width(), size.height()) / 2, size),
+                          video_);
+        painter.restore();
+    }
+    painter.setBrush(Qt::NoBrush);
     painter.setPen(QPen(speaking_ ? QColor("#7ed957") : QColor(255, 255, 255, 18),
                         speaking_ ? 2 : 1));
-    painter.drawRoundedRect(tile.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
-    const qreal side = std::min<qreal>(104, tile.height() * 0.4);
-    const QRectF avatar(tile.center().x() - side / 2, tile.center().y() - side / 2 - side * 0.08,
-                        side, side);
-    painter.drawPixmap(avatar.toRect(), person_.avatar);
+    painter.drawRoundedRect(frame, radius, radius);
     if (tile.height() < 50)
         return;
     QFont font = this->font();
@@ -600,6 +625,7 @@ void ScreenStage::setParticipants(const QList<StageParticipant>& people) {
     for (int i = 0; i < people.size(); ++i) {
         people_[i]->setParticipant(people[i]);
         people_[i]->setSpeaking(speaking_.contains(people[i].id));
+        people_[i]->setVideo(cameras_.value(people[i].id));
     }
     relayout();
 }
@@ -612,6 +638,16 @@ void ScreenStage::setSpeaking(const QString& id, bool speaking) {
     for (auto* tile : std::as_const(people_))
         if (tile->participant().id == id)
             tile->setSpeaking(speaking);
+}
+
+void ScreenStage::setCameraFrame(const QString& id, const QImage& image) {
+    if (image.isNull())
+        cameras_.remove(id);
+    else
+        cameras_[id] = image;
+    for (auto* tile : std::as_const(people_))
+        if (tile->participant().id == id)
+            tile->setVideo(image);
 }
 
 QImage ScreenStage::image(const QString& name) const {
