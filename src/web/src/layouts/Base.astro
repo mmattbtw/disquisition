@@ -1,0 +1,141 @@
+---
+import '../styles/global.css';
+
+interface Props {
+	title?: string;
+	description?: string;
+	image?: string;
+}
+
+const {
+	title = 'disquisition — group chat that lives on your devices',
+	description = 'A desktop community app with text channels, voice, and screen sharing you can draw on together. Communities are hosted by their members — no central server, no feed, no algorithm.',
+	image = 'https://disquisition.app/og.png',
+} = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://disquisition.app');
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical.href} />
+		<meta name="theme-color" content="#0e1014" />
+		<script is:inline>document.documentElement.classList.add('js');</script>
+		<meta name="color-scheme" content="dark" />
+
+		<link rel="icon" href="/favicon.ico" sizes="any" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="disquisition" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonical.href} />
+		<meta property="og:image" content={image} />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={title} />
+		<meta name="twitter:description" content={description} />
+		<meta name="twitter:image" content={image} />
+
+		<link
+			rel="preload"
+			href="/fonts/CalSans-Regular.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link
+			rel="preload"
+			href="/fonts/Inter-Regular.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+		<link
+			rel="preload"
+			href="/fonts/Inter-SemiBold.woff2"
+			as="font"
+			type="font/woff2"
+			crossorigin
+		/>
+
+		<script
+			type="application/ld+json"
+			set:html={JSON.stringify({
+				'@context': 'https://schema.org',
+				'@type': 'SoftwareApplication',
+				name: 'disquisition',
+				applicationCategory: 'CommunicationApplication',
+				operatingSystem: 'macOS, Windows, Linux',
+				description,
+				url: 'https://disquisition.app',
+				downloadUrl: 'https://github.com/mmattbtw/disquisition/releases/latest',
+				offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+			})}
+		/>
+	</head>
+	<body>
+		<a class="skip" href="#main">Skip to content</a>
+		<slot />
+
+		<script>
+			const nav = document.querySelector('.nav');
+			const setScrolled = () => {
+				if (!nav) return;
+				if (window.scrollY > 10) nav.setAttribute('data-scrolled', '');
+				else nav.removeAttribute('data-scrolled');
+			};
+			setScrolled();
+			addEventListener('scroll', setScrolled, { passive: true });
+
+			if ('IntersectionObserver' in window) {
+				const io = new IntersectionObserver(
+					(entries) => {
+						for (const entry of entries) {
+							if (!entry.isIntersecting) continue;
+							entry.target.setAttribute('data-inview', '');
+							io.unobserve(entry.target);
+						}
+					},
+					{ rootMargin: '0px 0px -10% 0px', threshold: 0.08 }
+				);
+				document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+			} else {
+				document.querySelectorAll('.reveal').forEach((el) => el.setAttribute('data-inview', ''));
+			}
+
+			const ua = navigator.userAgent;
+			const mobile = /iPhone|iPad|iPod|Android/i.test(ua);
+			let os: 'mac' | 'windows' | 'linux' | null = null;
+			if (!mobile) {
+				if (/Win/i.test(ua)) os = 'windows';
+				else if (/Linux|X11/i.test(ua)) os = 'linux';
+				else os = 'mac';
+			}
+
+			for (const card of document.querySelectorAll<HTMLElement>('[data-os-card]')) {
+				card.classList.toggle('is-detected', card.dataset.osCard === os);
+			}
+
+			const primary = document.querySelector<HTMLAnchorElement>('[data-download-primary]');
+			const label = primary?.querySelector<HTMLElement>('[data-download-label]');
+			if (primary && label) {
+				if (!os) {
+					label.textContent = 'Choose your platform';
+					primary.href = '#download';
+				} else {
+					const names = { mac: 'macOS', windows: 'Windows', linux: 'Linux' };
+					label.textContent = `Download for ${names[os]}`;
+					const url = primary.dataset[os];
+					if (url) primary.href = url;
+				}
+			}
+		</script>
+	</body>
+</html>

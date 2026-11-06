@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face { font-family: Inter; src: url("../public/fonts/Inter-Regular.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: Inter; src: url("../public/fonts/Inter-SemiBold.woff2") format("woff2"); font-weight: 600; }
+  @font-face { font-family: CalSans; src: url("../public/fonts/CalSans-Regular.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: JBMono; src: url("../public/fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1200px; height: 630px; overflow: hidden;
+    background: #0e1014; color: #edf0ef; font-family: Inter, sans-serif;
+    position: relative;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(720px 460px at 78% 38%, rgba(140,82,255,.12), transparent 68%),
+      radial-gradient(700px 460px at 18% 10%, rgba(157,204,202,.12), transparent 68%),
+      radial-gradient(520px 360px at 88% 90%, rgba(255,102,196,.09), transparent 70%);
+  }
+  .grid {
+    position: absolute; inset: 0; opacity: .35;
+    background-image: radial-gradient(rgba(255,255,255,.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: linear-gradient(120deg, black, transparent 62%);
+  }
+  .brand { position: absolute; left: 64px; top: 52px; display: flex; align-items: center; gap: 14px; }
+  .brand img { width: 44px; height: 44px; }
+  .brand span { font-family: CalSans; font-size: 31px; letter-spacing: .005em; }
+  .copy { position: absolute; left: 64px; top: 150px; width: 580px; }
+  h1 .pink { position: relative; display: inline-block; white-space: nowrap; }
+  h1 .pink svg { position: absolute; left: -4%; top: -.08em; width: 108%; height: 1.14em; overflow: visible; }
+  .sub { margin-top: 22px; font-size: 17px; line-height: 1.55; color: #a2acb4; max-width: 440px; }
+  .foot { position: absolute; left: 64px; bottom: 48px; display: flex; align-items: center; gap: 12px; font-family: JBMono; font-size: 11px; letter-spacing: .07em; color: #7f8a93; }
+  .foot .d { width: 4px; height: 4px; border-radius: 50%; background: #3c444d; }
+  .shot-wrap {
+    position: absolute; right: 36px; top: 110px; width: 540px;
+    transform: rotate(1.2deg);
+  }
+  .shot-wrap::before {
+    content: ""; position: absolute; inset: -40px -30px; border-radius: 50%;
+    background: conic-gradient(from 200deg, rgba(255,49,49,.22), rgba(255,117,31,.16), rgba(255,222,89,.14), rgba(126,217,87,.14), rgba(12,192,223,.2), rgba(140,82,255,.22), rgba(255,102,196,.2), rgba(165,223,220,.16), rgba(255,49,49,.22));
+    filter: blur(55px); opacity: .65;
+  }
+  .shot {
+    position: relative; border: 1px solid #3a434e; border-radius: 14px; overflow: hidden;
+    background: #16181d; box-shadow: 0 40px 100px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .cursor { position: absolute; z-index: 4; display: flex; align-items: flex-start; filter: drop-shadow(0 3px 6px rgba(0,0,0,.5)); }
+  .cursor svg { width: 18px; height: 23px; }
+  .cursor .tag { margin-top: 14px; margin-left: -2px; padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; color: #12171a; }
+  .c-june { left: -26px; top: 300px; }
+  .c-june .tag { background: #ff66c4; }
+  .c-maya { right: 16px; top: 64px; }
+  .c-maya .tag { background: #9dccca; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="brand"><img src="../src/assets/brand/disquisition-mark.png" alt="" /><span>disquisition</span></div>
+
+  <div class="copy">
+    <h1>Group chat that lives<br />on <span class="pink">your devices<svg viewBox="0 0 320 96" preserveAspectRatio="none" aria-hidden="true"><path d="M16 50C16 24 86 8 164 10c78 2 140 17 138 40-2 23-72 37-150 37C74 87 14 73 16 50" fill="none" stroke="#ff66c4" stroke-width="3.4" stroke-linecap="round"></path></svg></span>.</h1>
+    <p class="sub">Text channels, voice, and screen sharing you can draw on together — hosted by the people in the room.</p>
+  </div>
+
+  <div class="foot"><span>disquisition.app</span><span class="d"></span><span>macOS · Windows · Linux</span><span class="d"></span><span>open source</span></div>
+
+  <div class="shot-wrap">
+    <div class="shot"><img src="../src/assets/screenshots/app-hero.png" alt="" /></div>
+    <div class="cursor c-june">
+      <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#ff66c4" stroke="#16181d" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <span class="tag">june</span>
+    </div>
+    <div class="cursor c-maya">
+      <svg viewBox="0 0 17 22"><path d="M2 1l12 10-6.2 1.2L10.6 19 7.5 20 4.6 12.6 1 15z" fill="#9dccca" stroke="#16181d" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <span class="tag">maya</span>
+    </div>
+  </div>
+</body>
+</html>
