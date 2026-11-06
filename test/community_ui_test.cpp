@@ -711,7 +711,14 @@ int main(int argc, char** argv) {
         });
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-        CHECK(dialog && dialog->findChild<QCheckBox*>("communityShowPenguins")->isChecked());
+        auto* showPenguins = dialog ? dialog->findChild<QCheckBox*>("communityShowPenguins") : nullptr;
+        CHECK(showPenguins && showPenguins->isChecked());
+        auto* spriteEditor = dialog->findChild<QWidget*>("communitySpriteEditor");
+        CHECK(spriteEditor && spriteEditor->isVisibleTo(dialog));
+        showPenguins->setChecked(false);
+        CHECK(!spriteEditor->isVisibleTo(dialog));
+        showPenguins->setChecked(true);
+        CHECK(spriteEditor->isVisibleTo(dialog));
         CHECK(dialog->grab().save("community-penguin-settings.png"));
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
     });
