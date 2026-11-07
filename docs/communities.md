@@ -60,7 +60,9 @@ not own community metadata, issue invites, decide permissions, or store history.
 If the peer originally named in an invite is offline, the relay can
 route the request to another online member of that community.
 
-Direct invites contain up to eight bootstrap peers. If none is reachable, a
+Direct invites contain up to eight bootstrap peers. Links are compact base58
+and list each relay once, however many of those peers share it. Older JSON
+invite links are still accepted. If none of the peers is reachable, a
 joining client retries automatically. Changed public IPs or a relay that no
 longer exists require a reachable routing hint, such as an updated invite.
 

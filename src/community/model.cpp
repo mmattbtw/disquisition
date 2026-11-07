@@ -6,6 +6,7 @@
 #include <QMessageAuthenticationCode>
 #include <QUuid>
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 
 namespace community {
@@ -102,28 +103,176 @@ QString normalizeRelayEndpoint(const QString& address) {
     return result;
 }
 
+namespace {
+// Base58 keeps links alphanumeric, so chat markdown and double-click selection
+// leave them intact.
+constexpr char kBase58[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+constexpr int kInviteVersion = 2;
+constexpr int kOwnerNotSeed = 0xff;
+const QStringList kInviteSchemes{"relay", "tcp"};
+
+QString base58(const QByteArray& bytes) {
+    QByteArray digits; // little-endian
+    for (const auto byte : bytes) {
+        int carry = static_cast<unsigned char>(byte);
+        for (auto& digit : digits) {
+            carry += digit * 256;
+            digit = char(carry % 58);
+            carry /= 58;
+        }
+        for (; carry; carry /= 58)
+            digits.append(char(carry % 58));
+    }
+    QString result;
+    for (qsizetype index = 0; index < bytes.size() && bytes[index] == 0; ++index)
+        result += '1';
+    for (auto digit = digits.crbegin(); digit != digits.crend(); ++digit)
+        result += QLatin1Char(kBase58[int(*digit)]);
+    return result;
+}
+
+QByteArray fromBase58(const QString& text) {
+    static const QByteArray alphabet(kBase58);
+    QByteArray bytes; // little-endian
+    for (const auto character : text) {
+        int carry = alphabet.indexOf(character.toLatin1());
+        require(carry >= 0, "invalid invite encoding");
+        for (auto& byte : bytes) {
+            carry += static_cast<unsigned char>(byte) * 58;
+            byte = char(carry & 0xff);
+            carry >>= 8;
+        }
+        for (; carry; carry >>= 8)
+            bytes.append(char(carry & 0xff));
+    }
+    for (qsizetype index = 0; index < text.size() && text[index] == '1'; ++index)
+        bytes.append('\0');
+    std::reverse(bytes.begin(), bytes.end());
+    return bytes;
+}
+
+struct Reader {
+    QByteArray bytes;
+    qsizetype at = 0;
+    QByteArray take(qsizetype size) {
+        require(size <= bytes.size() - at, "incomplete community invite");
+        at += size;
+        return bytes.mid(at - size, size);
+    }
+    int byte() { return static_cast<unsigned char>(take(1)[0]); }
+};
+
+QByteArray peerBytes(const QString& peer) {
+    require(isPeerId(peer), "invalid invite peer");
+    return QByteArray::fromHex(peer.toLatin1());
+}
+
+// v1 links held base64url JSON, which always begins with `{"` and so `eyJ`.
+// They stay readable for links already shared or saved as pending joins.
+std::optional<Invite> legacyInvite(const QString& body) {
+    if (!body.startsWith("eyJ"))
+        return {};
+    const auto decoded = QByteArray::fromBase64Encoding(
+        body.toLatin1(), QByteArray::Base64UrlEncoding | QByteArray::AbortOnBase64DecodingErrors);
+    if (!decoded)
+        return {};
+    const auto document = QJsonDocument::fromJson(decoded.decoded);
+    const auto object = document.object();
+    if (!document.isObject() || object.value("v").toInt() != 1)
+        return {};
+    return Invite{object.value("community").toString(), object.value("owner").toString(),
+                  object.value("code").toString(), object.value("seeds").toArray()};
+}
+
+// v2: version, community UUID, code, then each distinct endpoint once, so peers
+// behind the same relay share it. Seeds keep their dial order and name an
+// endpoint by index. The owner is usually a seed and is then also an index.
+Invite compactInvite(const QString& body) {
+    require(body.size() <= 4096, "invalid community invite link");
+    Reader reader{fromBase58(body)};
+    require(reader.byte() == kInviteVersion, "unsupported or incomplete community invite");
+    Invite result;
+    result.community = QUuid::fromRfc4122(reader.take(16)).toString(QUuid::WithoutBraces);
+    result.code = QString::fromLatin1(
+        reader.take(24).toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+    QStringList endpoints;
+    for (int count = reader.byte(); endpoints.size() < count;) {
+        const auto scheme = reader.byte();
+        require(scheme < kInviteSchemes.size(), "invalid invite endpoint");
+        const auto high = reader.byte();
+        const auto port = high << 8 | reader.byte();
+        QUrl url;
+        url.setScheme(kInviteSchemes[scheme]);
+        url.setHost(QString::fromUtf8(reader.take(reader.byte())), QUrl::StrictMode);
+        url.setPort(port);
+        endpoints.append(url.toString());
+    }
+    for (int count = reader.byte(); result.seeds.size() < count;) {
+        const auto peer = QString::fromLatin1(reader.take(32).toHex());
+        const auto endpoint = reader.byte();
+        require(endpoint < endpoints.size(), "invalid invite endpoint");
+        result.seeds.append(QJsonObject{{"peer", peer}, {"endpoint", endpoints[endpoint]}});
+    }
+    const auto owner = reader.byte();
+    require(owner == kOwnerNotSeed || owner < result.seeds.size(), "invalid invite owner");
+    result.owner = owner == kOwnerNotSeed ? QString::fromLatin1(reader.take(32).toHex())
+                                          : result.seeds[owner].toObject().value("peer").toString();
+    require(reader.at == reader.bytes.size(), "invalid invite data");
+    return result;
+}
+} // namespace
+
 QString Invite::toLink() const {
-    const QJsonObject object{
-        {"v", 1}, {"community", community}, {"owner", owner}, {"code", code}, {"seeds", seeds}};
-    return "disquisition://join/" +
-           QString::fromLatin1(canonical(object).toBase64(QByteArray::Base64UrlEncoding |
-                                                          QByteArray::OmitTrailingEquals));
+    const auto id = QUuid(community);
+    const auto secret = QByteArray::fromBase64Encoding(
+        code.toLatin1(), QByteArray::Base64UrlEncoding | QByteArray::AbortOnBase64DecodingErrors);
+    require(!id.isNull() && secret && secret.decoded.size() == 24 && !seeds.isEmpty() &&
+                seeds.size() <= 8,
+            "incomplete community invite");
+    QByteArray bytes;
+    bytes.append(char(kInviteVersion));
+    bytes.append(id.toRfc4122());
+    bytes.append(secret.decoded);
+    QStringList endpoints;
+    QByteArray table, routes;
+    int ownerIndex = kOwnerNotSeed;
+    for (const auto& value : seeds) {
+        const auto seed = value.toObject();
+        const auto peer = seed.value("peer").toString(),
+                   endpoint = seed.value("endpoint").toString();
+        if (!endpoints.contains(endpoint)) {
+            const QUrl url(endpoint, QUrl::StrictMode);
+            const auto host = url.host(QUrl::FullyEncoded).toUtf8();
+            require(validEndpoint(endpoint) && host.size() <= 255, "invalid invite endpoint");
+            table.append(char(kInviteSchemes.indexOf(url.scheme())));
+            table.append(char(url.port() >> 8));
+            table.append(char(url.port() & 0xff));
+            table.append(char(host.size()));
+            table.append(host);
+            endpoints.append(endpoint);
+        }
+        if (peer == owner && ownerIndex == kOwnerNotSeed)
+            ownerIndex = int(routes.size() / 33);
+        routes.append(peerBytes(peer));
+        routes.append(char(endpoints.indexOf(endpoint)));
+    }
+    bytes.append(char(endpoints.size()));
+    bytes.append(table);
+    bytes.append(char(seeds.size()));
+    bytes.append(routes);
+    bytes.append(char(ownerIndex));
+    if (ownerIndex == kOwnerNotSeed)
+        bytes.append(peerBytes(owner));
+    return "disquisition://join/" + base58(bytes);
 }
 
 Invite Invite::fromLink(const QString& link) {
     const QString prefix = "disquisition://join/";
     require(link.startsWith(prefix) && link.size() <= 8192, "invalid community invite link");
-    const auto decoded = QByteArray::fromBase64Encoding(
-        link.mid(prefix.size()).toLatin1(),
-        QByteArray::Base64UrlEncoding | QByteArray::AbortOnBase64DecodingErrors);
-    require(bool(decoded), "invalid invite encoding");
-    QJsonParseError error;
-    const auto document = QJsonDocument::fromJson(decoded.decoded, &error);
-    require(error.error == QJsonParseError::NoError && document.isObject(), "invalid invite data");
-    const auto object = document.object();
-    Invite result{object.value("community").toString(), object.value("owner").toString(),
-                  object.value("code").toString(), object.value("seeds").toArray()};
-    require(object.value("v").toInt() == 1 && uuid(result.community) && isPeerId(result.owner) &&
+    const auto body = link.mid(prefix.size());
+    auto legacy = legacyInvite(body);
+    const auto result = legacy ? std::move(*legacy) : compactInvite(body);
+    require(uuid(result.community) && isPeerId(result.owner) &&
                 result.code.size() == 32 && !result.seeds.isEmpty() && result.seeds.size() <= 8,
             "unsupported or incomplete community invite");
     for (const auto& seed : result.seeds) {
