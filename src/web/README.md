@@ -75,7 +75,15 @@ The existing Git integration watches `main`. Its production settings are:
 Preview builds use the same root directory, with these commands:
 
 - Build command: `bun install --frozen-lockfile && bun run build:worker --preview`
-- Deploy command: `bunx cf previews deploy --prebuilt`
+- Deploy command: `bun run deploy:preview`
+
+`deploy:preview` wraps `cf previews deploy --prebuilt`. Workers Builds reads the
+preview URLs for its PR comment from the `WRANGLER_OUTPUT_FILE_*` entry that
+`wrangler preview` writes, which `cf` does not write yet, so the wrapper writes
+it. Without it the comment says "No Preview URL" even when the preview is live.
+The live setting falls back to `bunx cf previews deploy --prebuilt` when
+`scripts/deploy-preview.ts` is missing, so branches cut before the wrapper
+still build.
 
 These settings require the deployment configuration in this directory to be
 present on the branch being built. Authenticate with `cf auth login` for local
