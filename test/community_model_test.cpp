@@ -2,6 +2,7 @@
 #include <QMessageAuthenticationCode>
 #include <QSslCertificate>
 #include <QTemporaryDir>
+#include <algorithm>
 #include <cstdio>
 #include <functional>
 #include <stdexcept>
@@ -63,6 +64,45 @@ void identityAndInviteIntegrity() {
     CHECK(decoded.code == group.code);
     rejects([] { Invite::fromLink("disquisition://join/broken"); });
     rejects([] { Invite::fromLink("https://example.com"); });
+
+    // Peers behind one relay share its endpoint, and an owner who is also a
+    // seed costs no extra bytes.
+    QJsonArray crowd;
+    for (int index = 0; index < 8; ++index) {
+        const auto peer = index == 2 ? group.alice.id() : Identity::generate().id();
+        const auto endpoint =
+            index == 5 ? "tcp://[::1]:9001" : "relay://relay.disquisition.app:3333";
+        crowd.append(QJsonObject{{"peer", peer}, {"endpoint", endpoint}});
+    }
+    const Invite crowded{group.model.id, group.alice.id(), group.code, crowd};
+    const auto crowdedLink = crowded.toLink();
+    CHECK(crowdedLink.size() < 500);
+    const auto body = crowdedLink.mid(QString("disquisition://join/").size());
+    CHECK(std::all_of(body.begin(), body.end(), [](QChar ch) { return ch.isLetterOrNumber(); }));
+    const auto roundTrip = Invite::fromLink(crowdedLink);
+    CHECK(roundTrip.community == crowded.community && roundTrip.owner == crowded.owner &&
+          roundTrip.code == crowded.code && roundTrip.seeds == crowded.seeds);
+    auto ownerless = crowded;
+    ownerless.seeds = {crowd[0]};
+    const auto ownerlessLink = ownerless.toLink();
+    CHECK(Invite::fromLink(ownerlessLink).owner == group.alice.id());
+    CHECK(Invite::fromLink(ownerlessLink).seeds == ownerless.seeds);
+    rejects([&] { Invite::fromLink(ownerlessLink.chopped(1)); });
+    rejects([&] { Invite::fromLink(ownerlessLink + "2"); });
+    rejects([&] { Invite::fromLink(ownerlessLink + "0"); });
+
+    // Version 1 links already shared or saved as pending joins still open.
+    const QJsonObject legacy{{"v", 1},
+                             {"community", group.model.id},
+                             {"owner", group.alice.id()},
+                             {"code", group.code},
+                             {"seeds", group.invite.seeds}};
+    const auto legacyBody = canonical(legacy).toBase64(QByteArray::Base64UrlEncoding |
+                                                       QByteArray::OmitTrailingEquals);
+    const auto legacyInvite =
+        Invite::fromLink("disquisition://join/" + QString::fromLatin1(legacyBody));
+    CHECK(legacyInvite.community == group.model.id && legacyInvite.code == group.code &&
+          legacyInvite.seeds == group.invite.seeds);
     auto bad = group.model.toJson();
     auto operations = bad["operations"].toArray();
     auto operation = operations[0].toObject();
