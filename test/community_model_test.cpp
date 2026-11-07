@@ -83,7 +83,14 @@ void memberHostsAdmitWithoutAdmins() {
                       joinIntent(group.carol, group.invite, "carol", "relay://relay.example:3333"));
     CHECK(group.model.isMember(group.carol.id()));
     rejects([&] { group.model.change(group.bob, "rename", {{"name", "hijacked"}}); });
-    rejects([&] { group.model.issueInvite(group.bob); });
+    const auto dave = Identity::generate();
+    const auto bobCode = group.model.issueInvite(group.bob);
+    CHECK(group.model.validCode(bobCode));
+    Invite bobInvite{group.model.id, group.model.owner, bobCode,
+                     QJsonArray{QJsonObject{{"peer", group.bob.id()},
+                                            {"endpoint", "tcp://127.0.0.1:9002"}}}};
+    group.model.admit(group.bob, joinIntent(dave, bobInvite, "dave", "tcp://127.0.0.1:9004"));
+    CHECK(group.model.isMember(dave.id()));
     CHECK(group.model.host(QSet<QString>{group.bob.id()}) == group.bob.id());
     group.model.change(group.alice, "admin", {{"peer", group.bob.id()}, {"enabled", true}});
     group.model.change(group.bob, "rename", {{"name", "new name"}});
