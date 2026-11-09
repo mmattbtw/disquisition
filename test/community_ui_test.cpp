@@ -565,6 +565,14 @@ int main(int argc, char** argv) {
     CHECK(!textChannel.isEmpty() && !musicChannel.isEmpty());
     auto* center = window.findChild<NotificationCenter*>();
     CHECK(center && !center->settings().muted);
+    {
+        const auto unmuted = center->settings();
+        auto muted = unmuted;
+        muted.muted = true;
+        center->setSettings(muted);
+        CHECK(!center->wokenUp("bob", "wants you to wake up", true));
+        center->setSettings(unmuted);
+    }
     UnreadBadge badge;
     QObject::connect(center, &NotificationCenter::badgeChanged, [&](const UnreadBadge& next) { badge = next; });
     const auto channelUnread = [&](const QString& channelId) {

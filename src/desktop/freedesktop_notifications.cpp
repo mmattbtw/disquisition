@@ -76,8 +76,9 @@ FreedesktopNotifications::FreedesktopNotifications(const QImage& icon, QObject* 
 }
 
 void FreedesktopNotifications::show(const QString& key, const QString& title,
-                                    const QString& body) {
+                                    const QString& body, bool silent) {
     QVariantMap hints;
+    if (silent) hints.insert("suppress-sound", true);
     hints.insert("category", QStringLiteral("im.received"));
     hints.insert("urgency", QVariant::fromValue<uchar>(1)); // normal
     if (!icon_.isNull()) hints.insert("image-data", QVariant::fromValue(NotificationImage{icon_}));

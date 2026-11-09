@@ -46,7 +46,10 @@
 #include <QMediaDevices>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QFile>
 #include <QSettings>
+#include <QSoundEffect>
+#include <QUrl>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -553,6 +556,10 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         QSettings().setValue("penguins/enabled", enabled);
     });
     notifications_ = new NotificationCenter(window());
+    if (QFile::exists(":/sounds/wakeup.wav")) {
+        wakeupSound_ = new QSoundEffect(this);
+        wakeupSound_->setSource(QUrl("qrc:/sounds/wakeup.wav"));
+    }
     buildUi();
     connect(notifications_, &NotificationCenter::settingsChanged, this,
             [this](const NotificationSettings& settings) {
@@ -591,6 +598,15 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                                    : "Relay connection lost. Reconnecting automatically…");
                 });
         connect(node_.get(), &community::Node::packetReceived, this, &CommunityPanel::receive);
+        connect(node_.get(), &community::Node::wokenUp, this,
+                [this](const QString& cid, const QString& peer) {
+                    const bool sound = wakeupSound_ && wakeupSound_->status() != QSoundEffect::Error;
+                    if (notifications_->wokenUp(memberName(cid, peer),
+                                                "wants you to wake up in " + node_->communities().value(cid).name,
+                                                sound) &&
+                        sound)
+                        wakeupSound_->play();
+                });
         connect(node_.get(), &community::Node::voiceMoved, this,
                 [this](const QString& cid, const QString& channel) {
                     // The node has already changed presence. End subscriptions and capture
@@ -2586,8 +2602,8 @@ void CommunityPanel::refresh() {
                 if (peer.id != node_->peerId()) {
                     row->setContextMenuPolicy(Qt::CustomContextMenu);
                     connect(row, &QWidget::customContextMenuRequested, this,
-                            [this, row, id = peer.id](const QPoint& at) {
-                                showVoiceMemberMenu(id, row->mapToGlobal(at));
+                            [this, row, cid = model.id, id = peer.id](const QPoint& at) {
+                                showVoiceMemberMenu(cid, id, row->mapToGlobal(at));
                             });
                 }
                 static_cast<CommunityTree*>(tree_)->configureVoiceParticipant(
@@ -3721,7 +3737,7 @@ void CommunityPanel::applyVoiceSettings(const QString& peer) {
     audio_.setPeerMuted(peer, settings.value("community/voiceMuted/" + peer, false).toBool());
 }
 
-void CommunityPanel::showVoiceMemberMenu(const QString& peer, const QPoint& at) {
+void CommunityPanel::showVoiceMemberMenu(const QString& cid, const QString& peer, const QPoint& at) {
     QSettings settings;
     // Parented to the panel: a presence update can rebuild the row while the
     // menu is open.
@@ -3740,6 +3756,17 @@ void CommunityPanel::showVoiceMemberMenu(const QString& peer, const QPoint& at) 
         audio_.setPeerMuted(peer, muted);
         refresh();
     });
+    if (node_ && node_->presence(cid, peer).deafened) {
+        menu.addSeparator();
+        auto* wake = menu.addAction("Wake up");
+        wake->setObjectName("communityWakeUp");
+        connect(wake, &QAction::triggered, this, [this, cid, peer] {
+            attempt([&] {
+                node_->wakeUp(cid, peer);
+                commandReply("Wake up", "Sent to " + memberName(cid, peer));
+            });
+        });
+    }
     menu.exec(at);
 }
 

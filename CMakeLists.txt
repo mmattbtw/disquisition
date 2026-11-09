@@ -344,6 +344,12 @@ if(BUILD_DESKTOP_APP)
         resources/ui/chevron-down.png resources/ui/chevron-down@2x.png
         resources/ui/chevron-up.png resources/ui/chevron-up@2x.png
         resources/ui/chevron-right.png resources/ui/chevron-right@2x.png)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds/wakeup.wav")
+      qt_add_resources(disquisition-desktop "sounds"
+        PREFIX "/"
+        BASE resources
+        FILES resources/sounds/wakeup.wav)
+    endif()
     if(NOT APPLE)
       # The window and tray icon. The macOS bundle has its own.
       qt_add_resources(disquisition-desktop app_icon

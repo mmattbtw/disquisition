@@ -25,7 +25,15 @@ namespace Xml = ABI::Windows::Data::Xml::Dom;
 using ActivatedHandler =
     ABI::Windows::Foundation::ITypedEventHandler<Notifications::ToastNotification*, IInspectable*>;
 
-const QString kAppId = QStringLiteral("Disquisition.Desktop");
+QString appId() {
+    QString organization;
+    for (const QChar character : QCoreApplication::organizationName()) {
+        if ((character.isLetterOrNumber() && character.unicode() < 0x80) || character == u'-')
+            organization.append(character);
+    }
+    return (organization.isEmpty() ? QStringLiteral("Disquisition") : organization) +
+           QStringLiteral(".Desktop");
+}
 const QString kGroup = QStringLiteral("room");
 constexpr int kIconSize = 256;
 constexpr qsizetype kMaxTag = 64;
@@ -90,7 +98,7 @@ void registerAppId(const QImage& icon) {
     const QString iconPath = directory + "/notification-icon.png";
     QDir().mkpath(directory);
     icon.scaled(kIconSize, kIconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation).save(iconPath);
-    QSettings registration("HKEY_CURRENT_USER\\Software\\Classes\\AppUserModelId\\" + kAppId,
+    QSettings registration("HKEY_CURRENT_USER\\Software\\Classes\\AppUserModelId\\" + appId(),
                            QSettings::NativeFormat);
     registration.setValue("DisplayName", QGuiApplication::applicationDisplayName());
     registration.setValue("IconUri", QDir::toNativeSeparators(iconPath));
@@ -108,12 +116,13 @@ QString xmlText(const QString& text) {
     return clean.toHtmlEscaped();
 }
 
-QString toastXml(const QString& title, const QString& body) {
+QString toastXml(const QString& title, const QString& body, bool silent) {
     return QStringLiteral("<toast><visual><binding template=\"ToastGeneric\">"
                           "<text>%1</text><text>%2</text>"
-                          "</binding></visual>"
-                          "<audio src=\"ms-winsoundevent:Notification.IM\"/></toast>")
-        .arg(xmlText(title), xmlText(body));
+                          "</binding></visual>%3</toast>")
+        .arg(xmlText(title), xmlText(body),
+             silent ? QStringLiteral("<audio silent=\"true\"/>")
+                    : QStringLiteral("<audio src=\"ms-winsoundevent:Notification.IM\"/>"));
 }
 
 QString tagFor(const QString& key) {
@@ -143,7 +152,7 @@ WindowsNotifications::WindowsNotifications(const QImage& icon, QObject* parent) 
         FAILED(RoGetActivationFactory(
             HString(RuntimeClass_Windows_UI_Notifications_ToastNotification).get(),
             IID_PPV_ARGS(&state_->factory))) ||
-        FAILED(state_->manager->CreateToastNotifierWithId(HString(kAppId).get(),
+        FAILED(state_->manager->CreateToastNotifierWithId(HString(appId()).get(),
                                                           &state_->notifier))) {
         state_->notifier.Reset();
         return;
@@ -161,7 +170,8 @@ bool WindowsNotifications::isAvailable() const {
     return state_->notifier != nullptr;
 }
 
-void WindowsNotifications::show(const QString& key, const QString& title, const QString& body) {
+void WindowsNotifications::show(const QString& key, const QString& title, const QString& body,
+                                bool silent) {
     if (!state_->notifier) return;
     ComPtr<IInspectable> instance;
     ComPtr<Xml::IXmlDocument> document;
@@ -172,7 +182,7 @@ void WindowsNotifications::show(const QString& key, const QString& title, const 
     if (FAILED(RoActivateInstance(HString(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument).get(),
                                   &instance)) ||
         FAILED(instance.As(&document)) || FAILED(document.As(&loader)) ||
-        FAILED(loader->LoadXml(HString(toastXml(title, body)).get())) ||
+        FAILED(loader->LoadXml(HString(toastXml(title, body, silent)).get())) ||
         FAILED(state_->factory->CreateToastNotification(document.Get(), &toast)) ||
         FAILED(toast.As(&tagged)) ||
         // A toast with the same tag and group replaces the one before it.
@@ -189,6 +199,6 @@ void WindowsNotifications::removeAll() {
     ComPtr<Notifications::IToastNotificationHistory> history;
     if (state_->notifier && SUCCEEDED(state_->manager.As(&manager)) &&
         SUCCEEDED(manager->get_History(&history))) {
-        history->ClearWithId(HString(kAppId).get());
+        history->ClearWithId(HString(appId()).get());
     }
 }

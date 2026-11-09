@@ -62,12 +62,13 @@ MacNotifications::~MacNotifications() {
     delete state_;
 }
 
-void MacNotifications::show(const QString& key, const QString& title, const QString& body) {
+void MacNotifications::show(const QString& key, const QString& title, const QString& body,
+                            bool silent) {
     if (!state_->delegate) return;
     UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
     content.title = title.toNSString();
     content.body = body.toNSString();
-    content.sound = UNNotificationSound.defaultSound;
+    content.sound = silent ? nil : UNNotificationSound.defaultSound;
     content.threadIdentifier = @"room";
     UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:key.toNSString()
                                                                           content:content

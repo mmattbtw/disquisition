@@ -14,7 +14,7 @@ public:
     ~WindowsNotifications() override;
 
     bool isAvailable() const;
-    void show(const QString& key, const QString& title, const QString& body);
+    void show(const QString& key, const QString& title, const QString& body, bool silent = false);
     void removeAll();
 
 signals:

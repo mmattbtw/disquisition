@@ -78,6 +78,14 @@ void NotificationCenter::activityOccurred(const QString& member, const QString& 
     if (!windowInView() && notifiesActivity(settings_)) notify("activity/" + member, member, text);
 }
 
+bool NotificationCenter::wokenUp(const QString& member, const QString& text, bool silent) {
+    if (settings_.muted)
+        return false;
+    show({"wakeup/" + member, member, notificationText(text), silent});
+    notifier_->requestAttention(window_);
+    return true;
+}
+
 bool NotificationCenter::eventFilter(QObject* watched, QEvent* event) {
     if (watched == window_ &&
         (event->type() == QEvent::WindowStateChange || event->type() == QEvent::WindowActivate ||

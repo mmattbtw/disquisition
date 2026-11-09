@@ -56,6 +56,7 @@ public:
     void setVoice(const QString& community, const QString& channel, bool muted = false,
                   bool deafened = false, bool sharing = false, bool camera = false);
     void moveVoice(const QString& community, const QString& peer, const QString& channel);
+    void wakeUp(const QString& community, const QString& peer);
     QSet<QString> online(const QString& community) const;
     QString host(const QString& community) const;
     Presence presence(const QString& community, const QString& peer) const;
@@ -67,6 +68,7 @@ public:
 signals:
     void changed();
     void voiceMoved(const QString& community, const QString& channel);
+    void wokenUp(const QString& community, const QString& peer);
     void joined(const QString& community);
     void joinRejected(const QString& community, const QString& reason);
     void packetReceived(const QString& community, const QString& channel, const QString& peer,
@@ -137,6 +139,7 @@ private:
     QTimer timer_;
     bool running_ = false;
     qint64 recoveringUntil_ = 0;
+    QHash<QString, qint64> wokenAt_;
     QSet<QString> seenMessages_;
     QStringList messageOrder_;
 };

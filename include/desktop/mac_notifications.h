@@ -13,7 +13,7 @@ public:
     MacNotifications(const MacNotifications&) = delete;
     MacNotifications& operator=(const MacNotifications&) = delete;
 
-    void show(const QString& key, const QString& title, const QString& body);
+    void show(const QString& key, const QString& title, const QString& body, bool silent = false);
     void removeAll();
     void setBadgeLabel(const QString& label);
 
