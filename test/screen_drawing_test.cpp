@@ -1006,7 +1006,7 @@ void testMoveAndHidePresenterToolbar() {
     CHECK(grip && toggle && controls && tools->isVisible());
     const QPoint home = tools->pos();
     const QPoint moved(-qMin(60, home.x() - screen.left()), 90);
-    CHECK(home == QPoint(screen.center().x() - tools->width() / 2, screen.top() + 12));
+    CHECK(home == QPoint(qMax(screen.left(), screen.center().x() - tools->width() / 2), screen.top() + 12));
 
     const QPoint start = grip->mapToGlobal(grip->rect().center());
     const auto drag = [&](QEvent::Type type, const QPoint& global, Qt::MouseButton button,
