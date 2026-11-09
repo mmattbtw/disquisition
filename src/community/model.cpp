@@ -478,6 +478,12 @@ void Model::rebuild() {
             }
             continue;
         }
+        if (kind == "invite" && members.contains(author) && couldAct(author, key) &&
+            isPeerId(data.value("hash").toString()) && data.value("code").toString().size() == 32 &&
+            digest(data.value("code").toString().toUtf8()) == data.value("hash").toString()) {
+            invites_.insert(data.value("hash").toString(), operation);
+            continue;
+        }
         if (!members.contains(author) || !couldAct(author, key) || !authorized(key))
             continue;
         if (kind == "admin" && author == owner) {
@@ -510,11 +516,6 @@ void Model::rebuild() {
         }
         else if (kind == "delete-channel") {
             channels.remove(data.value("id").toString());
-        }
-        else if (kind == "invite" && isPeerId(data.value("hash").toString()) &&
-                 data.value("code").toString().size() == 32 &&
-                 digest(data.value("code").toString().toUtf8()) == data.value("hash").toString()) {
-            invites_.insert(data.value("hash").toString(), operation);
         }
         else if (kind == "priority" && data.value("peers").isArray()) {
             QStringList next;
@@ -579,12 +580,13 @@ QJsonObject Model::append(const Identity& author, const QString& kind, QJsonObje
 }
 
 QJsonObject Model::change(const Identity& author, const QString& kind, QJsonObject data) {
-    const QSet<QString> administrative{"rename", "icon", "channel", "delete-channel", "invite",
+    const QSet<QString> administrative{"rename", "icon", "channel", "delete-channel",
                                        "revoke", "priority", "kick", "remove", "unban", "admin"};
     require(!deleted, "this community has been deleted");
     require((kind == "leave" && isMember(author.id()) && author.id() != owner) ||
                 (kind == "delete" && author.id() == owner) ||
                 (kind == "profile" && isMember(author.id())) ||
+                (kind == "invite" && isMember(author.id())) ||
                 (administrative.contains(kind) && canAdmin(author.id())),
             "only the owner or an admin can make this change");
     require(kind != "admin" || author.id() == owner, "only the owner can assign admins");

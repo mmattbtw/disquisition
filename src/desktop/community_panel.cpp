@@ -2659,7 +2659,7 @@ void CommunityPanel::refresh() {
     composer_->setPlaceholderText(textChannel ? "Message #" + channel.name : "Message this channel");
     setFlag(composerFrame_, "inactive", !textChannel);
     const bool admin = model.canAdmin(node_->peerId());
-    invite_->setEnabled(admin);
+    invite_->setEnabled(member);
     manage_->setEnabled(admin);
     const bool canLeave = member && model.owner != node_->peerId();
     leaveAction_->setVisible(canLeave);
