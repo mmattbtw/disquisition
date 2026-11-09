@@ -244,11 +244,13 @@ if(BUILD_DESKTOP_APP)
     target_link_libraries(desktop_update PUBLIC Qt6::Network)
 
     add_library(desktop_screen STATIC
+      include/desktop/global_hotkeys.h
       include/desktop/screen_drawing.h
       include/desktop/screen_drawing_session.h
       include/desktop/screen_stage.h
       include/desktop/share_source.h
       include/desktop/volume_menu.h
+      src/desktop/global_hotkeys.cpp
       src/desktop/screen_drawing.cpp
       src/desktop/screen_drawing_session.cpp
       src/desktop/screen_stage.cpp

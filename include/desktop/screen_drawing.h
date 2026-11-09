@@ -15,6 +15,7 @@
 
 class QPainter;
 class QColorDialog;
+class GlobalHotkeys;
 #if defined(Q_OS_MACOS)
 class MacDrawingPanel;
 #endif
@@ -139,7 +140,11 @@ public:
     // Draws its own rounded panel, for a toolbar floating over a stream.
     void setFloating(bool floating);
 
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
+
 private:
+    QPointer<ScreenDrawing> drawing_;
     QPointer<QColorDialog> colorPicker_;
 };
 
@@ -187,8 +192,10 @@ private:
 class PresenterOverlay final : public DrawingCanvas {
     Q_OBJECT
 public:
-    PresenterOverlay(const ShareSource& source, ScreenDrawing* drawing, QWidget* parent);
+    PresenterOverlay(const ShareSource& source, ScreenDrawing* drawing);
     ~PresenterOverlay() override;
+    void setToolbarCollapsed(bool collapsed);
+    bool toolbarCollapsed() const { return collapsed_; }
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -196,8 +203,17 @@ protected:
 
 private:
     void refresh();
+    void dragToolbar(const QPoint& global);
     ShareSource source_;
     QWidget* tools_ = nullptr;
+    DrawingControls* controls_ = nullptr;
+    GlobalHotkeys* hotkeys_ = nullptr;
+    QPushButton* toggle_ = nullptr;
+    bool collapsed_ = false;
+    QRect bounds_;
+    QPoint toolsSpot_;
+    QPoint dragAnchor_;
+    std::optional<QPoint> toolsOffset_;
     QTimer positionTimer_;
 #if defined(Q_OS_MACOS)
     MacDrawingPanel* canvasPanel_ = nullptr;

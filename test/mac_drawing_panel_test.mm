@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     ScreenDrawingSession session("alice", "alice", &drawing, true);
     ShareSource source;
     source.nativeId = CGMainDisplayID();
-    PresenterOverlay overlay(source, &drawing, &mainWindow);
+    PresenterOverlay overlay(source, &drawing);
 
     const bool wasActive = NSApp.active;
     CHECK(!wasActive);
