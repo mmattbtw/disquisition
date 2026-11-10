@@ -86,6 +86,7 @@ private:
     };
     void accept(qintptr descriptor);
     Link* makeLink(bool outgoing, const QString& expectedPeer = {});
+    void dropLink(Link* link);
     void encrypted(Link* link);
     void read(Link* link);
     void handle(Link* link, const QJsonObject& message);

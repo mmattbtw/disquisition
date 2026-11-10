@@ -421,28 +421,31 @@ Node::Link* Node::makeLink(bool outgoing, const QString& expected) {
                         Qt::QueuedConnection);
                 }
             });
-    connect(socket, &QSslSocket::disconnected, this, [this, link] {
-        if (!links_.removeOne(link))
-            return;
-        if (peers_.value(link->peer) == link) {
-            peers_.remove(link->peer);
-            for (auto& group : presence_)
-                group.remove(link->peer);
-        }
-        for (auto it = joining_.begin(); it != joining_.end();) {
-            if (it.value() == link) {
-                joinStarted_.remove(it.key());
-                it = joining_.erase(it);
-            }
-            else
-                ++it;
-        }
-        link->socket->disconnect(this);
-        link->socket->deleteLater();
-        delete link;
-        emit changed();
-    });
+    connect(socket, &QSslSocket::disconnected, this, [this, link] { dropLink(link); });
     return link;
+}
+
+void Node::dropLink(Link* link) {
+    if (!links_.removeOne(link))
+        return;
+    if (peers_.value(link->peer) == link) {
+        peers_.remove(link->peer);
+        for (auto& group : presence_)
+            group.remove(link->peer);
+    }
+    for (auto it = joining_.begin(); it != joining_.end();) {
+        if (it.value() == link) {
+            joinStarted_.remove(it.key());
+            it = joining_.erase(it);
+        }
+        else
+            ++it;
+    }
+    link->socket->disconnect(this);
+    link->socket->abort();
+    link->socket->deleteLater();
+    delete link;
+    emit changed();
 }
 
 void Node::accept(qintptr descriptor) {
@@ -1415,12 +1418,12 @@ void Node::tick() {
                     stalled = true;
             if ((!link->hello && now() - link->started > 10000) ||
                 (link->hello && now() - link->touched > 35000) || stalled) {
-                link->socket->abort();
+                dropLink(link);
                 continue;
             }
             if (link->hello && link->allowed.isEmpty() && link->admissions.isEmpty() &&
                 now() - link->started > 30000) {
-                link->socket->abort();
+                dropLink(link);
                 continue;
             }
             if (link->hello && now() - link->touched > 10000)
