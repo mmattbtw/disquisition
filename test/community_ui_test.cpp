@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QFrame>
@@ -445,6 +446,39 @@ int main(int argc, char** argv) {
         QDesktopServices::unsetUrlHandler("http");
         QDesktopServices::unsetUrlHandler("https");
         return 0;
+    }
+    // Cmd+V (Ctrl+V elsewhere) sends copied images and copied image files;
+    // copied text still pastes as text.
+    {
+        const auto images = [&] { return transcript->toHtml().count("<img src=\"embed:"); };
+        const auto paste = [&] {
+            QKeyEvent press(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+            QApplication::sendEvent(composer, &press);
+        };
+        int before = images();
+        QImage pixels(40, 30, QImage::Format_RGB32);
+        pixels.fill(Qt::red);
+        QApplication::clipboard()->setImage(pixels);
+        paste();
+        CHECK(until([&] { return images() == before + 1; }));
+        CHECK(composer->text().isEmpty());
+        const auto file = directory.path() + "/pasted.png";
+        CHECK(pixels.save(file));
+        auto* copied = new QMimeData;
+        copied->setUrls({QUrl::fromLocalFile(file)});
+        copied->setText("pasted.png");
+        QApplication::clipboard()->setMimeData(copied);
+        before = images();
+        paste();
+        CHECK(until([&] { return images() == before + 1; }));
+        CHECK(composer->text().isEmpty());
+        QApplication::clipboard()->setText("just words");
+        before = images();
+        paste();
+        QApplication::processEvents();
+        CHECK(composer->text() == "just words");
+        CHECK(images() == before);
+        composer->clear();
     }
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());

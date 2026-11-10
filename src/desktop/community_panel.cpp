@@ -23,6 +23,7 @@
 #include <QHBoxLayout>
 #include <QImageReader>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -3868,12 +3869,38 @@ void CommunityPanel::dropEvent(QDropEvent* event) {
     event->acceptProposedAction();
 }
 
+// Pasting copied image files sends them, as does pasting copied pixels with
+// no text alongside. Anything else pastes as text.
+bool CommunityPanel::pasteImages(const QMimeData* mime) {
+    if (!mime || !online_ || !composer_->isEnabled())
+        return false;
+    QStringList paths;
+    for (const auto& url : mime->urls())
+        if (url.isLocalFile() && QImageReader(url.toLocalFile()).canRead())
+            paths.append(url.toLocalFile());
+    for (const auto& path : paths.mid(0, 4))
+        prepareUpload([path] { return prepareImageFile(path); });
+    if (!paths.isEmpty())
+        return true;
+    if (!mime->hasImage() || !mime->text().trimmed().isEmpty())
+        return false;
+    const auto image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull())
+        return false;
+    prepareUpload([image] { return prepareImage(image); });
+    return true;
+}
+
 bool CommunityPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == transcript_ && event->type() == QEvent::Resize)
         placePip();
     if (watched == composer_ &&
         (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut))
         setFlag(composerFrame_, "focused", event->type() == QEvent::FocusIn);
+    if (watched == composer_ && event->type() == QEvent::KeyPress &&
+        static_cast<QKeyEvent*>(event)->matches(QKeySequence::Paste) &&
+        pasteImages(QApplication::clipboard()->mimeData()))
+        return true;
     if (watched == qApp && event->type() == QEvent::FileOpen) {
         const auto url = static_cast<QFileOpenEvent*>(event)->url();
         if (url.scheme() == "disquisition") {

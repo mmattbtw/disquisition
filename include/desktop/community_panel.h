@@ -22,6 +22,7 @@ class PenguinOverlay;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QLineEdit;
+class QMimeData;
 class QPushButton;
 class QFrame;
 class QLabel;
@@ -88,6 +89,7 @@ private:
     void loadHistory(const QString& cid, const QString& channel);
     void prepareUpload(std::function<PreparedImage()> prepare);
     void sendImage(const PreparedImage& image, const QString& cid, const QString& channel);
+    bool pasteImages(const QMimeData* mime);
     void joinVoice();
     void leaveVoice();
     // leaveVoice without the sound: switching channels or shutting down.
