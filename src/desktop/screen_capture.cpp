@@ -20,6 +20,10 @@
 #include "desktop/mac_screen_capture.h"
 #include <CoreGraphics/CGWindow.h>
 #endif
+#if defined(Q_OS_WIN)
+#include "desktop/windows_screen_capture.h"
+#include <QtGui/qscreen_platform.h>
+#endif
 
 bool requestScreenRecordingAccess() {
 #if defined(Q_OS_MACOS)
@@ -173,7 +177,7 @@ bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
                 if (self && self->generation_ == generation) self->errorOccurred(error);
             });
         },
-        audio);
+        audio, fps_);
     if (source.kind == ShareSource::Kind::Screen) {
         macCapture_->startDisplay(source.nativeId);
     }
@@ -181,6 +185,15 @@ bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
         macCapture_->startWindow(source.nativeId);
     }
 #else
+#if defined(Q_OS_WIN)
+    if (startWindowsCapture(source)) {
+        QString audioError;
+        if (audio && !audioCapture_.start(source, audio, audioError)) {
+            emit audioUnavailable(audioError);
+        }
+        return true;
+    }
+#endif
     session_ = new QMediaCaptureSession(this);
     sink_ = new QVideoSink(this);
     session_->setVideoSink(sink_);
@@ -211,6 +224,46 @@ bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
 #endif
     return true;
 }
+
+#if defined(Q_OS_WIN)
+// Windows Graphics Capture draws the mouse pointer itself. A window whose
+// handle is unknown, because its title is not unique, goes through Qt.
+bool ScreenCapture::startWindowsCapture(const ShareSource& source) {
+    quintptr monitor = 0;
+    if (source.kind == ShareSource::Kind::Screen) {
+        if (auto* native = source.screen->nativeInterface<QNativeInterface::QWindowsScreen>())
+            monitor = reinterpret_cast<quintptr>(native->handle());
+        if (!monitor) return false;
+    }
+    else if (!source.nativeId) {
+        return false;
+    }
+    const quint64 generation = generation_;
+    QPointer<ScreenCapture> self(this);
+    windowsCapture_ = std::make_unique<WindowsScreenCapture>(
+        [self, generation](QImage image) {
+            QMetaObject::invokeMethod(QGuiApplication::instance(),
+                                      [self, generation, image = std::move(image)]() mutable {
+                if (self && self->generation_ == generation) self->handleImage(std::move(image));
+            });
+        },
+        [self, generation](QString error) {
+            QMetaObject::invokeMethod(QGuiApplication::instance(), [self, generation, error] {
+                if (self && self->generation_ == generation) emit self->errorOccurred(error);
+            });
+        },
+        fps_);
+    const bool started = source.kind == ShareSource::Kind::Screen
+                             ? windowsCapture_->startMonitor(monitor)
+                             : windowsCapture_->startWindow(source.nativeId);
+    if (!started) {
+        windowsCapture_.reset();
+        return false;
+    }
+    screen_ = nullptr;
+    return true;
+}
+#endif
 
 bool ScreenCapture::startCamera(const QCameraDevice& device) {
     stop();
@@ -257,10 +310,18 @@ void ScreenCapture::stop() {
     keyframeTimer_.stop();
     keyframeRequested_ = false;
     latestImage_ = {};
+    pending_ = {};
+    statsClock_.invalidate();
+    stats_.clear();
+    captured_ = encoded_ = sent_ = 0;
+    encodeMsTotal_ = 0;
 #if defined(Q_OS_MACOS)
     macCapture_.reset();
 #else
     audioCapture_.stop();
+#endif
+#if defined(Q_OS_WIN)
+    windowsCapture_.reset();
 #endif
     if (camera_) {
         camera_->disconnect(this);
@@ -296,12 +357,38 @@ bool ScreenCapture::running() const {
 #if defined(Q_OS_MACOS)
     return macCapture_ && macCapture_->running();
 #else
+#if defined(Q_OS_WIN)
+    if (windowsCapture_ && windowsCapture_->running()) return true;
+#endif
     return (screenCapture_ && screenCapture_->isActive()) ||
            (windowCapture_ && windowCapture_->isActive());
 #endif
 }
 
+void ScreenCapture::countStats(qint64 encodeMs, bool sent) {
+    encodeMsTotal_ += encodeMs;
+    ++encoded_;
+    sent_ += sent;
+    if (!statsClock_.isValid()) {
+        statsClock_.start();
+        return;
+    }
+    const qint64 elapsed = statsClock_.elapsed();
+    if (elapsed < 1000) {
+        return;
+    }
+    stats_ = QString("%1, captured %2 fps, sent %3 fps, encode %4 ms")
+                 .arg(encoderName_)
+                 .arg(captured_ * 1000.0 / elapsed, 0, 'f', 0)
+                 .arg(sent_ * 1000.0 / elapsed, 0, 'f', 0)
+                 .arg(static_cast<double>(encodeMsTotal_) / encoded_, 0, 'f', 1);
+    statsClock_.restart();
+    captured_ = encoded_ = sent_ = 0;
+    encodeMsTotal_ = 0;
+}
+
 void ScreenCapture::handleFrame(const QVideoFrame& frame) {
+    ++captured_;
     // toImage applies camera rotation and mirroring metadata as well.
     if (camera_) submitFrame([frame] { return frame.toImage(); });
     else submitFrame([frame] { return frameImage(frame); });
@@ -309,6 +396,7 @@ void ScreenCapture::handleFrame(const QVideoFrame& frame) {
 
 void ScreenCapture::handleImage(QImage image) {
     if (image.isNull()) return;
+    ++captured_;
     submitFrame([image = std::move(image)] { return image; });
 }
 
@@ -333,8 +421,10 @@ void ScreenCapture::submitFrame(std::function<QImage()> image) {
     if (backlog_ && backlog_() > kMaxScreenBacklogBytes) {
         return;
     }
-    // The encoder is still on an earlier frame; this one is dropped.
+    // The encoder is still on an earlier frame; keep only the newest one for
+    // when it finishes, so a slow encode does not halve the frame rate.
     if (encoding_) {
+        pending_ = std::move(image);
         return;
     }
     nextDueMs_ += frameIntervalMs_;
@@ -355,15 +445,22 @@ void ScreenCapture::submitFrame(std::function<QImage()> image) {
     }
     const quint32 frameId = nextFrameId_++;
     const quint64 generation = generation_;
-    const int fps = static_cast<int>(1000 / frameIntervalMs_);
     encoder_.start([this, image = std::move(image), geometry, cursor, frameId, generation,
-                    h264 = h264_, maxSize = maxSize_, fps, now, requestKeyframe] {
+                    h264 = h264_, maxSize = maxSize_, fps = fps_, now, requestKeyframe] {
+        QElapsedTimer timer;
+        timer.start();
         EncodedFrame encoded = encodeFrame(image(), geometry, cursor, *h264, maxSize, fps, now,
                                            requestKeyframe);
-        QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation] {
+        const qint64 encodeMs = timer.elapsed();
+        QMetaObject::invokeMethod(this, [this, encoded = std::move(encoded), frameId, generation,
+                                         encodeMs] {
             encoding_ = false;
             if (generation != generation_) {
                 return;
+            }
+            countStats(encodeMs, !encoded.chunks.isEmpty());
+            if (pending_) {
+                submitFrame(std::exchange(pending_, {}));
             }
             latestImage_ = encoded.image;
             if (encoded.failed) {

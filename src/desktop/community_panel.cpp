@@ -734,8 +734,10 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                 for (const auto& chunk : chunks)
                     encoded += chunk;
                 auto image = decoders_[node_->peerId()].decode(frame, keyframe, encoded);
-                if (!image.isNull())
+                if (!image.isNull()) {
+                    stage_->setDetail(node_->peerId(), capture_.stats());
                     showFrame(node_->peerId(), image, encoded.size());
+                }
                 const auto watchers = watchers_;
                 for (const auto& peer : watchers)
                     attempt([&] {
@@ -3748,6 +3750,9 @@ void CommunityPanel::share() {
     });
     if (dialog.exec() != QDialog::Accepted || !dialog.chosen())
         return;
+    const StreamQuality quality = dialog.quality();
+    capture_.setMaxSize(quality.maxSize);
+    capture_.setFrameRate(quality.fps);
     if (!capture_.start(*dialog.chosen(), dialog.shareAudio())) {
         noteError("Could not start screen sharing.");
         return;
