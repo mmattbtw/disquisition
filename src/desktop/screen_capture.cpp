@@ -226,8 +226,7 @@ bool ScreenCapture::start(const ShareSource& source, bool shareAudio) {
 }
 
 #if defined(Q_OS_WIN)
-// Windows Graphics Capture draws the mouse pointer itself. A window whose
-// handle is unknown, because its title is not unique, goes through Qt.
+// A window whose handle is unknown, because its title is not unique, goes through Qt.
 bool ScreenCapture::startWindowsCapture(const ShareSource& source) {
     quintptr monitor = 0;
     if (source.kind == ShareSource::Kind::Screen) {
@@ -421,8 +420,7 @@ void ScreenCapture::submitFrame(std::function<QImage()> image) {
     if (backlog_ && backlog_() > kMaxScreenBacklogBytes) {
         return;
     }
-    // The encoder is still on an earlier frame; keep only the newest one for
-    // when it finishes, so a slow encode does not halve the frame rate.
+    // The encoder is busy; keep the newest frame for when it finishes.
     if (encoding_) {
         pending_ = std::move(image);
         return;

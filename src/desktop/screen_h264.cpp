@@ -34,9 +34,8 @@ AVPixelFormat pixelFormatOf(QImage::Format format) {
 
 // Hardware encoders such as NVENC take the captured RGB frame as is and convert
 // it on the GPU, which saves 10-20 ms of CPU work per 1080p frame. Other
-// encoders get NV12 or YUV 4:2:0, converted on the CPU. A frame that is scaled
-// down needs a CPU pass anyway, and converting to NV12 in that same pass is
-// several times cheaper than scaling RGB.
+// encoders get NV12 or YUV 4:2:0, converted on the CPU. Scaled frames go to
+// NV12, which is several times cheaper than scaling RGB.
 AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec,
                              AVPixelFormat sourceFormat, bool scaling) {
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
@@ -71,8 +70,6 @@ AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec
     return AV_PIX_FMT_NONE;
 }
 
-// Single-threaded, scaling a 1440p frame down to 1080p takes longer than a
-// 60 fps frame lasts. "threads" is ignored by FFmpeg before 7.1.
 SwsContext* threadedScaler(const QSize& source, AVPixelFormat sourceFormat, const QSize& target,
                            AVPixelFormat targetFormat) {
     SwsContext* scaler = sws_alloc_context();
@@ -261,7 +258,6 @@ bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qin
         if (!state.scaler) {
             return true;
         }
-        // Only sws_scale_frame() splits the work across threads.
         AVFrame* input = av_frame_alloc();
         if (!input) {
             return true;
@@ -271,7 +267,7 @@ bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qin
         input->height = source.height();
         input->data[0] = const_cast<uint8_t*>(planes[0]);
         input->linesize[0] = strides[0];
-        // A frame without a buffer reference is scaled on one thread.
+        // sws_scale_frame() only uses threads when the input has a buffer reference.
         input->buf[0] = av_buffer_create(input->data[0], static_cast<size_t>(source.sizeInBytes()),
                                          [](void*, uint8_t*) {}, nullptr, AV_BUFFER_FLAG_READONLY);
         const int scaled = sws_scale_frame(state.scaler, state.frame, input);

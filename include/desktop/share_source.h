@@ -28,8 +28,7 @@ struct ShareSource {
 #endif
 };
 
-// Frames are scaled down to fit maxSize. Each encoded frame must fit in
-// kMaxScreenChunks, which keeps resolutions above 1440p out.
+// Above 1440p, keyframes can exceed kMaxScreenChunks.
 struct StreamQuality {
     QString label;
     QSize maxSize;

@@ -102,7 +102,6 @@ struct WindowsScreenCapture::State {
         active = false;
     }
 
-    // Everything COM lives on this thread, from setup to teardown.
     void run(HMONITOR monitor, HWND window, std::promise<bool>& started) {
         const HRESULT apartment = RoInitialize(RO_INIT_MULTITHREADED);
         bool reported = false;
@@ -174,7 +173,6 @@ struct WindowsScreenCapture::State {
 
     void capture(ID3D11Device* d3d, ID3D11DeviceContext* context, IDirect3DDevice* device,
                  IDirect3D11CaptureFramePool* pool, SizeInt32 poolSize, HWND window) {
-        // Frames the encoder would skip anyway are not copied out.
         const qint64 minimumGapTicks = 10'000'000LL / fps * 3 / 4;
         qint64 lastTicks = 0;
         HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,

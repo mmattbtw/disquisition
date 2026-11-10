@@ -58,7 +58,6 @@ public:
     bool running() const;
     // The encoder in use, such as "h264_nvenc".
     QString encoderName() const { return encoderName_; }
-    // Encoder, captured and sent frame rates, and encode time over the last second.
     QString stats() const { return stats_; }
     void setFrameRate(int fps) {
         fps_ = qBound(1, fps, 60);
