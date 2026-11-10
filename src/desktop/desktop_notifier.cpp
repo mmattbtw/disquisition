@@ -65,16 +65,17 @@ DesktopNotifier::~DesktopNotifier() {
 
 void DesktopNotifier::show(const DesktopNotification& notification) {
 #if defined(Q_OS_MACOS)
-    mac_->show(notification.key, notification.title, notification.body);
+    mac_->show(notification.key, notification.title, notification.body, notification.silent);
 #elif defined(Q_OS_WIN)
     if (windows_) {
-        windows_->show(notification.key, notification.title, notification.body);
+        windows_->show(notification.key, notification.title, notification.body, notification.silent);
     } else {
         showTrayMessage(notification);
     }
 #elif defined(DISQUISITION_DBUS_NOTIFICATIONS)
     if (freedesktop_) {
-        freedesktop_->show(notification.key, notification.title, notification.body);
+        freedesktop_->show(notification.key, notification.title, notification.body,
+                           notification.silent);
     } else {
         showTrayMessage(notification);
     }

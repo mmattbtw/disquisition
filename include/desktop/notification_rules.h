@@ -14,6 +14,7 @@ struct DesktopNotification {
     QString key;
     QString title;
     QString body;
+    bool silent = false;
 };
 
 enum class NotifyLevel { AllMessages, MentionsOnly };

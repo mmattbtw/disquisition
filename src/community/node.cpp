@@ -22,6 +22,8 @@
 
 namespace community {
 namespace {
+constexpr qint64 kWakeupCooldownMs = 10000;
+
 qint64 now() {
     return QDateTime::currentMSecsSinceEpoch();
 }
@@ -971,6 +973,16 @@ void Node::handle(Link* link, const QJsonObject& message) {
         emit voiceMoved(cid, channel);
         return;
     }
+    if (type == "wakeup") {
+        if (!mine_.value(cid).deafened)
+            return;
+        const auto last = wokenAt_.constFind(link->peer);
+        if (last != wokenAt_.cend() && now() - *last < kWakeupCooldownMs)
+            return;
+        wokenAt_.insert(link->peer, now());
+        emit wokenUp(cid, link->peer);
+        return;
+    }
     if (type == "presence") {
         const auto channel = message.value("channel").toString();
         if (!channel.isEmpty() && (!models_[cid].channels.contains(channel) ||
@@ -1127,6 +1139,14 @@ void Node::moveVoice(const QString& cid, const QString& peer, const QString& cha
     }
     else
         send(peers_[peer], {{"type", "move-voice"}, {"community", cid}, {"channel", channel}});
+}
+
+void Node::wakeUp(const QString& cid, const QString& peer) {
+    if (!running_ || !models_.contains(cid) || !models_[cid].isMember(peerId()))
+        throw std::runtime_error("unknown community");
+    if (peer == peerId() || !online(cid).contains(peer) || !presence(cid, peer).deafened)
+        throw std::runtime_error("only a deafened member can be woken up");
+    send(peers_[peer], {{"type", "wakeup"}, {"community", cid}});
 }
 
 bool Node::validPacket(const QString& cid, const QString& channel, const QString& type,

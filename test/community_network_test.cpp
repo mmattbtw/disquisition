@@ -733,6 +733,49 @@ void metadataUpdatesKeepMembersOnlineAndVoiceConnected() {
     CHECK(b.presence(cid, a.peerId()).voiceChannel == voice);
 }
 
+void wakeupsReachOnlyDeafenedMembers() {
+    QTemporaryDir ad, bd;
+    Node a(ad.path()), b(bd.path());
+    CHECK(a.start("alice", "127.0.0.1") && b.start("bob", "127.0.0.1"));
+    const auto cid = a.createCommunity("wakeups");
+    b.joinCommunity(a.invite(cid));
+    CHECK(until([&] {
+        return a.online(cid).size() == 2 && b.online(cid).size() == 2 &&
+               !a.synchronizing(cid) && !b.synchronizing(cid);
+    }));
+    const auto voice = channel(a.communities()[cid], "voice");
+    const auto rejects = [&](const QString& peer) {
+        try { a.wakeUp(cid, peer); }
+        catch (const std::exception&) { return true; }
+        return false;
+    };
+    int woken = 0;
+    QObject::connect(&b, &Node::wokenUp, [&](const QString& community, const QString& peer) {
+        CHECK(community == cid && peer == a.peerId());
+        ++woken;
+    });
+    b.setVoice(cid, voice);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).voiceChannel == voice; }));
+    CHECK(rejects(b.peerId()));
+    CHECK(rejects(a.peerId()));
+
+    b.setVoice(cid, voice, false, true);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).deafened; }));
+    b.setVoice(cid, voice);
+    a.wakeUp(cid, b.peerId());
+    CHECK(until([&] { return !a.presence(cid, b.peerId()).deafened; }));
+    until([] { return false; }, 1000);
+    CHECK(woken == 0);
+
+    b.setVoice(cid, voice, false, true);
+    CHECK(until([&] { return a.presence(cid, b.peerId()).deafened; }));
+    a.wakeUp(cid, b.peerId());
+    CHECK(until([&] { return woken == 1; }));
+    a.wakeUp(cid, b.peerId());
+    until([] { return false; }, 1000);
+    CHECK(woken == 1);
+}
+
 void voiceMovesRequireAdminAndPreserveMuteState() {
     QTemporaryDir ad, bd;
     Node a(ad.path()), b(bd.path());
@@ -1154,6 +1197,7 @@ int main(int argc, char** argv) {
     relayDiagnosticsAreReportedOnceAcrossRetries();
     metadataUpdatesKeepMembersOnlineAndVoiceConnected();
     voiceMovesRequireAdminAndPreserveMuteState();
+    wakeupsReachOnlyDeafenedMembers();
     repeatedRejoinUsesExistingPeerConnection();
     leavingAndDeletingPropagateWithoutInterruptingOtherCommunities();
     relayHostMigrationAndReconnection();

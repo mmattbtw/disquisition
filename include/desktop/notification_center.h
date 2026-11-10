@@ -27,6 +27,7 @@ public:
 
     void messageReceived(const QString& sender, const QString& text, Mentioned mentioned);
     void activityOccurred(const QString& member, const QString& text);
+    bool wokenUp(const QString& member, const QString& text, bool silent);
 
 signals:
     void settingsChanged(const NotificationSettings& settings);

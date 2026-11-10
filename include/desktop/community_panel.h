@@ -17,6 +17,7 @@
 #include "desktop/screen_capture.h"
 
 class QAction;
+class QSoundEffect;
 class PenguinOverlay;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -115,7 +116,7 @@ private:
     void watch(const QString& peer, bool enabled);
     void setStreamVolume(const QString& peer, int percent);
     void applyVoiceSettings(const QString& peer);
-    void showVoiceMemberMenu(const QString& peer, const QPoint& at);
+    void showVoiceMemberMenu(const QString& cid, const QString& peer, const QPoint& at);
     QString memberName(const QString& cid, const QString& peer) const;
     void attempt(const std::function<void()>& action);
     void note(const QString& text);
@@ -215,6 +216,7 @@ private:
     GifSearch* gifSearch_ = nullptr;
     ScreenStage* stage_ = nullptr;
     NotificationCenter* notifications_ = nullptr;
+    QSoundEffect* wakeupSound_ = nullptr;
     MentionCompleter* mentions_ = nullptr;
     QMap<QString, QSet<QString>> previousOnline_, previousSharing_;
     PushToTalk pushToTalk_;

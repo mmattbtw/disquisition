@@ -11,7 +11,7 @@ class FreedesktopNotifications final : public QObject {
 public:
     explicit FreedesktopNotifications(const QImage& icon, QObject* parent = nullptr);
 
-    void show(const QString& key, const QString& title, const QString& body);
+    void show(const QString& key, const QString& title, const QString& body, bool silent = false);
     void closeAll();
 
 signals:
