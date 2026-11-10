@@ -1398,8 +1398,11 @@ void Node::tick() {
             emit changed();
         }
         connectRelay();
-        if (relay_ && now() - relayLastRead_ > (relayRegistered_ ? 35000 : 10000))
+        if (relay_ && now() - relayLastRead_ > (relayRegistered_ ? 35000 : 10000)) {
+            connectionError(relayEndpoint_,
+                            "Relay " + QUrl(relayEndpoint_).authority() + " is not responding.");
             relay_->abort();
+        }
         if (relay_ && !relayNonce_.isEmpty() && now() / 10000 != (now() - 500) / 10000)
             relay_->write(frame({{"type", "ping"}}));
         const auto connections = links_;

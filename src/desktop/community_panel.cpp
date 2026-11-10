@@ -594,8 +594,20 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         connect(node_.get(), &community::Node::errorOccurred, this, &CommunityPanel::noteError);
         connect(node_.get(), &community::Node::relayConnectionChanged, this,
                 [this](bool connected) {
-                    note(connected ? "Relay connected."
-                                   : "Relay connection lost. Reconnecting automatically…");
+                    if (connected) {
+                        relayDown_.clear();
+                        note("Relay connected.");
+                        return;
+                    }
+                    // Each failed retry lands here, so the footer stays up while the relay
+                    // is down even after another error replaces it.
+                    auto message = node_->relayError();
+                    if (message.isEmpty())
+                        message = "Lost connection to relay " + QUrl(node_->endpoint()).authority();
+                    if (!message.endsWith('.'))
+                        message += '.';
+                    relayDown_ = message + " Reconnecting automatically…";
+                    noteError(relayDown_);
                 });
         connect(node_.get(), &community::Node::packetReceived, this, &CommunityPanel::receive);
         connect(node_.get(), &community::Node::wokenUp, this,
@@ -802,8 +814,7 @@ void CommunityPanel::attempt(const std::function<void()>& action) {
 void CommunityPanel::note(const QString& message) {
     // Routine status stays out of the footer; only failures surface there.
     Q_UNUSED(message);
-    status_->clear();
-    status_->hide();
+    noteError(relayDown_);
 }
 void CommunityPanel::noteError(const QString& message) {
     status_->setText(message);
@@ -1299,6 +1310,7 @@ void CommunityPanel::connectNode() {
         leaveVoice();
         node_->stop();
         online_ = false;
+        relayDown_.clear();
         uploads_.clear();
         images_.clear();
         joiningCommunities_.clear();

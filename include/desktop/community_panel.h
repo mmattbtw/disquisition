@@ -126,6 +126,7 @@ private:
 
     std::unique_ptr<community::Node> node_;
     QString failure_;
+    QString relayDown_; // Shown in place of routine notes until the relay reconnects.
     bool online_ = false;
     bool refreshQueued_ = false;
     QString cid_, channel_;

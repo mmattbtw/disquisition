@@ -34,6 +34,7 @@
 #include <QSslSocket>
 #include <QStackedWidget>
 #include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextCursor>
@@ -47,6 +48,7 @@
 
 #include "check.h"
 #include "community/store.h"
+#include "community/wire.h"
 #include "desktop/community_panel.h"
 #include "desktop/community_tree.h"
 #include "desktop/gif_picker.h"
@@ -100,6 +102,82 @@ int main(int argc, char** argv) {
         CommunityPanel fresh(nullptr, directory.path() + "/fresh");
         QApplication::processEvents();
         CHECK(fresh.findChild<QPushButton*>("communityConnect")->text() == "Connect");
+    }
+    // A relay that is down keeps a visible diagnostic in the footer across
+    // retries, clears it once the relay answers, and reports a later loss.
+    {
+        const auto relayData = directory.path() + "/relay-down";
+        {
+            community::Store store(relayData);
+            auto profile = store.profile();
+            profile.name = "Relay tester";
+            store.saveProfile(profile);
+        }
+        quint16 port = 0;
+        {
+            QTcpServer reserve;
+            CHECK(reserve.listen(QHostAddress::LocalHost, 0));
+            port = reserve.serverPort();
+        }
+        QSettings().setValue("community/relay", "127.0.0.1:" + QString::number(port));
+        CommunityPanel panel(nullptr, relayData);
+        auto* status = panel.findChild<QLabel*>("communityStatus");
+        CHECK(status);
+        const auto relayDown = [&] {
+            return !status->isHidden() && status->text().contains("relay", Qt::CaseInsensitive) &&
+                   status->text().contains("Reconnecting automatically");
+        };
+        CHECK(until(relayDown));
+        CHECK(status->text().contains("127.0.0.1:" + QString::number(port)));
+        // Outlast a retry: the message must not be cleared by the next attempt.
+        QDeadlineTimer retry(4000);
+        while (!retry.hasExpired()) {
+            QApplication::processEvents(QEventLoop::AllEvents, 10);
+            CHECK(relayDown());
+        }
+        // Routine status, such as accepting an invite, must not hide the outage.
+        {
+            const auto host = community::Identity::generate();
+            auto model = community::Model::create(host, "Elsewhere", "Host", "tcp://127.0.0.1:1");
+            const auto link =
+                community::Invite{model.id, model.owner, model.issueInvite(host),
+                                  QJsonArray{QJsonObject{{"peer", host.id()},
+                                                         {"endpoint", "tcp://127.0.0.1:1"}}}}
+                    .toLink();
+            QTimer::singleShot(0, [&] {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                CHECK(dialog);
+                dialog->findChild<QPlainTextEdit*>("communityInviteInput")->setPlainText(link);
+                dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+            });
+            panel.findChild<QPushButton*>("communityJoin")->click();
+            CHECK(!panel.findChild<QWidget*>("communityJoining")->isHidden());
+            CHECK(relayDown());
+        }
+        QTcpServer relay;
+        CHECK(relay.listen(QHostAddress::LocalHost, port));
+        QPointer<QTcpSocket> accepted;
+        QObject::connect(&relay, &QTcpServer::newConnection, [&] {
+            auto* socket = relay.nextPendingConnection();
+            accepted = socket;
+            auto challenged = std::make_shared<bool>(false);
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, challenged] {
+                socket->readAll();
+                socket->write(community::frame(*challenged
+                                                   ? QJsonObject{{"type", "registered"}}
+                                                   : QJsonObject{{"type", "challenge"},
+                                                                 {"nonce", "relay-test"}}));
+                *challenged = true;
+            });
+        });
+        auto* node = panel.findChild<community::Node*>();
+        CHECK(node);
+        CHECK(until([&] { return node->relayConnected(); }));
+        CHECK(status->isHidden());
+        relay.close();
+        accepted->abort();
+        CHECK(until(relayDown));
+        QSettings().remove("community/relay");
     }
     // Exercise member moderation through the actual management controls.
     {
