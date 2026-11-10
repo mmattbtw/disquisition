@@ -1337,6 +1337,14 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return !node->communities().value(visit).isMember(node->peerId()) &&
                              !remote.communities().value(visit).isMember(node->peerId()); }));
     CHECK(tree->topLevelItemCount() == 1);
+    // Saving settings republishes sprites, but never to a community already left.
+    QTimer::singleShot(0, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(dialog);
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    panel->showSettings();
+    CHECK(status->text() != "unknown channel");
     online->click();
     std::puts("community_ui_test: ok");
 }
