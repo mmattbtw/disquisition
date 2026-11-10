@@ -64,6 +64,8 @@ public:
     qint64 mediaBacklog() const;
     bool synchronizing(const QString& community) const;
     bool relayConnected() const { return relayRegistered_; }
+    // The latest failure reaching the relay, or empty if none was diagnosed.
+    QString relayError() const { return connectionErrors_.value(relayEndpoint_); }
 
 signals:
     void changed();
