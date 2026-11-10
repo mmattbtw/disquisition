@@ -3863,7 +3863,8 @@ void CommunityPanel::stopDrawing(const QString& peer) {
 }
 
 void CommunityPanel::publishSprite(const QString& cid, const QString& target) {
-    if (!online_ || !node_) return;
+    // Left and deleted communities stay in the node's list; there is nobody to send to.
+    if (!online_ || !node_ || !node_->communities().value(cid).isMember(node_->peerId())) return;
     // Sprites describe a community member and do not depend on its channels.
     const QString channel;
     QSettings settings;
