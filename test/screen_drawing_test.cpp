@@ -1090,10 +1090,79 @@ void testGlobalHotkeys() {
 
 } // namespace
 
+// Canvases keep painted ink and only add new segments, so a canvas painted
+// many times must match one that paints the whole drawing at once.
+void testIncrementalInkMatchesFullPaint() {
+    ScreenDrawing drawing;
+    drawing.setIdentity("alice", true);
+    drawing.setState(true, 1);
+    QImage video(320, 180, QImage::Format_RGB32);
+    video.fill(Qt::black);
+    const auto render = [&](StreamView& view) {
+        QImage frame(view.size() * 2, QImage::Format_ARGB32_Premultiplied);
+        frame.setDevicePixelRatio(2);
+        frame.fill(Qt::transparent);
+        QPainter painter(&frame);
+        view.render(&painter);
+        return frame;
+    };
+    const auto fresh = [&](QSize size) {
+        StreamView view;
+        view.setDrawing(&drawing);
+        view.setImage(video);
+        view.resize(size);
+        return render(view);
+    };
+    StreamView view;
+    view.setDrawing(&drawing);
+    view.setImage(video);
+    view.resize(400, 300);
+    quint32 id = 0;
+    const auto drawStroke = [&](quint32 stroke, bool paintWhileDrawing) {
+        int x = 1000 * stroke, y = 2000 + 300 * stroke;
+        for (int i = 0; i < 20; ++i) {
+            chat::ScreenDraw segment;
+            segment.author = stroke % 2 ? "alice" : "bob";
+            segment.epoch = drawing.epoch();
+            segment.id = ++id;
+            segment.stroke = stroke;
+            segment.x1 = x; segment.y1 = y;
+            x += 150; y += i % 2 ? 300 : -100;
+            segment.x2 = x; segment.y2 = y;
+            segment.color = static_cast<int>(stroke % chat::kPenColorCount);
+            drawing.add(segment);
+            if (paintWhileDrawing && i % 3 == 0)
+                render(view);
+        }
+    };
+    for (quint32 stroke = 1; stroke <= 4; ++stroke)
+        drawStroke(stroke, true);
+    const QImage drawn = render(view);
+    CHECK(drawn == fresh(view.size()));
+    // Erase, then draw as much again before the next paint.
+    drawing.remove("bob", {2});
+    drawStroke(5, false);
+    const QImage redrawn = render(view);
+    CHECK(redrawn != drawn && redrawn == fresh(view.size()));
+    drawing.remove("alice", {5});
+    const QImage erased = render(view);
+    CHECK(erased != redrawn && erased == fresh(view.size()));
+    drawing.select({"alice:3"});
+    const QImage selected = render(view);
+    CHECK(selected != erased && selected == fresh(view.size()));
+    drawing.select({});
+    CHECK(render(view) == erased);
+    view.resize(640, 360);
+    CHECK(render(view) == fresh(view.size()));
+    drawing.setState(true, 2);
+    CHECK(render(view) == fresh(view.size()));
+}
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     testPermissionsAndLocalEcho();
     testLetterboxingAndResize();
+    testIncrementalInkMatchesFullPaint();
     testDragAndStopWatching();
     testAccessibleControls();
     testCameraPlaysInPersonTile();
