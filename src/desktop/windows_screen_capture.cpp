@@ -1,5 +1,6 @@
 #include "desktop/windows_screen_capture.h"
 
+#define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
@@ -27,7 +28,7 @@ using ABI::Windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
 // MinUpdateInterval, Windows 11 24H2 and later. MinGW's headers predate it.
 // Implemented by Windows, so this must not be in an anonymous namespace: GCC
 // would see no implementation and compile calls on it as unreachable.
-struct IGraphicsCaptureSession5 : IInspectable {
+struct ICaptureSessionUpdateInterval : IInspectable {
     virtual HRESULT STDMETHODCALLTYPE get_MinUpdateInterval(TimeSpan* value) = 0;
     virtual HRESULT STDMETHODCALLTYPE put_MinUpdateInterval(TimeSpan value) = 0;
 };
@@ -145,7 +146,7 @@ struct WindowsScreenCapture::State {
                 fail();
             }
             else {
-                Com<IGraphicsCaptureSession5> session5;
+                Com<ICaptureSessionUpdateInterval> session5;
                 if (SUCCEEDED(session->QueryInterface(kSession5,
                                                       reinterpret_cast<void**>(session5.put()))))
                     session5->put_MinUpdateInterval(TimeSpan {10'000}); // 1 ms
