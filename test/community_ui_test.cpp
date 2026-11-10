@@ -42,6 +42,8 @@
 #include <QTextTable>
 #include <QThread>
 #include <QTimer>
+#include <QToolTip>
+#include <QHelpEvent>
 #include <QTreeWidget>
 #include <functional>
 #include <memory>
@@ -570,7 +572,7 @@ int main(int argc, char** argv) {
     panel->findChild<QPushButton*>("communityCamera")->click();
     CHECK(until([&] { return cameraDenied; }));
     cameraDialog.stop();
-    CHECK(panel->findChild<QPushButton*>("communityCamera")->text() == "Turn camera on");
+    CHECK(panel->findChild<QPushButton*>("communityCamera")->toolTip() == "Turn camera on");
     CHECK(!node->presence(cid, node->peerId()).camera);
     bool selfUnderChannel = false;
     for (QTreeWidgetItemIterator item(tree); *item; ++item)
@@ -592,6 +594,31 @@ int main(int argc, char** argv) {
         }
     CHECK(selfUnderChannel);
     CHECK(window.grab().save("community-voice.png"));
+    // Hovering a button drawn as just a symbol names it.
+    const auto hover = [](QWidget* widget, QPoint at) {
+        QHelpEvent help(QEvent::ToolTip, at, widget->mapToGlobal(at));
+        QApplication::sendEvent(widget, &help);
+        // A tooltip hides after a delay, so only count one this hover showed.
+        return help.isAccepted() && QToolTip::isVisible() ? QToolTip::text() : QString();
+    };
+    for (const auto& [name, label] :
+         {std::pair{"communityVoice", "Leave voice"}, std::pair{"communityMute", "Mute"},
+          std::pair{"communityDeafen", "Undeafen"}, std::pair{"communityShare", "Share screen"},
+          std::pair{"communityCamera", "Turn camera on"}, std::pair{"communityImage", "Send an image"}}) {
+        auto* action = panel->findChild<QPushButton*>(name);
+        CHECK(action && action->text().isEmpty() && !action->icon().isNull());
+        CHECK(action->accessibleName() == label);
+        CHECK(hover(action, action->rect().center()) == label);
+    }
+    QSet<QString> markTips;
+    for (auto* person : panel->findChildren<ParticipantTile*>())
+        if (person->isVisible() && person->participant().deafened)
+            for (int y = person->height() / 2; y < person->height(); y += 2)
+                for (int x = 0; x < person->width() / 2; x += 2)
+                    if (const auto tip = hover(person, QPoint(x, y)); !tip.isEmpty())
+                        markTips.insert(tip);
+    CHECK(markTips == QSet<QString>({"Muted", "Deafened"}));
+    QToolTip::hideText();
     // Exercise the real hotkey event filter and community presence without audio hardware.
     QSettings().setValue("voice/pushToTalk", true);
     QSettings().setValue("voice/pushToTalkKey", 42);
