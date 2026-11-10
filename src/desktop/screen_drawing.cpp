@@ -1,5 +1,7 @@
 #include "desktop/screen_drawing.h"
 
+#include "desktop/global_hotkeys.h"
+
 #include <QApplication>
 #include <QConicalGradient>
 #include <QFrame>
@@ -17,6 +19,7 @@
 #include <QShortcut>
 #include <QVBoxLayout>
 #include <cmath>
+#include <functional>
 #include <utility>
 
 #if defined(Q_OS_MACOS)
@@ -378,6 +381,14 @@ QIcon toolIcon(const QString& kind) {
                 path.moveTo(9.6, 3.4);
                 path.cubicTo(11, 2, 12.6, 2.2, 13.2, 2.8);
                 path.cubicTo(13.8, 3.4, 14, 5, 12.6, 6.4);
+            } else if (kind == "collapse") {
+                path.moveTo(10, 3.5);
+                path.lineTo(5.5, 8);
+                path.lineTo(10, 12.5);
+            } else if (kind == "expand") {
+                path.moveTo(6, 3.5);
+                path.lineTo(10.5, 8);
+                path.lineTo(6, 12.5);
             }
             painter.drawPath(path);
             painter.end();
@@ -385,6 +396,40 @@ QIcon toolIcon(const QString& kind) {
         }
     }
     return icon;
+}
+
+constexpr int kToolHotkeys = 4;
+constexpr int kEscapeHotkey = 100;
+
+std::optional<ScreenDrawing::Tool> numberTool(const ScreenDrawing& drawing, int number) {
+    if (!drawing.drawingAllowed())
+        return std::nullopt;
+    switch (number) {
+    case 1:
+        return ScreenDrawing::Tool::Pen;
+    case 2:
+        return ScreenDrawing::Tool::Eraser;
+    case 3:
+        return ScreenDrawing::Tool::Laser;
+    case 4:
+        if (drawing.owner())
+            return ScreenDrawing::Tool::Select;
+        break;
+    default:
+        break;
+    }
+    return std::nullopt;
+}
+
+std::optional<ScreenDrawing::Tool> hotkeyTool(const ScreenDrawing& drawing, const QKeyEvent& event) {
+    if (event.isAutoRepeat() || (event.modifiers() & ~Qt::KeypadModifier) != Qt::ControlModifier ||
+        event.key() < Qt::Key_1 || event.key() > Qt::Key_9)
+        return std::nullopt;
+    return numberTool(drawing, event.key() - Qt::Key_0);
+}
+
+QString toolKey(int number) {
+    return QKeySequence(Qt::ControlModifier | Qt::Key(Qt::Key_0 + number)).toString(QKeySequence::NativeText);
 }
 
 } // namespace
@@ -452,7 +497,7 @@ QLabel { color: #8b959e; background: transparent; font-family: Inter, sans-serif
 } // namespace
 
 DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* parent) :
-    QWidget(parent) {
+    QWidget(parent), drawing_(drawing) {
     setObjectName("drawingControls");
     setAttribute(Qt::WA_StyledBackground);
     setStyleSheet(kControlsStyle);
@@ -477,13 +522,13 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     row->addWidget(toolsLine);
     auto* pen = tool("pen", "pen", "drawingPen");
     pen->setCheckable(true);
-    pen->setToolTip("Draw on the shared screen. Press Esc to return to using your mouse.");
+    pen->setToolTip(QString("Pen (%1)").arg(toolKey(1)));
     auto* eraser = tool("eraser", "eraser", "drawingEraser");
     eraser->setCheckable(true);
-    eraser->setToolTip(owner ? "Drag over a stroke to erase it." : "Drag over one of your strokes to erase it.");
+    eraser->setToolTip(QString("Eraser (%1)").arg(toolKey(2)));
     auto* select = tool("select", "select", "drawingSelect");
     select->setCheckable(true);
-    select->setToolTip("Click a stroke or drag a box, then press Delete to remove selected strokes.");
+    select->setToolTip(QString("Select (%1)").arg(toolKey(4)));
     auto* colorsLine = separator(this);
     row->addWidget(colorsLine);
     // Swatch 0 follows the chat color, 1-6 are the presets and the last is custom.
@@ -504,19 +549,18 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     hex->setPlaceholderText("#RRGGBB");
     hex->setMaxLength(7);
     hex->setFixedWidth(74);
-    hex->setToolTip("Enter a color as #RRGGBB.");
     row->addWidget(hex);
     auto* pick = tool({}, "picker", "drawingPickColor");
     pick->setAccessibleName("Pick color");
-    pick->setToolTip("Open the color picker.");
+    pick->setToolTip("Color picker");
     auto* actionsLine = separator(this);
     row->addWidget(actionsLine);
     auto* laser = tool("laser", "laser", "drawingLaser");
     laser->setCheckable(true);
-    laser->setToolTip("Move your mouse to point with a fading trail. No click needed. Press Esc to exit.");
+    laser->setToolTip(QString("Laser (%1)").arg(toolKey(3)));
     auto* undo = tool({}, "undo", "drawingUndo");
     undo->setAccessibleName("undo");
-    undo->setToolTip(QString("Undo your last stroke (%1).")
+    undo->setToolTip(QString("Undo (%1)")
                      .arg(QKeySequence(QKeySequence::Undo).toString(QKeySequence::NativeText)));
     auto* undoShortcut = new QShortcut(QKeySequence::Undo, this);
     undoShortcut->setContext(Qt::WidgetWithChildrenShortcut);
@@ -524,7 +568,7 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
     connect(undo, &QPushButton::clicked, drawing, &ScreenDrawing::undo);
     auto* deleteSelected = tool({}, "delete", "drawingDeleteSelected");
     deleteSelected->setAccessibleName("delete selected");
-    deleteSelected->setToolTip("Delete the selected strokes.");
+    deleteSelected->setToolTip("Delete selected");
     auto* clearLine = separator(this);
     row->addWidget(clearLine);
     auto* clearMine = tool("clear mine", {}, "drawingClearMine");
@@ -650,12 +694,10 @@ DrawingControls::DrawingControls(ScreenDrawing* drawing, bool owner, QWidget* pa
             earlier |= groups[i];
         }
         const bool previewOnly = owner && !drawing->presenterOverlayAvailable();
-        const QString toolHint = drawing->tool() == ScreenDrawing::Tool::Select ? "click or drag a box; Delete removes; Esc exits" :
-                                 drawing->tool() == ScreenDrawing::Tool::Eraser ? (owner ? "erase strokes; Esc exits" : "erase your strokes; Esc exits") : QString();
         hint->setText(!drawing->status().isEmpty() ? drawing->status() :
                       drawing->banned() ? "you are banned from drawing on this stream" :
                       !drawing->enabled() ? "drawing is off" :
-                      previewOnly ? "draw in the video preview" : toolHint);
+                      previewOnly ? "draw in the video preview" : QString());
         hint->setVisible(!hint->text().isEmpty());
     };
     connect(drawing, &ScreenDrawing::changed, this, refresh);
@@ -667,6 +709,15 @@ void DrawingControls::setFloating(bool floating) {
     setProperty("floating", floating);
     style()->unpolish(this);
     style()->polish(this);
+}
+
+void DrawingControls::keyPressEvent(QKeyEvent* event) {
+    if (const auto tool = drawing_ ? hotkeyTool(*drawing_, *event) : std::nullopt) {
+        drawing_->setTool(*tool);
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }
 
 namespace {
@@ -1071,13 +1122,62 @@ void DrawingCanvas::keyPressEvent(QKeyEvent* event) {
     } else if (drawing_ && drawing_->penActive() && event->key() == Qt::Key_Escape) {
         drawing_->setPenActive(false);
         event->accept();
+    } else if (const auto tool = drawing_ ? hotkeyTool(*drawing_, *event) : std::nullopt) {
+        drawing_->setTool(*tool);
+        event->accept();
     } else {
         QWidget::keyPressEvent(event);
     }
 }
 
-PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* drawing,
-                                   QWidget* parent) : DrawingCanvas(parent), source_(source) {
+namespace {
+class ToolbarGrip final : public QWidget {
+public:
+    std::function<void(const QPoint&)> pressed;
+    std::function<void(const QPoint&)> dragged;
+    std::function<void()> reset;
+
+    explicit ToolbarGrip(QWidget* parent) : QWidget(parent) {
+        setObjectName("drawingToolbarGrip");
+        setAccessibleName("Move drawing toolbar");
+        setToolTip("Drag to move the toolbar. Double-click to put it back.");
+        setCursor(Qt::SizeAllCursor);
+        setFixedWidth(12);
+        setMinimumHeight(24);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor("#8b959e"));
+        const QPointF center = QRectF(rect()).center();
+        for (const qreal dx : {-2.5, 2.5}) {
+            for (const qreal dy : {-5.0, 0.0, 5.0})
+                painter.drawEllipse(center + QPointF(dx, dy), 1.3, 1.3);
+        }
+    }
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && pressed)
+            pressed(event->globalPosition().toPoint());
+        event->accept();
+    }
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if ((event->buttons() & Qt::LeftButton) && dragged)
+            dragged(event->globalPosition().toPoint());
+        event->accept();
+    }
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton && reset)
+            reset();
+        event->accept();
+    }
+};
+}
+
+PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* drawing) :
+    DrawingCanvas(nullptr), source_(source) {
     setObjectName("screenDrawingOverlay");
     setWindowTitle("Screen drawing overlay");
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
@@ -1097,9 +1197,28 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
     qApp->installEventFilter(this);
     auto* layout = new QHBoxLayout(tools_);
     layout->setContentsMargins(3, 1, 3, 1);
-    layout->addWidget(new DrawingControls(drawing, true, tools_));
-    tools_->setStyleSheet("QWidget#screenDrawingToolbar { background: #16191f; border: 1px solid "
-                          "#5f6974; border-radius: 12px; }");
+    layout->setSpacing(0);
+    auto* grip = new ToolbarGrip(tools_);
+    grip->pressed = [this](const QPoint& global) { dragAnchor_ = global - toolsSpot_; };
+    grip->dragged = [this](const QPoint& global) { dragToolbar(global); };
+    grip->reset = [this] {
+        toolsOffset_.reset();
+        refresh();
+    };
+    layout->addWidget(grip);
+    controls_ = new DrawingControls(drawing, true, tools_);
+    layout->addWidget(controls_);
+    toggle_ = new QPushButton(tools_);
+    toggle_->setObjectName("drawingToolbarToggle");
+    toggle_->setCursor(Qt::PointingHandCursor);
+    toggle_->setIconSize(QSize(14, 14));
+    connect(toggle_, &QPushButton::clicked, this, [this] { setToolbarCollapsed(!collapsed_); });
+    layout->addWidget(toggle_);
+    tools_->setStyleSheet(
+        "QWidget#screenDrawingToolbar { background: #16191f; border: 1px solid #5f6974; border-radius: 12px; }"
+        "QPushButton#drawingToolbarToggle { background: transparent; border: 1px solid transparent;"
+        " border-radius: 8px; padding: 4px 6px; }"
+        "QPushButton#drawingToolbarToggle:hover { background: rgba(255, 255, 255, 18); }");
 #if defined(Q_OS_MACOS)
     if (QGuiApplication::platformName() == "cocoa") {
         canvasPanel_ = new MacDrawingPanel(this, drawing);
@@ -1110,9 +1229,18 @@ PresenterOverlay::PresenterOverlay(const ShareSource& source, ScreenDrawing* dra
 #endif
     connect(drawing, &ScreenDrawing::changed, this, &PresenterOverlay::refresh);
     positionTimer_.setInterval(100);
+    hotkeys_ = new GlobalHotkeys(this);
+    connect(hotkeys_, &GlobalHotkeys::activated, this, [this](int id) {
+        if (!this->drawing())
+            return;
+        if (id == kEscapeHotkey)
+            this->drawing()->setPenActive(false);
+        else if (const auto tool = numberTool(*this->drawing(), id))
+            this->drawing()->setTool(*tool);
+    });
     connect(&positionTimer_, &QTimer::timeout, this, &PresenterOverlay::refresh);
     positionTimer_.start();
-    refresh();
+    setToolbarCollapsed(false);
 }
 
 PresenterOverlay::~PresenterOverlay() {
@@ -1122,6 +1250,13 @@ PresenterOverlay::~PresenterOverlay() {
 void PresenterOverlay::refresh() {
     const QRect bounds = shareSourceSupportsOverlay(source_) ? shareSourceGeometry(source_)
                                                              : QRect();
+    if (hotkeys_) {
+        const bool shown = drawing() && drawing()->enabled() && !bounds.isEmpty();
+        for (int number = 1; number <= kToolHotkeys; ++number)
+            hotkeys_->set(number, shown && numberTool(*drawing(), number), Qt::ControlModifier,
+                          Qt::Key(Qt::Key_0 + number));
+        hotkeys_->set(kEscapeHotkey, shown && drawing()->penActive(), Qt::NoModifier, Qt::Key_Escape);
+    }
     if (!drawing() || !drawing()->enabled() || bounds.isEmpty()) {
 #if defined(Q_OS_MACOS)
         if (canvasPanel_) {
@@ -1136,8 +1271,15 @@ void PresenterOverlay::refresh() {
     }
     const bool transparent = !drawing()->penActive();
     tools_->adjustSize();
-    const QRect toolsBounds(bounds.center().x() - tools_->width() / 2, bounds.top() + 12,
-                            tools_->width(), tools_->height());
+    bounds_ = bounds;
+    QPoint spot = toolsOffset_ ? bounds.topLeft() + *toolsOffset_
+                               : QPoint(bounds.center().x() - tools_->width() / 2, bounds.top() + 12);
+    spot.setX(qBound(bounds.left(), spot.x(), qMax(bounds.left(), bounds.left() + bounds.width() - tools_->width())));
+    spot.setY(qBound(bounds.top(), spot.y(), qMax(bounds.top(), bounds.top() + bounds.height() - tools_->height())));
+    toolsSpot_ = spot;
+    if (toolsOffset_)
+        toolsOffset_ = spot - bounds.topLeft();
+    const QRect toolsBounds(spot, tools_->size());
 #if defined(Q_OS_MACOS)
     if (canvasPanel_) {
         canvasPanel_->show(bounds, transparent);
@@ -1162,6 +1304,22 @@ void PresenterOverlay::refresh() {
 #endif
 }
 
+void PresenterOverlay::dragToolbar(const QPoint& global) {
+    if (bounds_.isEmpty())
+        return;
+    toolsOffset_ = global - dragAnchor_ - bounds_.topLeft();
+    refresh();
+}
+
+void PresenterOverlay::setToolbarCollapsed(bool collapsed) {
+    collapsed_ = collapsed;
+    controls_->setVisible(!collapsed);
+    toggle_->setIcon(toolIcon(collapsed ? "expand" : "collapse"));
+    toggle_->setAccessibleName(collapsed ? "Show drawing tools" : "Hide drawing tools");
+    toggle_->setToolTip(collapsed ? "Show the drawing tools." : "Hide the drawing tools.");
+    refresh();
+}
+
 bool PresenterOverlay::eventFilter(QObject* watched, QEvent* event) {
     // Native nonactivating panels receive keys while another app stays active.
     const auto* widget = qobject_cast<QWidget*>(watched);
@@ -1174,10 +1332,12 @@ bool PresenterOverlay::eventFilter(QObject* watched, QEvent* event) {
         const bool undo = !editing && drawing()->drawingAllowed() && keyEvent->matches(QKeySequence::Undo);
         const bool erase = !editing && drawing()->tool() == ScreenDrawing::Tool::Select &&
                            (key == Qt::Key_Delete || key == Qt::Key_Backspace);
-        if ((key == Qt::Key_Escape && drawing()->penActive()) || erase || undo) {
+        const auto hotkey = editing ? std::nullopt : hotkeyTool(*drawing(), *keyEvent);
+        if ((key == Qt::Key_Escape && drawing()->penActive()) || erase || undo || hotkey) {
             if (event->type() == QEvent::KeyPress) {
                 if (undo) drawing()->undo();
                 else if (erase) drawing()->deleteSelection();
+                else if (hotkey) drawing()->setTool(*hotkey);
                 else drawing()->setPenActive(false);
             }
             event->accept();

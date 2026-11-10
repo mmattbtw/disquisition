@@ -2,6 +2,8 @@
 #include <QLineEdit>
 #include <QColorDialog>
 #include <QEventLoop>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QLabel>
@@ -12,7 +14,12 @@
 #include <QVBoxLayout>
 #include <cstdio>
 
+#if defined(Q_OS_WIN)
+#    include <qt_windows.h>
+#endif
+
 #include "check.h"
+#include "desktop/global_hotkeys.h"
 #include "desktop/screen_drawing_session.h"
 #include "desktop/screen_stage.h"
 
@@ -214,9 +221,8 @@ void testEscapeFromAnotherControl() {
 }
 
 void testEscapeFromPresenterWindows() {
-    QWidget window;
     ScreenDrawing drawing;
-    PresenterOverlay overlay(ShareSource{}, &drawing, &window);
+    PresenterOverlay overlay(ShareSource{}, &drawing);
     auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
     CHECK(tools);
     auto* control = tools->findChild<QPushButton*>();
@@ -546,10 +552,9 @@ void testHexColorsAndPicker() {
 }
 
 void testUndoFromPresenterToolbarAndTextEditing() {
-    QWidget window;
     ScreenDrawing drawing;
     ScreenDrawingSession host("alice", "alice", &drawing, true);
-    PresenterOverlay overlay(ShareSource{}, &drawing, &window);
+    PresenterOverlay overlay(ShareSource{}, &drawing);
     auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
     auto* controls = tools->findChild<DrawingControls*>();
     drawing.permissionRequested(true);
@@ -926,6 +931,163 @@ void testDrawingHistoryLimitAndMissingPeer() {
     CHECK(!viewer.enabled());
 }
 
+
+bool press(QWidget* target, Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QKeyEvent event(QEvent::KeyPress, key, modifiers);
+    QApplication::sendEvent(target, &event);
+    return event.isAccepted();
+}
+
+void testToolHotkeys() {
+    const auto ctrl = Qt::ControlModifier;
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    DrawingCanvas canvas;
+    canvas.setDrawing(&drawing);
+    CHECK(!press(&canvas, Qt::Key_1, ctrl));
+    CHECK(!drawing.penActive());
+    drawing.permissionRequested(true);
+    press(&canvas, Qt::Key_1, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Pen);
+    press(&canvas, Qt::Key_2, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Eraser);
+    press(&canvas, Qt::Key_3, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Laser);
+    press(&canvas, Qt::Key_4, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Select);
+    press(&canvas, Qt::Key_1, ctrl | Qt::KeypadModifier);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Pen);
+    CHECK(!press(&canvas, Qt::Key_2));
+    CHECK(!press(&canvas, Qt::Key_2, ctrl | Qt::ShiftModifier));
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Pen);
+    press(&canvas, Qt::Key_Escape);
+    CHECK(!drawing.penActive());
+
+    ScreenDrawing viewer;
+    viewer.setState(true, 1);
+    canvas.setDrawing(&viewer);
+    press(&canvas, Qt::Key_1, ctrl);
+    CHECK(viewer.tool() == ScreenDrawing::Tool::Pen);
+    CHECK(!press(&canvas, Qt::Key_4, ctrl));
+    CHECK(viewer.tool() == ScreenDrawing::Tool::Pen);
+
+    DrawingControls controls(&drawing, true);
+    press(controls.findChild<QPushButton*>("drawingPen"), Qt::Key_2, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Eraser);
+
+    PresenterOverlay overlay(ShareSource{}, &drawing);
+    auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
+    press(tools->findChild<QPushButton*>("drawingPen"), Qt::Key_3, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Laser);
+    press(&overlay, Qt::Key_1, ctrl);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Pen);
+    press(&overlay, Qt::Key_Escape);
+    CHECK(!drawing.penActive());
+}
+
+void testMoveAndHidePresenterToolbar() {
+    ShareSource source;
+#if !defined(Q_OS_MACOS)
+    source.kind = ShareSource::Kind::Screen;
+    source.screen = QGuiApplication::primaryScreen();
+#endif
+    if (!shareSourceSupportsOverlay(source) || shareSourceGeometry(source).isEmpty())
+        return;
+    const QRect screen = shareSourceGeometry(source);
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    PresenterOverlay overlay(source, &drawing);
+    drawing.permissionRequested(true);
+    QApplication::processEvents();
+    auto* tools = overlay.findChild<QWidget*>("screenDrawingToolbar");
+    auto* grip = tools->findChild<QWidget*>("drawingToolbarGrip");
+    auto* toggle = tools->findChild<QPushButton*>("drawingToolbarToggle");
+    auto* controls = tools->findChild<DrawingControls*>();
+    CHECK(grip && toggle && controls && tools->isVisible());
+    const QPoint home = tools->pos();
+    const QPoint moved(-qMin(60, home.x() - screen.left()), 90);
+    CHECK(home == QPoint(qMax(screen.left(), screen.center().x() - tools->width() / 2), screen.top() + 12));
+
+    const QPoint start = grip->mapToGlobal(grip->rect().center());
+    const auto drag = [&](QEvent::Type type, const QPoint& global, Qt::MouseButton button,
+                          Qt::MouseButtons buttons) {
+        QMouseEvent event(type, QPointF(grip->mapFromGlobal(global)), QPointF(global), button,
+                          buttons, Qt::NoModifier);
+        QApplication::sendEvent(grip, &event);
+    };
+    drag(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+    drag(QEvent::MouseMove, start + moved, Qt::NoButton, Qt::LeftButton);
+    CHECK(tools->pos() == home + moved);
+    drag(QEvent::MouseButtonRelease, start + moved, Qt::LeftButton, Qt::NoButton);
+    QApplication::processEvents();
+    CHECK(tools->pos() == home + moved);
+
+    drag(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+    drag(QEvent::MouseMove, start - QPoint(20000, 20000), Qt::NoButton, Qt::LeftButton);
+    CHECK(tools->pos() == screen.topLeft());
+    drag(QEvent::MouseButtonRelease, start, Qt::LeftButton, Qt::NoButton);
+    drag(QEvent::MouseButtonDblClick, start, Qt::LeftButton, Qt::LeftButton);
+    CHECK(tools->pos() == home);
+
+    const int fullWidth = tools->width();
+    toggle->click();
+    CHECK(overlay.toolbarCollapsed() && controls->isHidden());
+    CHECK(tools->isVisible() && tools->width() < fullWidth);
+    drawing.setTool(ScreenDrawing::Tool::Pen);
+    CHECK(controls->isHidden());
+    toggle->click();
+    CHECK(!overlay.toolbarCollapsed() && !controls->isHidden());
+    CHECK(tools->width() == fullWidth);
+}
+
+void testGlobalHotkeys() {
+    ShareSource source;
+#if !defined(Q_OS_MACOS)
+    source.kind = ShareSource::Kind::Screen;
+    source.screen = QGuiApplication::primaryScreen();
+#endif
+    if (!shareSourceSupportsOverlay(source) || shareSourceGeometry(source).isEmpty())
+        return;
+    ScreenDrawing drawing;
+    ScreenDrawingSession host("alice", "alice", &drawing, true);
+    PresenterOverlay overlay(source, &drawing);
+    auto* hotkeys = overlay.findChild<GlobalHotkeys*>();
+    CHECK(hotkeys);
+    for (const int id : {1, 2, 3, 4, 100})
+        CHECK(!hotkeys->registered(id));
+    drawing.permissionRequested(true);
+    QApplication::processEvents();
+    CHECK(!hotkeys->registered(100));
+    emit hotkeys->activated(3);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Laser);
+#if defined(Q_OS_WIN)
+    CHECK(hotkeys->registered(100));
+    HWND receiver = nullptr;
+    for (HWND window = FindWindowExW(HWND_MESSAGE, nullptr, L"DisquisitionGlobalHotkeys", nullptr); window;
+         window = FindWindowExW(HWND_MESSAGE, window, L"DisquisitionGlobalHotkeys", nullptr)) {
+        DWORD process = 0;
+        GetWindowThreadProcessId(window, &process);
+        if (process == GetCurrentProcessId())
+            receiver = window;
+    }
+    CHECK(receiver);
+    SendMessageW(receiver, WM_HOTKEY, 1, 0);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Pen);
+    SendMessageW(receiver, WM_HOTKEY, 4, 0);
+    CHECK(drawing.tool() == ScreenDrawing::Tool::Select);
+    SendMessageW(receiver, WM_HOTKEY, 100, 0);
+    CHECK(!drawing.penActive());
+#else
+    emit hotkeys->activated(100);
+    CHECK(!drawing.penActive());
+#endif
+    CHECK(!hotkeys->registered(100));
+    drawing.permissionRequested(false);
+    QApplication::processEvents();
+    for (const int id : {1, 2, 3, 4, 100})
+        CHECK(!hotkeys->registered(id));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -937,6 +1099,9 @@ int main(int argc, char** argv) {
     testCameraPlaysInPersonTile();
     testEscapeFromAnotherControl();
     testEscapeFromPresenterWindows();
+    testToolHotkeys();
+    testMoveAndHidePresenterToolbar();
+    testGlobalHotkeys();
     testClosingFullscreenRestoresEscape();
     testLeavingFullscreenClosesViewer();
     testClientOwnedDrawing();

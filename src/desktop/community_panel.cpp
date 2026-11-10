@@ -3663,7 +3663,7 @@ void CommunityPanel::share() {
     }
     stage_->addStream(node_->peerId(), true, name_->text().trimmed());
     startDrawing(node_->peerId(), true);
-    presenterOverlay_ = std::make_unique<PresenterOverlay>(*dialog.chosen(), stage_->drawing(node_->peerId()), this);
+    presenterOverlay_ = std::make_unique<PresenterOverlay>(*dialog.chosen(), stage_->drawing(node_->peerId()));
     voiceState();
     openStage(stageOpen_);
 }
