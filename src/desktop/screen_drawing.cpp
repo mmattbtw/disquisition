@@ -141,6 +141,7 @@ void ScreenDrawing::setState(bool enabled, std::int64_t epoch) {
     received_.clear();
     removed_.clear();
     selected_.clear();
+    ++inkRevision_;
     selectionBox_ = {};
     activeAuthors_.clear();
     activityTimer_.stop();
@@ -229,6 +230,7 @@ void ScreenDrawing::remove(const QString& author, const QList<quint32>& strokes)
     }) != 0;
     if (!removed)
         return;
+    ++inkRevision_;
     const auto active = activeAuthors_.find(author);
     if (active != activeAuthors_.end() && keys.contains(screenStrokeKey(active->segment)))
         activeAuthors_.erase(active);
@@ -247,6 +249,7 @@ void ScreenDrawing::requestErase(const QSet<QString>& strokes) {
 
 void ScreenDrawing::select(const QSet<QString>& strokes) {
     selected_ = owner_ ? strokes : QSet<QString>{};
+    ++inkRevision_;
     emit updated();
 }
 
@@ -268,6 +271,7 @@ void ScreenDrawing::setBanned(bool banned) {
         tool_ = Tool::None;
         selected_.clear();
         selectionBox_ = {};
+        ++inkRevision_;
     }
     emit changed();
 }
@@ -282,7 +286,10 @@ void ScreenDrawing::setTool(Tool tool) {
         emit laserPointed(stop);
     }
     tool_ = tool;
-    selected_.clear();
+    if (!selected_.isEmpty()) {
+        selected_.clear();
+        ++inkRevision_;
+    }
     selectionBox_ = {};
     emit changed();
 }
@@ -814,6 +821,7 @@ void DrawingCanvas::setDrawing(ScreenDrawing* drawing) {
     if (drawing_)
         disconnect(drawing_, nullptr, this, nullptr);
     drawing_ = drawing;
+    ink_ = {};
     if (drawing_) {
         connect(drawing_, &ScreenDrawing::updated, this, qOverload<>(&QWidget::update));
         connect(drawing_, &ScreenDrawing::changed, this, [this] {
@@ -852,17 +860,7 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
     painter.save();
     painter.setClipRect(area);
     painter.setRenderHint(QPainter::Antialiasing);
-    const qreal width = qMax(2.0, area.width() * 0.003);
-    for (const auto& segment : drawing_->segments()) {
-        const QPointF a = drawingPoint(area, segment.x1, segment.y1);
-        const QPointF b = drawingPoint(area, segment.x2, segment.y2);
-        if (drawing_->selectedStrokes().contains(screenStrokeKey(segment))) {
-            painter.setPen(QPen(QColor("#2682ff"), width + 5, Qt::SolidLine, Qt::RoundCap));
-            if (a == b) painter.drawPoint(a); else painter.drawLine(a, b);
-        }
-        painter.setPen(QPen(screenSegmentColor(segment), width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        if (a == b) painter.drawPoint(a); else painter.drawLine(a, b);
-    }
+    paintInk(painter, area, qMax(2.0, area.width() * 0.003));
     if (!drawing_->selectionBox().isNull()) {
         const auto box = drawing_->selectionBox();
         const QRectF selection(drawingPoint(area, qRound(box.left()), qRound(box.top())),
@@ -877,9 +875,11 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
     painter.setFont(labelFont);
     struct Label { QPointF position; QColor color; };
     QHash<QString, Label> labels;
-    for (const auto& segment : drawing_->segments()) {
-        if (drawing_->selectedStrokes().contains(screenStrokeKey(segment)))
-            labels[QString::fromStdString(segment.author)] = {drawingPoint(area, segment.x2, segment.y2), screenSegmentColor(segment)};
+    if (!drawing_->selectedStrokes().isEmpty()) {
+        for (const auto& segment : drawing_->segments()) {
+            if (drawing_->selectedStrokes().contains(screenStrokeKey(segment)))
+                labels[QString::fromStdString(segment.author)] = {drawingPoint(area, segment.x2, segment.y2), screenSegmentColor(segment)};
+        }
     }
     for (const auto& author : drawing_->activeAuthors())
         labels[QString::fromStdString(author.author)] = {drawingPoint(area, author.x2, author.y2), screenSegmentColor(author)};
@@ -917,6 +917,48 @@ void DrawingCanvas::paintDrawing(QPainter& painter) {
         painter.setBrush(Qt::NoBrush);
     }
     painter.restore();
+}
+
+void DrawingCanvas::paintInk(QPainter& painter, const QRectF& area, qreal width) {
+    const auto& segments = drawing_->segments();
+    if (segments.isEmpty()) {
+        ink_ = {};
+        return;
+    }
+    // Repainting every segment each frame made long drawings lag, so keep the
+    // painted ink and only add segments appended since the last paint.
+    const qreal scale = painter.device()->devicePixelRatioF();
+    const QRect pixels = QRectF(area.topLeft() * scale, area.size() * scale).toAlignedRect();
+    if (ink_.image.isNull() || ink_.area != area || ink_.scale != scale ||
+        ink_.revision != drawing_->inkRevision() || ink_.painted > segments.size()) {
+        ink_.image = QImage(pixels.size(), QImage::Format_ARGB32_Premultiplied);
+        ink_.image.setDevicePixelRatio(scale);
+        ink_.image.fill(Qt::transparent);
+        ink_.area = area;
+        ink_.scale = scale;
+        ink_.revision = drawing_->inkRevision();
+        ink_.painted = 0;
+    }
+    if (ink_.painted < segments.size()) {
+        QPainter layer(&ink_.image);
+        layer.translate(-QPointF(pixels.topLeft()) / scale);
+        layer.setClipRect(area);
+        layer.setRenderHint(QPainter::Antialiasing);
+        const auto& selected = drawing_->selectedStrokes();
+        for (qsizetype i = ink_.painted; i < segments.size(); ++i) {
+            const auto& segment = segments[i];
+            const QPointF a = drawingPoint(area, segment.x1, segment.y1);
+            const QPointF b = drawingPoint(area, segment.x2, segment.y2);
+            if (!selected.isEmpty() && selected.contains(screenStrokeKey(segment))) {
+                layer.setPen(QPen(QColor("#2682ff"), width + 5, Qt::SolidLine, Qt::RoundCap));
+                if (a == b) layer.drawPoint(a); else layer.drawLine(a, b);
+            }
+            layer.setPen(QPen(screenSegmentColor(segment), width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            if (a == b) layer.drawPoint(a); else layer.drawLine(a, b);
+        }
+        ink_.painted = segments.size();
+    }
+    painter.drawImage(QPointF(pixels.topLeft()) / scale, ink_.image);
 }
 
 void DrawingCanvas::renderDrawing(QPainter& painter) {

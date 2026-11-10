@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QElapsedTimer>
 #include <QHash>
+#include <QImage>
 #include <QPointer>
 #include <QPushButton>
 #include <QSet>
@@ -78,6 +79,8 @@ public:
     int color() const { return color_; }
     std::int64_t epoch() const { return epoch_; }
     const QList<chat::ScreenDraw>& segments() const { return segments_; }
+    // Changes whenever existing ink changes; appended segments keep it.
+    quint64 inkRevision() const { return inkRevision_; }
     std::uint32_t nextSegmentId() { return ++nextSegmentId_; }
 
 signals:
@@ -115,6 +118,7 @@ private:
     std::int64_t epoch_ = 0;
     QList<chat::ScreenDraw> segments_;
     QSet<QString> received_;
+    quint64 inkRevision_ = 0;
     std::uint32_t nextSegmentId_ = 0;
 };
 
@@ -175,6 +179,16 @@ private:
     void eraseTo(const QPointF& position);
     void selectTo(const QPointF& position, bool finished);
     QPointF normalized(const QPointF& position) const;
+    void paintInk(QPainter& painter, const QRectF& area, qreal width);
+    // Strokes are painted once into this layer; later paints add new segments.
+    struct InkCache {
+        QImage image;
+        QRectF area;
+        qreal scale = 0;
+        quint64 revision = 0;
+        qsizetype painted = 0;
+    };
+    InkCache ink_;
     std::optional<QPointF> gestureStart_;
     std::optional<QPointF> eraserPrevious_;
     quint32 stroke_ = 0;
