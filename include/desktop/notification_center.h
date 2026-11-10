@@ -12,6 +12,7 @@
 class DesktopNotifier;
 class QAction;
 class QEvent;
+class QSoundEffect;
 class QWidget;
 
 class NotificationCenter final : public QObject {
@@ -49,6 +50,8 @@ private:
     QWidget* window_;
     QAction* muteAction_ = nullptr;
     DesktopNotifier* notifier_ = nullptr;
+    // Replaces the system sound, so notifications sound the same everywhere.
+    QSoundEffect* sound_ = nullptr;
     NotificationSettings settings_;
     UnreadBadge badge_;
     NotificationPacer pacer_;

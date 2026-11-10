@@ -8,6 +8,7 @@
 #include <QWidget>
 #include <algorithm>
 
+#include "desktop/app_sound.h"
 #include "desktop/desktop_notifier.h"
 
 NotificationCenter::NotificationCenter(QWidget* window) :
@@ -28,6 +29,7 @@ NotificationCenter::NotificationCenter(QWidget* window) :
     auto* quit = new QAction("Quit", this);
     connect(quit, &QAction::triggered, window_, &QWidget::close);
     notifier_ = new DesktopNotifier({open, muteAction_, separator, quit}, this);
+    sound_ = bundledSound("notification", this);
     connect(notifier_, &DesktopNotifier::activated, this, &NotificationCenter::bringWindowToFront);
 
     clock_.start();
@@ -120,9 +122,10 @@ void NotificationCenter::setBadge(const UnreadBadge& badge) {
 }
 
 void NotificationCenter::notify(const QString& key, const QString& title, const QString& text) {
-    const DesktopNotification notification{key, title, notificationText(text)};
+    const DesktopNotification notification{key, title, notificationText(text), sound_ != nullptr};
     if (pacer_.offer(notification, clock_.elapsed())) {
         show(notification);
+        playSound(sound_);
     } else {
         schedulePacedNotifications();
     }
@@ -134,9 +137,11 @@ void NotificationCenter::show(const DesktopNotification& notification) {
 }
 
 void NotificationCenter::showDueNotifications() {
-    for (const DesktopNotification& notification : pacer_.takeDue(clock_.elapsed())) {
+    const auto due = pacer_.takeDue(clock_.elapsed());
+    for (const DesktopNotification& notification : due) {
         show(notification);
     }
+    if (!due.isEmpty()) playSound(sound_);
     schedulePacedNotifications();
 }
 

@@ -283,6 +283,7 @@ if(BUILD_DESKTOP_APP)
     # Qt finalization imports the Darwin permission plugins from Info.plist.
     # They are required by QCamera even when authorization is requested natively.
     qt_add_executable(disquisition-desktop MANUAL_FINALIZATION MACOSX_BUNDLE
+      include/desktop/app_sound.h
       include/desktop/audio_permission.h
       include/desktop/chat_media.h
       include/desktop/desktop_notifier.h
@@ -297,6 +298,7 @@ if(BUILD_DESKTOP_APP)
       include/desktop/share_picker.h
       include/desktop/system_audio_capture.h
       include/desktop/theme.h
+      src/desktop/app_sound.cpp
       src/desktop/audio_permission.cpp
       src/desktop/chat_media.cpp
       src/desktop/desktop_notifier.cpp
@@ -346,12 +348,15 @@ if(BUILD_DESKTOP_APP)
         resources/ui/chevron-down.png resources/ui/chevron-down@2x.png
         resources/ui/chevron-up.png resources/ui/chevron-up@2x.png
         resources/ui/chevron-right.png resources/ui/chevron-right@2x.png)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds/wakeup.wav")
-      qt_add_resources(disquisition-desktop "sounds"
-        PREFIX "/"
-        BASE resources
-        FILES resources/sounds/wakeup.wav)
-    endif()
+    qt_add_resources(disquisition-desktop "sounds"
+      PREFIX "/"
+      BASE resources
+      FILES
+        resources/sounds/boot_up.wav
+        resources/sounds/join_vc.wav
+        resources/sounds/leave_vc.wav
+        resources/sounds/notification.wav
+        resources/sounds/wakeup.wav)
     if(NOT APPLE)
       # The window and tray icon. The macOS bundle has its own.
       qt_add_resources(disquisition-desktop app_icon
