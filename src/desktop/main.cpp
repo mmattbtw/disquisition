@@ -2,6 +2,7 @@
 #include <QCommandLineParser>
 
 #include "desktop/app_identity.h"
+#include "desktop/app_sound.h"
 #include "desktop/main_window.h"
 #include "desktop/update_install.h"
 
@@ -23,5 +24,6 @@ int main(int argc, char** argv) {
 
     MainWindow window;
     window.show();
+    playSound(bundledSound("boot_up", &app));
     return app.exec();
 }

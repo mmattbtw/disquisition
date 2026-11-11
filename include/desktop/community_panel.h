@@ -90,6 +90,8 @@ private:
     void sendImage(const PreparedImage& image, const QString& cid, const QString& channel);
     void joinVoice();
     void leaveVoice();
+    // leaveVoice without the sound: switching channels or shutting down.
+    void endVoice();
     void voiceState();
     void updatePushToTalk();
     void refreshPenguins();
@@ -218,6 +220,11 @@ private:
     ScreenStage* stage_ = nullptr;
     NotificationCenter* notifications_ = nullptr;
     QSoundEffect* wakeupSound_ = nullptr;
+    QSoundEffect* joinSound_ = nullptr;
+    QSoundEffect* leaveSound_ = nullptr;
+    // Who else was in the call at the last refresh, to chime as they come and go.
+    QString soundChannel_;
+    QSet<QString> soundPeers_;
     MentionCompleter* mentions_ = nullptr;
     QMap<QString, QSet<QString>> previousOnline_, previousSharing_;
     PushToTalk pushToTalk_;

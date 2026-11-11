@@ -68,6 +68,7 @@
 #include <cmath>
 
 #include "community/qr.h"
+#include "desktop/app_sound.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
 #include "desktop/chat_color.h"
@@ -556,10 +557,9 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
         QSettings().setValue("penguins/enabled", enabled);
     });
     notifications_ = new NotificationCenter(window());
-    if (QFile::exists(":/sounds/wakeup.wav")) {
-        wakeupSound_ = new QSoundEffect(this);
-        wakeupSound_->setSource(QUrl("qrc:/sounds/wakeup.wav"));
-    }
+    wakeupSound_ = bundledSound("wakeup", this);
+    joinSound_ = bundledSound("join_vc", this);
+    leaveSound_ = bundledSound("leave_vc", this);
     buildUi();
     connect(notifications_, &NotificationCenter::settingsChanged, this,
             [this](const NotificationSettings& settings) {
@@ -617,7 +617,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                                                 "wants you to wake up in " + node_->communities().value(cid).name,
                                                 sound) &&
                         sound)
-                        wakeupSound_->play();
+                        playSound(wakeupSound_);
                 });
         connect(node_.get(), &community::Node::voiceMoved, this,
                 [this](const QString& cid, const QString& channel) {
@@ -648,6 +648,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                     voiceChannel_ = channel;
                     selectedVoiceCid_ = cid;
                     selectedVoiceChannel_ = channel;
+                    playSound(joinSound_);
                     refresh();
                     note("An administrator moved you to " +
                          node_->communities().value(cid).channels.value(channel).name + '.');
@@ -793,12 +794,12 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
 
 CommunityPanel::~CommunityPanel() {
     qApp->removeEventFilter(this);
-    leaveVoice();
+    endVoice();
 }
 
 void CommunityPanel::releaseStore() {
-    // leaveVoice first: capture/audio threads reference node_.
-    leaveVoice();
+    // endVoice first: capture/audio threads reference node_.
+    endVoice();
     node_.reset();
     online_ = false;
 }
@@ -2813,6 +2814,15 @@ void CommunityPanel::refresh() {
         if (capture_.running() && !(active - audioPeers_).isEmpty())
             announceViewers();
         audioPeers_ = active;
+        const auto here = voiceCid_ + '/' + voiceChannel_;
+        if (here == soundChannel_ && !deafen_->isChecked()) {
+            if (!(active - soundPeers_).isEmpty())
+                playSound(joinSound_);
+            else if (!(soundPeers_ - active).isEmpty())
+                playSound(leaveSound_);
+        }
+        soundChannel_ = here;
+        soundPeers_ = active;
         for (const auto& peer : streams_ - streaming) {
             stopDrawing(peer);
             stage_->removeStream(peer);
@@ -3511,7 +3521,7 @@ void CommunityPanel::joinVoice() {
         if (!model.isMember(node_->peerId()) ||
             model.channels.value(selectedChannel).type != "voice")
             return;
-        leaveVoice();
+        endVoice();
         QSettings settings;
         if (!audio_.start(settings.value("community/input").toString(),
                           settings.value("community/output").toString())) {
@@ -3521,6 +3531,7 @@ void CommunityPanel::joinVoice() {
         screenAudio_.setOutputDevice(settings.value("community/output").toString());
         voiceCid_ = cid;
         voiceChannel_ = selectedChannel;
+        playSound(joinSound_);
         updatePushToTalk();
         voiceState();
         refresh();
@@ -3542,6 +3553,12 @@ void CommunityPanel::voiceState() {
 }
 
 void CommunityPanel::leaveVoice() {
+    if (!voiceCid_.isEmpty())
+        playSound(leaveSound_);
+    endVoice();
+}
+
+void CommunityPanel::endVoice() {
     const auto previous = voiceCid_;
     presenterOverlay_.reset();
     for (const auto& [_, session] : drawings_) session->stop();
@@ -3555,6 +3572,8 @@ void CommunityPanel::leaveVoice() {
         attempt([&] { node_->setVoice(previous, {}); });
     audio_.stop();
     audioPeers_.clear();
+    soundChannel_.clear();
+    soundPeers_.clear();
     speaking_.clear();
     quietAudioFrames_.clear();
     lastAudioAt_.clear();
