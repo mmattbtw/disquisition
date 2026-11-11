@@ -49,6 +49,7 @@
 #include "check.h"
 #include "community/store.h"
 #include "community/wire.h"
+#include "desktop/app_sound.h"
 #include "desktop/community_panel.h"
 #include "desktop/community_tree.h"
 #include "desktop/gif_picker.h"
@@ -280,6 +281,9 @@ int main(int argc, char** argv) {
         CHECK(relay && relay->text().isEmpty());
         auto* linkedMedia = dialog->findChild<QCheckBox*>("communityShowLinkedMedia");
         CHECK(linkedMedia && linkedMedia->isChecked());
+        // Sound effects are opt-in.
+        auto* soundEffects = dialog->findChild<QCheckBox*>("communitySoundEffects");
+        CHECK(soundEffects && !soundEffects->isChecked());
         dialog->findChild<QLineEdit*>("userDisplayName")->setText("Unsaved name");
         dialog->reject();
     });
@@ -363,6 +367,10 @@ int main(int argc, char** argv) {
             "Builds things. Listens to music.");
         auto* linkedMedia = dialog->findChild<QCheckBox*>("communityShowLinkedMedia");
         linkedMedia->setChecked(false);
+        dialog->findChild<QCheckBox*>("communitySoundEffects")->setChecked(true);
+        dialog->findChild<QListWidget*>("userSettingsCategories")->setCurrentRow(1);
+        QApplication::processEvents();
+        CHECK(dialog->grab().save("community-audio-settings.png"));
         dialog->findChild<QCheckBox*>("communitySaveMessages")->setChecked(true);
         dialog->findChild<QLineEdit*>("communityMessageFile")->setText(directory.path() + "/history.db");
         dialog->findChild<QListWidget*>("userSettingsCategories")->setCurrentRow(4);
@@ -375,6 +383,7 @@ int main(int argc, char** argv) {
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
     CHECK(!QSettings().value("gifs/showLinkedMedia", true).toBool());
+    CHECK(soundEffectsEnabled());
     CHECK(node->profile().bio == "Builds things. Listens to music.");
     CHECK(QImage::fromData(node->profile().avatar).size() == QSize(128, 128));
     QTimer::singleShot(0, [&] {

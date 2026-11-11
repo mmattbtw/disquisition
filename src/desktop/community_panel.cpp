@@ -617,7 +617,7 @@ CommunityPanel::CommunityPanel(QWidget* parent, const QString& directory) : QWid
                                                 "wants you to wake up in " + node_->communities().value(cid).name,
                                                 sound) &&
                         sound)
-                        playSound(wakeupSound_);
+                        playAlert(wakeupSound_);
                 });
         connect(node_.get(), &community::Node::voiceMoved, this,
                 [this](const QString& cid, const QString& channel) {
@@ -1680,6 +1680,11 @@ void CommunityPanel::settings() {
                               "Restart after granting access. On Wayland it works while the app is focused.", &dialog);
     pttHelp->setWordWrap(true);
     audioForm->addRow(pttHelp);
+    auto* soundEffects = new QCheckBox("Play sound effects", &dialog);
+    soundEffects->setObjectName("communitySoundEffects");
+    soundEffects->setToolTip("Startup, notification, and voice join and leave sounds");
+    soundEffects->setChecked(soundEffectsEnabled());
+    audioForm->addRow(soundEffects);
     auto* muted = new QCheckBox("Mute all notifications", &dialog);
     muted->setObjectName("communityMuteNotifications");
     muted->setChecked(notifications_->settings().muted);
@@ -1773,6 +1778,7 @@ void CommunityPanel::settings() {
             saved.setValue("community/output", outputId);
             if (outputId != previousOutput)
                 screenAudio_.setOutputDevice(outputId);
+            setSoundEffectsEnabled(soundEffects->isChecked());
             saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());
