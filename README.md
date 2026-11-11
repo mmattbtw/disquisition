@@ -64,5 +64,6 @@ desktop client. The relay needs no discovery server or database.
 - Cameron Sapienza [@ohkee](https://github.com/ohkee)
 - Zheer Shimeirani [@z-shim](https://github.com/z-shim)
 - Jesse Tomlin [@ChaosSnakey](https://github.com/ChaosSnakey)
+- Hamza Yey [@hamzayey97](https://github.com/hamzayey97)
 
 To add your name, follow the [Git crash course](docs/git_crash_course.md#guided-tutorial-add-your-name-to-readmemd).
