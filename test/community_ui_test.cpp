@@ -447,38 +447,70 @@ int main(int argc, char** argv) {
         QDesktopServices::unsetUrlHandler("https");
         return 0;
     }
-    // Cmd+V (Ctrl+V elsewhere) sends copied images and copied image files;
-    // copied text still pastes as text.
+    // Cmd+V (Ctrl+V elsewhere) attaches copied images and copied image files
+    // to the composer; they send with the message. Copied text pastes as text.
     {
         const auto images = [&] { return transcript->toHtml().count("<img src=\"embed:"); };
+        const auto tiles = [&] { return panel->findChildren<QFrame*>("composerAttachment").size(); };
         const auto paste = [&] {
             QKeyEvent press(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
             QApplication::sendEvent(composer, &press);
+            QApplication::processEvents();
         };
-        int before = images();
-        QImage pixels(40, 30, QImage::Format_RGB32);
-        pixels.fill(Qt::red);
+        const int before = images();
+        QImage pixels(160, 120, QImage::Format_RGB32);
+        for (int y = 0; y < pixels.height(); ++y)
+            for (int x = 0; x < pixels.width(); ++x)
+                pixels.setPixelColor(x, y, QColor(157, 204 - y / 2, 202 - x / 2));
         QApplication::clipboard()->setImage(pixels);
         paste();
-        CHECK(until([&] { return images() == before + 1; }));
-        CHECK(composer->text().isEmpty());
+        CHECK(tiles() == 1 && composer->text().isEmpty());
         const auto file = directory.path() + "/pasted.png";
         CHECK(pixels.save(file));
         auto* copied = new QMimeData;
         copied->setUrls({QUrl::fromLocalFile(file)});
         copied->setText("pasted.png");
         QApplication::clipboard()->setMimeData(copied);
-        before = images();
         paste();
+        CHECK(tiles() == 2 && composer->text().isEmpty());
+        QApplication::clipboard()->setText("look at these");
+        paste();
+        CHECK(composer->text() == "look at these" && tiles() == 2);
+        CHECK(images() == before); // Nothing sends until the message does.
+        CHECK(panel->grab().save("community-attachments.png"));
+        panel->findChildren<QFrame*>("composerAttachment")
+            .first()
+            ->findChild<QPushButton*>("composerAttachmentRemove")
+            ->click();
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        CHECK(tiles() == 1);
+        panel->findChild<QPushButton*>("communitySend")->click();
         CHECK(until([&] { return images() == before + 1; }));
+        CHECK(transcript->toPlainText().contains("look at these"));
         CHECK(composer->text().isEmpty());
-        QApplication::clipboard()->setText("just words");
-        before = images();
+        CHECK(until([&] { return tiles() == 0; }));
+        CHECK(!panel->findChild<QWidget*>("composerAttachments")->isVisible());
+        // Attachments sent while earlier images still upload wait in the tray.
+        copied = new QMimeData;
+        copied->setUrls({QUrl::fromLocalFile(file)});
+        QApplication::clipboard()->setMimeData(copied);
+        for (int i = 0; i < 4; ++i)
+            paste();
+        CHECK(tiles() == 4);
+        panel->findChild<QPushButton*>("communitySend")->click();
+        CHECK(tiles() == 0);
+        QApplication::clipboard()->setImage(pixels);
         paste();
-        QApplication::processEvents();
-        CHECK(composer->text() == "just words");
-        CHECK(images() == before);
-        composer->clear();
+        panel->findChild<QPushButton*>("communitySend")->click();
+        CHECK(tiles() == 1 && status->text().contains("Wait"));
+        CHECK(until([&] { return images() == before + 5; }));
+        CHECK(until([&] {
+            panel->findChild<QPushButton*>("communitySend")->click();
+            QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            return tiles() == 0;
+        }));
+        CHECK(until([&] { return images() == before + 6; }));
+        CHECK(status->isHidden());
     }
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());

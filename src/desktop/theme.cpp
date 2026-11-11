@@ -131,6 +131,13 @@ QFrame#composerFrame { background: #24272e; border: 1px solid #3d434c; border-ra
 QFrame#composerFrame[focused="true"] { border-color: #9dccca; }
 QFrame#composerFrame[inactive="true"] { background: #26292f; border-color: #30343b; }
 QLineEdit#communityComposer { background: transparent; border: 0; padding: 6px 2px; }
+QWidget#composerAttachments { background: transparent; }
+QFrame#composerAttachment { background: #1f2228; border: 1px solid #3d434c; border-radius: 8px; }
+QLabel#composerAttachmentPreview { background: #17191e; border-radius: 5px; }
+QLabel#composerAttachmentName { background: transparent; color: #c9d0d4; font-size: 12px; }
+QPushButton#composerAttachmentRemove { background: #2c3038; border: 1px solid #4a505a; border-radius: 4px;
+    color: #ff8f8f; padding: 0; font-size: 15px; font-weight: 600; }
+QPushButton#composerAttachmentRemove:hover { background: #4a2e33; border-color: #ff8f8f; }
 QLineEdit#communityComposer:disabled { background: transparent; }
 QLabel#composerPrefix { color: #6f7a84; font-size: 14px; font-weight: 600; }
 QLabel#communityStatus { color: #ffb3b3; font-size: 12px; }
