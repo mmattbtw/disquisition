@@ -609,6 +609,19 @@ int main(int argc, char** argv) {
         CHECK(action && action->text().isEmpty() && !action->icon().isNull());
         CHECK(action->accessibleName() == label);
         CHECK(hover(action, action->rect().center()) == label);
+        // The symbol must actually draw: an empty icon leaves a blank button.
+        const auto symbol = action->icon().pixmap(action->iconSize()).toImage();
+        int inked = 0;
+        for (int y = 0; y < symbol.height(); ++y)
+            for (int x = 0; x < symbol.width(); ++x)
+                inked += qAlpha(symbol.pixel(x, y)) > 128;
+        CHECK(inked > symbol.width() * symbol.height() / 8);
+        const auto drawn = action->grab().toImage();
+        const auto icon = action->icon();
+        action->setIcon(QIcon());
+        const auto blank = action->grab().toImage();
+        action->setIcon(icon);
+        CHECK(drawn != blank);
     }
     QSet<QString> markTips;
     for (auto* person : panel->findChildren<ParticipantTile*>())
