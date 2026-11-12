@@ -138,7 +138,7 @@ if(BUILD_DESKTOP_APP)
     enable_language(OBJCXX)
   endif()
   # Linux desktop notifications go over D-Bus when Qt has it.
-  find_package(Qt6 6.10 COMPONENTS Widgets Network Multimedia OPTIONAL_COMPONENTS DBus QUIET)
+  find_package(Qt6 6.10 COMPONENTS Widgets Network Multimedia Svg OPTIONAL_COMPONENTS DBus QUIET)
   # Screen sharing encodes and decodes H.264 video and Opus sound with FFmpeg.
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
@@ -243,6 +243,29 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_update PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_update PUBLIC Qt6::Network)
 
+    # Filled Material Symbols (fonts.google.com/icons), tinted when drawn.
+    add_library(desktop_symbols STATIC include/desktop/symbols.h src/desktop/symbols.cpp)
+    target_include_directories(desktop_symbols PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_symbols PUBLIC Qt6::Gui PRIVATE Qt6::Svg)
+    qt_add_resources(desktop_symbols symbols
+      PREFIX "/icons"
+      BASE resources/ui/icons
+      FILES
+        resources/ui/icons/call.svg
+        resources/ui/icons/gif_box.svg
+        resources/ui/icons/headset_mic.svg
+        resources/ui/icons/headset_off.svg
+        resources/ui/icons/image.svg
+        resources/ui/icons/mic.svg
+        resources/ui/icons/mic_off.svg
+        resources/ui/icons/phone_cancel.svg
+        resources/ui/icons/screen_share.svg
+        resources/ui/icons/stop_screen_share.svg
+        resources/ui/icons/tv.svg
+        resources/ui/icons/tv_off.svg
+        resources/ui/icons/video_camera_front.svg
+        resources/ui/icons/video_camera_front_off.svg)
+
     add_library(desktop_screen STATIC
       include/desktop/global_hotkeys.h
       include/desktop/screen_drawing.h
@@ -257,7 +280,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/share_source.cpp
       src/desktop/volume_menu.cpp)
     set_target_properties(desktop_screen PROPERTIES AUTOMOC ON)
-    target_link_libraries(desktop_screen PUBLIC chat_drawing Qt6::Widgets Qt6::Multimedia)
+    target_link_libraries(desktop_screen PUBLIC chat_drawing desktop_symbols Qt6::Widgets Qt6::Multimedia)
     if(UNIX AND NOT APPLE)
       pkg_check_modules(XCB QUIET IMPORTED_TARGET xcb)
       if(XCB_FOUND)

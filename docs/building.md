@@ -7,7 +7,7 @@ Run commands from the repository root unless a section says otherwise.
 Both the desktop app and relay need a C++20 compiler, CMake 3.16+, and OpenSSL 3+
 Crypto. The relay needs Qt 6.2+ Core/Network; the desktop app needs Qt 6.10+.
 
-The desktop app also needs Qt Widgets and Multimedia, SQLite 3.24+, pkg-config,
+The desktop app also needs Qt Widgets, Multimedia and Svg, SQLite 3.24+, pkg-config,
 and FFmpeg development libraries: `libavcodec` 60+, `libavutil`, `libswresample`,
 and `libswscale`.
 Git and network access are needed on the first desktop configure to fetch the
@@ -73,7 +73,7 @@ directory. `make clean` removes all three build directories.
 
 The CMake application targets are
 `relay` and `disquisition-desktop`. CMake skips the desktop target when its
-Widgets/Multimedia or FFmpeg dependencies are unavailable. Core/Network and
+Widgets/Multimedia/Svg or FFmpeg dependencies are unavailable. Core/Network and
 OpenSSL are required.
 
 ## Desktop app

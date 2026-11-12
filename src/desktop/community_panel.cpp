@@ -1,4 +1,5 @@
 #include "desktop/community_panel.h"
+#include "desktop/symbols.h"
 
 #include <QAction>
 #include <QAudio>
@@ -66,6 +67,8 @@
 #include <QWindow>
 #include <algorithm>
 #include <cmath>
+#include <tuple>
+#include <utility>
 
 #include "community/qr.h"
 #include "desktop/app_identity.h"
@@ -125,6 +128,27 @@ QPushButton* button(const QString& title, const char* name, QWidget* parent) {
     result->setObjectName(name);
     return result;
 }
+constexpr auto kCheckedText = "#ffb3b3";
+constexpr auto kDangerText = "#ff9b9b";
+// Shows `label` as the tooltip and accessible name of a button drawn as just
+// a symbol. Skips the update when nothing changed, since refresh runs often.
+void setSymbol(QPushButton* button, const QString& name, const QColor& color,
+               const QString& label) {
+    const auto look = name + '/' + color.name();
+    if (button->property("symbol").toString() != look) {
+        button->setProperty("symbol", look);
+        button->setIcon(symbols::icon(name, color));
+    }
+    button->setToolTip(label);
+    button->setAccessibleName(label);
+}
+void labelVoiceButtons(QPushButton* mute, QPushButton* deafen) {
+    for (const auto& [action, on, off] : {std::tuple{mute, "Unmute", "Mute"},
+                                          std::tuple{deafen, "Undeafen", "Deafen"}}) {
+        action->setToolTip(action->isChecked() ? on : off);
+        action->setAccessibleName(action->toolTip());
+    }
+}
 QList<community::Channel> orderedChannels(const community::Model& model) {
     auto channels = model.channels.values();
     std::sort(channels.begin(), channels.end(), [](const auto& a, const auto& b) {
@@ -137,48 +161,33 @@ QList<community::Channel> orderedChannels(const community::Model& model) {
     });
     return channels;
 }
-QPixmap voiceIndicator(const QString& kind) {
-    QPixmap image(16, 16);
+QPixmap voiceIndicator(const QString& kind, qreal scale) {
+    const QColor live("#9dccca"), quiet("#aebcbf");
+    if (kind == "muted")
+        return symbols::pixmap("mic_off", quiet, 16, scale);
+    if (kind == "deafened")
+        return symbols::pixmap("headset_off", quiet, 16, scale);
+    if (kind == "sharing screen")
+        return symbols::pixmap("screen_share", live, 16, scale);
+    if (kind == "camera on")
+        return symbols::pixmap("video_camera_front", live, 16, scale);
+    // Muted by you: a speaker, crossed out.
+    QPixmap image(QSize(16, 16) * scale);
+    image.setDevicePixelRatio(scale);
     image.fill(Qt::transparent);
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(kind == "sharing screen" || kind == "camera on" ? QColor("#9dccca")
-                                                                     : QColor("#aebcbf"),
-                        1.5));
-    if (kind == "muted") {
-        painter.drawRoundedRect(QRectF(6, 1, 4, 8), 2, 2);
-        painter.drawArc(QRectF(4, 4, 8, 7), 180 * 16, 180 * 16);
-        painter.drawLine(8, 11, 8, 14);
-        painter.drawLine(5, 14, 11, 14);
-    }
-    else if (kind == "deafened") {
-        painter.drawArc(QRectF(3, 2, 10, 12), 0, 180 * 16);
-        painter.drawRoundedRect(QRectF(2, 8, 3, 6), 1, 1);
-        painter.drawRoundedRect(QRectF(11, 8, 3, 6), 1, 1);
-    }
-    else if (kind == "muted by you") {
-        QPainterPath speaker;
-        speaker.moveTo(2, 6);
-        speaker.lineTo(5, 6);
-        speaker.lineTo(9, 3);
-        speaker.lineTo(9, 13);
-        speaker.lineTo(5, 10);
-        speaker.lineTo(2, 10);
-        speaker.closeSubpath();
-        painter.drawPath(speaker);
-    }
-    else if (kind == "camera on") {
-        painter.drawRoundedRect(QRectF(1.5, 4, 9, 8), 2, 2);
-        painter.drawPolygon(QPolygonF({QPointF(10.5, 7), QPointF(14.5, 4.5), QPointF(14.5, 11.5),
-                                       QPointF(10.5, 9)}));
-    }
-    else {
-        painter.drawRect(QRectF(2, 2, 12, 9));
-        painter.drawLine(8, 11, 8, 14);
-        painter.drawLine(5, 14, 11, 14);
-    }
-    if (kind != "sharing screen" && kind != "camera on")
-        painter.drawLine(2, 1, 14, 15);
+    painter.setPen(QPen(quiet, 1.5));
+    QPainterPath speaker;
+    speaker.moveTo(2, 6);
+    speaker.lineTo(5, 6);
+    speaker.lineTo(9, 3);
+    speaker.lineTo(9, 13);
+    speaker.lineTo(5, 10);
+    speaker.lineTo(2, 10);
+    speaker.closeSubpath();
+    painter.drawPath(speaker);
+    painter.drawLine(2, 1, 14, 15);
     return image;
 }
 // Slider positions follow loudness as heard, which is roughly logarithmic.
@@ -1050,6 +1059,8 @@ void CommunityPanel::buildUi() {
     callHeader->addLayout(callTitles, 1);
     joinCall_ = button("Join voice", "communityJoinVoice", stagePage);
     joinCall_->setProperty("primary", true);
+    joinCall_->setIcon(symbols::icon("call", theme::kInk));
+    joinCall_->setIconSize(QSize(16, 16));
     callHeader->addWidget(joinCall_, 0, Qt::AlignVCenter);
     stageLayout->addLayout(callHeader);
     connect(joinCall_, &QPushButton::clicked, this, &CommunityPanel::joinVoice);
@@ -1122,6 +1133,14 @@ void CommunityPanel::buildUi() {
     send_->setProperty("primary", true);
     for (auto* action : {send_, image_, gif_})
         action->setProperty("compact", true);
+    for (const auto& [action, symbol] : {std::pair{image_, "image"}, std::pair{gif_, "gif_box"}}) {
+        const auto label = action->text() == "GIF" ? QStringLiteral("Send a GIF")
+                                                   : QStringLiteral("Send an image");
+        action->setText({});
+        action->setProperty("iconOnly", true);
+        action->setIconSize(QSize(18, 18));
+        setSymbol(action, symbol, theme::kText, label);
+    }
     compose->addWidget(prefix);
     compose->addWidget(composer_, 1);
     compose->addWidget(image_);
@@ -1234,6 +1253,21 @@ void CommunityPanel::buildUi() {
     share_->setProperty("primary", true);
     mute_->setCheckable(true);
     deafen_->setCheckable(true);
+    stageToggle_->setIconSize(QSize(16, 16));
+    for (auto* action : {voice_, mute_, deafen_, camera_, share_}) {
+        action->setText({});
+        action->setProperty("iconOnly", true);
+        action->setIconSize(QSize(18, 18));
+    }
+    setSymbol(voice_, "phone_cancel", theme::kText, "Leave voice");
+    // Checked mute and deafen buttons show the crossed-out symbol in red.
+    mute_->setIcon(symbols::icon("mic", theme::kText, "mic_off", kCheckedText));
+    deafen_->setIcon(symbols::icon("headset_mic", theme::kText, "headset_off", kCheckedText));
+    // Presence updates check these with signals blocked, so refresh labels them too.
+    const auto labelVoiceToggles = [this] { labelVoiceButtons(mute_, deafen_); };
+    labelVoiceToggles();
+    connect(mute_, &QPushButton::toggled, this, labelVoiceToggles);
+    connect(deafen_, &QPushButton::toggled, this, labelVoiceToggles);
     voiceRow->addWidget(voiceDot);
     voiceRow->addWidget(voiceStatus_);
     voiceRow->addSpacing(6);
@@ -2461,6 +2495,7 @@ void CommunityPanel::refresh() {
         deafen_->setChecked(presence.deafened);
         if (!presence.deafened && !QSettings().value("voice/pushToTalk", false).toBool())
             mute_->setChecked(presence.muted);
+        labelVoiceButtons(mute_, deafen_);
     }
     for (auto* action : {invite_, manage_, send_, image_, gif_, voice_, mute_, deafen_, share_, camera_})
         action->setEnabled(false);
@@ -2639,7 +2674,7 @@ void CommunityPanel::refresh() {
                 for (const auto& kind : activity) {
                     auto* indicator = new QLabel(row);
                     indicator->setObjectName("voiceActivity");
-                    indicator->setPixmap(voiceIndicator(kind));
+                    indicator->setPixmap(voiceIndicator(kind, devicePixelRatioF()));
                     indicator->setToolTip(kind);
                     indicator->setAccessibleName(kind);
                     indicator->setFixedSize(16, 16);
@@ -2648,7 +2683,7 @@ void CommunityPanel::refresh() {
                 if (!state.muted && !state.deafened) {
                     auto* mic = new QLabel(row);
                     mic->setObjectName("voiceMic");
-                    mic->setPixmap(theme::micIcon(false, devicePixelRatioF()));
+                    mic->setPixmap(symbols::pixmap("mic", theme::kDim, 16, devicePixelRatioF()));
                     mic->setFixedSize(16, 16);
                     line->addWidget(mic);
                 }
@@ -2788,14 +2823,20 @@ void CommunityPanel::refresh() {
     const bool inVoice = !voiceCid_.isEmpty();
     voice_->setEnabled(inVoice);
     mute_->setEnabled(inVoice && !deafen_->isChecked());
+    labelVoiceButtons(mute_, deafen_);
     deafen_->setEnabled(inVoice);
     share_->setEnabled(inVoice);
     camera_->setEnabled(inVoice);
-    camera_->setText(cameraPending_              ? "Cancel camera"
-                     : cameraCapture_.running() ? "Turn camera off"
-                                                : "Turn camera on");
+    setSymbol(camera_, cameraPending_ || cameraCapture_.running() ? "video_camera_front_off"
+                                                                  : "video_camera_front",
+              cameraCapture_.running() ? kDangerText : theme::kText,
+              cameraPending_              ? "Cancel camera"
+              : cameraCapture_.running() ? "Turn camera off"
+                                         : "Turn camera on");
     setFlag(camera_, "danger", cameraCapture_.running());
-    share_->setText(capture_.running() ? "Stop sharing" : "Share screen");
+    setSymbol(share_, capture_.running() ? "stop_screen_share" : "screen_share",
+              capture_.running() ? kDangerText : theme::kInk,
+              capture_.running() ? "Stop sharing" : "Share screen");
     setFlag(share_, "primary", !capture_.running());
     setFlag(share_, "danger", capture_.running());
     if (inVoice) {
@@ -2943,6 +2984,11 @@ void CommunityPanel::openStage(bool open) {
     stageToggle_->setText(!sharer.isEmpty() ? "Watch " + sharer : "Show call");
     stageToggle_->setVisible(!voiceCid_.isEmpty() && !viewingCall);
     setFlag(stageToggle_, "primary", !viewingCall && !streams_.isEmpty());
+    const auto toggleColor = !viewingCall && !streams_.isEmpty() ? theme::kInk : theme::kText;
+    if (stageToggle_->property("symbolColor").toString() != toggleColor) {
+        stageToggle_->setProperty("symbolColor", toggleColor);
+        stageToggle_->setIcon(symbols::icon("tv", toggleColor));
+    }
     refreshCall();
     refreshPip();
 }
