@@ -17,12 +17,14 @@
 #include <QDropEvent>
 #include <QFrame>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFileOpenEvent>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImageReader>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -1106,7 +1108,19 @@ void CommunityPanel::buildUi() {
     columnLayout->addWidget(transcript_, 1);
     composerFrame_ = new QFrame(column);
     composerFrame_->setObjectName("composerFrame");
-    auto* compose = new QHBoxLayout(composerFrame_);
+    auto* composeStack = new QVBoxLayout(composerFrame_);
+    composeStack->setContentsMargins(0, 0, 0, 0);
+    composeStack->setSpacing(0);
+    attachmentTray_ = new QWidget(composerFrame_);
+    attachmentTray_->setObjectName("composerAttachments");
+    attachmentRow_ = new QHBoxLayout(attachmentTray_);
+    attachmentRow_->setContentsMargins(10, 10, 10, 4);
+    attachmentRow_->setSpacing(8);
+    attachmentRow_->addStretch(1);
+    attachmentTray_->hide();
+    composeStack->addWidget(attachmentTray_);
+    auto* compose = new QHBoxLayout;
+    composeStack->addLayout(compose);
     compose->setContentsMargins(10, 3, 4, 3);
     compose->setSpacing(5);
     auto* prefix = new QLabel("#", composerFrame_);
@@ -3303,12 +3317,27 @@ void CommunityPanel::render() {
 
 void CommunityPanel::sendChat() {
     const auto body = composer_->text().trimmed();
-    if (body.isEmpty()) return;
+    if (body.isEmpty() && attachments_.isEmpty()) return;
     if (body.startsWith('/')) {
         runCommand(body);
         return;
     }
     if (!online_) { noteError("Connect before sending messages."); return; }
+    if (!attachments_.isEmpty()) {
+        // sendImage drops images past four in flight, so keep these until it has room.
+        if (uploads_.size() + preparing_ + attachments_.size() > 4) {
+            noteError("Wait for the current image uploads to finish.");
+            return;
+        }
+        noteError(relayDown_);
+    }
+    for (auto& attachment : attachments_) {
+        prepareUpload(std::move(attachment.prepare));
+        delete attachment.tile;
+    }
+    attachments_.clear();
+    attachmentTray_->hide();
+    if (body.isEmpty()) return;
     attempt([&] {
         const auto body = composer_->text().trimmed();
         const auto id = freshId();
@@ -3336,6 +3365,7 @@ void CommunityPanel::sendChat() {
 
 void CommunityPanel::prepareUpload(std::function<PreparedImage()> prepare) {
     const auto cid = cid_, channel = channel_;
+    ++preparing_;
     imagePool_.start([this, cid, channel, prepare = std::move(prepare)] {
         PreparedImage image;
         try {
@@ -3346,7 +3376,10 @@ void CommunityPanel::prepareUpload(std::function<PreparedImage()> prepare) {
         }
         QMetaObject::invokeMethod(
             this,
-            [this, cid, channel, image = std::move(image)] { sendImage(image, cid, channel); },
+            [this, cid, channel, image = std::move(image)] {
+                --preparing_;
+                sendImage(image, cid, channel);
+            },
             Qt::QueuedConnection);
     });
 }
@@ -3868,12 +3901,88 @@ void CommunityPanel::dropEvent(QDropEvent* event) {
     event->acceptProposedAction();
 }
 
+// Pasting copied image files attaches them, as does pasting copied pixels
+// with no text alongside. Anything else pastes as text.
+bool CommunityPanel::pasteImages(const QMimeData* mime) {
+    if (!mime || !online_ || !composer_->isEnabled())
+        return false;
+    QStringList paths;
+    for (const auto& url : mime->urls())
+        if (url.isLocalFile() && QImageReader(url.toLocalFile()).canRead())
+            paths.append(url.toLocalFile());
+    for (const auto& path : paths) {
+        QImageReader reader(path);
+        reader.setAutoTransform(true);
+        attach(reader.read(), QFileInfo(path).fileName(),
+               [path] { return prepareImageFile(path); });
+    }
+    if (!paths.isEmpty())
+        return true;
+    if (!mime->hasImage() || !mime->text().trimmed().isEmpty())
+        return false;
+    const auto image = qvariant_cast<QImage>(mime->imageData());
+    if (image.isNull())
+        return false;
+    attach(image, "image.png", [image] { return prepareImage(image); });
+    return true;
+}
+
+void CommunityPanel::attach(const QImage& preview, const QString& name,
+                            std::function<PreparedImage()> prepare) {
+    // Sending more at once would overflow the upload queue in sendImage.
+    if (attachments_.size() >= 4) {
+        noteError("You can attach up to 4 images at a time.");
+        return;
+    }
+    auto* tile = new QFrame(attachmentTray_);
+    tile->setObjectName("composerAttachment");
+    tile->setFixedSize(120, 116);
+    auto* layout = new QVBoxLayout(tile);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(4);
+    auto* thumbnail = new QLabel(tile);
+    thumbnail->setObjectName("composerAttachmentPreview");
+    thumbnail->setFixedSize(106, 80);
+    thumbnail->setAlignment(Qt::AlignCenter);
+    const qreal ratio = devicePixelRatioF();
+    QPixmap pixmap = QPixmap::fromImage(preview.scaled(
+        thumbnail->size() * ratio, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    pixmap.setDevicePixelRatio(ratio);
+    thumbnail->setPixmap(pixmap);
+    auto* label = new QLabel(tile);
+    label->setObjectName("composerAttachmentName");
+    label->setText(label->fontMetrics().elidedText(name, Qt::ElideMiddle, 106));
+    label->setToolTip(name);
+    layout->addWidget(thumbnail);
+    layout->addWidget(label);
+    auto* remove = new QPushButton("\u00d7", tile);
+    remove->setObjectName("composerAttachmentRemove");
+    remove->setToolTip("Remove attachment");
+    remove->setCursor(Qt::PointingHandCursor);
+    remove->setFixedSize(22, 22);
+    remove->move(tile->width() - 26, 4);
+    remove->raise();
+    connect(remove, &QPushButton::clicked, this, [this, tile] {
+        attachments_.removeIf([tile](const Attachment& a) { return a.tile == tile; });
+        tile->deleteLater();
+        attachmentTray_->setVisible(!attachments_.isEmpty());
+        composer_->setFocus(Qt::OtherFocusReason);
+    });
+    attachmentRow_->insertWidget(attachmentRow_->count() - 1, tile);
+    attachments_.append({tile, std::move(prepare)});
+    attachmentTray_->show();
+}
+
 bool CommunityPanel::eventFilter(QObject* watched, QEvent* event) {
     if (watched == transcript_ && event->type() == QEvent::Resize)
         placePip();
     if (watched == composer_ &&
         (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut))
         setFlag(composerFrame_, "focused", event->type() == QEvent::FocusIn);
+    if (watched == composer_ && event->type() == QEvent::KeyPress &&
+        static_cast<QKeyEvent*>(event)->matches(QKeySequence::Paste) &&
+        pasteImages(QApplication::clipboard()->mimeData()))
+        return true;
     if (watched == qApp && event->type() == QEvent::FileOpen) {
         const auto url = static_cast<QFileOpenEvent*>(event)->url();
         if (url.scheme() == "disquisition") {
