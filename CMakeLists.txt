@@ -324,6 +324,18 @@ if(BUILD_DESKTOP_APP)
       include/desktop/community_tree.h src/desktop/community_tree.cpp)
     target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
+    set(DISQUISITION_BUILD_INFO "${CMAKE_CURRENT_BINARY_DIR}/generated/desktop/build_info.h")
+    add_custom_target(disquisition_build_info
+      COMMAND "${CMAKE_COMMAND}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DOUTPUT=${DISQUISITION_BUILD_INFO}"
+        "-DGIT_BRANCH=${DISQUISITION_GIT_BRANCH}"
+        "-DGIT_COMMIT=${DISQUISITION_GIT_COMMIT}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildInfo.cmake"
+      BYPRODUCTS "${DISQUISITION_BUILD_INFO}"
+      COMMENT "Recording git branch and commit"
+      VERBATIM)
+    add_dependencies(disquisition-desktop disquisition_build_info)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_recent_messages desktop_audio desktop_media desktop_penguins desktop_notifications
@@ -509,6 +521,7 @@ if(BUILD_TESTING AND TARGET disquisition-desktop)
   target_link_libraries(community_ui_test PRIVATE ${COMMUNITY_UI_LIBRARIES})
   target_compile_definitions(community_ui_test PRIVATE ${COMMUNITY_UI_DEFINITIONS})
   target_include_directories(community_ui_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  add_dependencies(community_ui_test disquisition_build_info)
   add_test(NAME community_chat_links_test COMMAND community_ui_test --chat-links-only)
   set_tests_properties(community_chat_links_test PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME community_ui_test COMMAND community_ui_test)

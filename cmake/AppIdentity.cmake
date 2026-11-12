@@ -21,6 +21,10 @@ endif()
 
 set(DISQUISITION_BUILD_NUMBER "0" CACHE STRING
     "Release build number the desktop app updates from; 0 turns updates off")
+set(DISQUISITION_GIT_BRANCH "" CACHE STRING
+    "Branch shown in About; blank reads it from the checkout")
+set(DISQUISITION_GIT_COMMIT "" CACHE STRING
+    "Commit shown in About; blank reads it from the checkout")
 set(DISQUISITION_UPDATE_REPOSITORY "mmattbtw/disquisition" CACHE STRING
     "GitHub repository whose latest release the desktop app updates to")
 if(NOT DISQUISITION_BUILD_NUMBER MATCHES "^[0-9]+$")
