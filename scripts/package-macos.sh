@@ -56,12 +56,51 @@ if grep -q '^ERROR:' "$staging/deployment.log"; then
     exit 1
 fi
 cmake "-DDISQUISITION_CODESIGN_IDENTITY=${DISQUISITION_CODESIGN_IDENTITY:-AUTO}" \
+    -DDISQUISITION_CODESIGN_HARDENED=ON \
     "-DDISQUISITION_APP_BUNDLE=$app" -P "$script_dir/../cmake/SignMacOS.cmake"
+
+# Notarize only when credentials are given: a keychain profile saved with
+# `xcrun notarytool store-credentials`, or an App Store Connect API key.
+notary_args=()
+if [[ -n ${DISQUISITION_NOTARY_PROFILE:-} ]]; then
+    notary_args=(--keychain-profile "$DISQUISITION_NOTARY_PROFILE")
+elif [[ -n ${DISQUISITION_NOTARY_KEY:-} ]]; then
+    notary_args=(--key "$DISQUISITION_NOTARY_KEY" --key-id "${DISQUISITION_NOTARY_KEY_ID:?}"
+        --issuer "${DISQUISITION_NOTARY_ISSUER:?}")
+fi
+# Sign the DMG with the app's identity. Ad-hoc signatures have no authority.
+signer=$(codesign --display --verbose=2 "$app" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)
+if [[ ${#notary_args[@]} -gt 0 && $signer != "Developer ID Application: "* ]]; then
+    echo "Notarization needs a Developer ID Application identity, not '${signer:-ad-hoc}'." >&2
+    exit 1
+fi
 
 cpack --config "$script_dir/../cmake/MacDmg.cmake" \
     -D "CPACK_INSTALLED_DIRECTORIES=$staging/payload;/" \
     -D "CPACK_PACKAGE_FILE_NAME=$package_name" \
     -D "CPACK_DMG_VOLUME_NAME=${app_name%.app}" \
     -D "CPACK_PACKAGE_DIRECTORY=$staging/output"
-mv "$staging/output/$package_name.dmg" "$output_dir/$package_name.dmg"
+dmg="$staging/output/$package_name.dmg"
+if [[ -n $signer ]]; then
+    codesign --force --timestamp --sign "$signer" "$dmg"
+fi
+if [[ ${#notary_args[@]} -gt 0 ]]; then
+    # The status below decides failure, after printing Apple's log.
+    xcrun notarytool submit "$dmg" "${notary_args[@]}" --wait --output-format json \
+        > "$staging/notary.json" || true
+    cat "$staging/notary.json"
+    status=$(/usr/bin/plutil -extract status raw "$staging/notary.json" 2>/dev/null || true)
+    if [[ $status != Accepted ]]; then
+        submission=$(/usr/bin/plutil -extract id raw "$staging/notary.json" 2>/dev/null || true)
+        if [[ -n $submission ]]; then
+            xcrun notarytool log "$submission" "${notary_args[@]}" >&2 || true
+        fi
+        echo "Notarization failed with status '${status:-unknown}'." >&2
+        exit 1
+    fi
+    xcrun stapler staple "$dmg"
+    xcrun stapler validate "$dmg"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+fi
+mv "$dmg" "$output_dir/$package_name.dmg"
 echo "Created $output_dir/$package_name.dmg"
