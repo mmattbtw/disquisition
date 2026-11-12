@@ -381,8 +381,9 @@ if(BUILD_DESKTOP_APP)
       target_sources(disquisition-desktop PRIVATE resources/windows/disquisition.rc)
       target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows")
       target_sources(disquisition-desktop PRIVATE
-        include/desktop/windows_notifications.h src/desktop/windows_notifications.cpp)
-      target_link_libraries(disquisition-desktop PRIVATE runtimeobject)
+        include/desktop/windows_notifications.h src/desktop/windows_notifications.cpp
+        include/desktop/windows_screen_capture.h src/desktop/windows_screen_capture.cpp)
+      target_link_libraries(disquisition-desktop PRIVATE runtimeobject d3d11 dxgi)
     endif()
     if(UNIX AND NOT APPLE AND TARGET Qt6::DBus)
       target_sources(disquisition-desktop PRIVATE

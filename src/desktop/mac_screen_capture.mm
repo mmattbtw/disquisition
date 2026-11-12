@@ -17,6 +17,7 @@
     std::function<void(QImage)> frameCallback;
     std::function<void(QString)> errorCallback;
     ShareAudioCallback audioCallback;
+    int frameRate;
     // Sound is delivered in order on its own queue, then interleaved here.
     dispatch_queue_t audioQueue;
     std::vector<float> interleaved;
@@ -130,7 +131,7 @@ void startStream(DisquisitionScreenOutput* output, NSString* missing, FilterChoo
         configuration.width = static_cast<size_t>(size.width);
         configuration.height = static_cast<size_t>(size.height);
         configuration.pixelFormat = kCVPixelFormatType_32BGRA;
-        configuration.minimumFrameInterval = CMTimeMake(1, 30);
+        configuration.minimumFrameInterval = CMTimeMake(1, output->frameRate);
         configuration.queueDepth = 3;
         configuration.showsCursor = YES;
         const bool audio = static_cast<bool>(output->audioCallback);
@@ -208,9 +209,11 @@ struct MacScreenCapture::State {
 };
 
 MacScreenCapture::MacScreenCapture(std::function<void(QImage)> frame,
-                                   std::function<void(QString)> error, ShareAudioCallback audio)
+                                   std::function<void(QString)> error, ShareAudioCallback audio,
+                                   int fps)
     : state_(new State {[[DisquisitionScreenOutput alloc] init]}) {
     state_->output->active = false;
+    state_->output->frameRate = fps;
     state_->output->frameCallback = std::move(frame);
     state_->output->errorCallback = std::move(error);
     state_->output->audioCallback = std::move(audio);

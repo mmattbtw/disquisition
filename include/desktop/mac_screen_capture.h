@@ -15,7 +15,7 @@
 class MacScreenCapture {
 public:
     MacScreenCapture(std::function<void(QImage)> frame, std::function<void(QString)> error,
-                     ShareAudioCallback audio = {});
+                     ShareAudioCallback audio = {}, int fps = 30);
     ~MacScreenCapture();
     void startDisplay(quint32 displayId);
     void startWindow(quint32 windowId);

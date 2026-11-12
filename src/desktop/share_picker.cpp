@@ -1,9 +1,13 @@
 #include "desktop/share_picker.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSettings>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -37,6 +41,19 @@ SharePicker::SharePicker(QWidget* parent) : QDialog(parent) {
     shareAudio_->setToolTip("A window shares its application's sound. A screen shares everything "
                             "you hear except voice chat.");
 
+    quality_ = new QComboBox(this);
+    for (const StreamQuality& quality : streamQualities())
+        quality_->addItem(quality.label);
+    const int saved = QSettings().value("share/quality", kDefaultStreamQuality).toInt();
+    quality_->setCurrentIndex(saved >= 0 && saved < quality_->count() ? saved
+                                                                      : kDefaultStreamQuality);
+    connect(quality_, &QComboBox::currentIndexChanged, this,
+            [](int index) { QSettings().setValue("share/quality", index); });
+    auto* qualityRow = new QHBoxLayout;
+    qualityRow->addWidget(new QLabel("Stream quality", this));
+    qualityRow->addWidget(quality_);
+    qualityRow->addStretch(1);
+
     auto* buttons = new QDialogButtonBox(this);
     goLive_ = buttons->addButton("Go Live", QDialogButtonBox::AcceptRole);
     goLive_->setObjectName("primary");
@@ -45,6 +62,7 @@ SharePicker::SharePicker(QWidget* parent) : QDialog(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(tabs_, 1);
     layout->addWidget(shareAudio_);
+    layout->addLayout(qualityRow);
     layout->addWidget(buttons);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -102,6 +120,11 @@ std::optional<ShareSource> SharePicker::chosen() const {
 
 bool SharePicker::shareAudio() const {
     return shareAudio_->isChecked();
+}
+
+StreamQuality SharePicker::quality() const {
+    return streamQualities().value(quality_->currentIndex(),
+                                   streamQualities()[kDefaultStreamQuality]);
 }
 
 QListWidget* SharePicker::currentList() const {

@@ -8,6 +8,7 @@
 #include "desktop/share_source.h"
 
 class QCheckBox;
+class QComboBox;
 class QListWidget;
 class QPushButton;
 class QTabWidget;
@@ -23,6 +24,7 @@ public:
     // The selection, once the dialog has been accepted.
     std::optional<ShareSource> chosen() const;
     bool shareAudio() const;
+    StreamQuality quality() const;
 
 private:
     QListWidget* currentList() const;
@@ -32,6 +34,7 @@ private:
     QListWidget* windows_ = nullptr;
     QListWidget* screens_ = nullptr;
     QCheckBox* shareAudio_ = nullptr;
+    QComboBox* quality_ = nullptr;
     QPushButton* goLive_ = nullptr;
     QList<ShareSource> sources_;
 };

@@ -30,6 +30,7 @@ class QVideoFrame;
 class QVideoSink;
 class QWindowCapture;
 class MacScreenCapture;
+class WindowsScreenCapture;
 class ScreenAudioEncoder;
 
 // Requests macOS Screen Recording access when needed. Other platforms return true.
@@ -57,7 +58,11 @@ public:
     bool running() const;
     // The encoder in use, such as "h264_nvenc".
     QString encoderName() const { return encoderName_; }
-    void setFrameRate(int fps) { frameIntervalMs_ = 1000 / qBound(1, fps, 60); }
+    QString stats() const { return stats_; }
+    void setFrameRate(int fps) {
+        fps_ = qBound(1, fps, 60);
+        frameIntervalMs_ = 1000 / fps_;
+    }
     void setMaxSize(const QSize& size) { maxSize_ = size; }
     void setBacklogProbe(std::function<qint64()> probe) { backlog_ = std::move(probe); }
     // A new/reconnecting viewer must be able to decode even a static screen.
@@ -76,6 +81,10 @@ private:
     void handleFrame(const QVideoFrame& frame);
     void handleImage(QImage image);
     void submitFrame(std::function<QImage()> image);
+    void countStats(qint64 encodeMs, bool sent);
+#if defined(Q_OS_WIN)
+    bool startWindowsCapture(const ShareSource& source);
+#endif
     // Encodes captured sound and posts each packet back to this object.
     ShareAudioCallback audioEncoder();
 
@@ -83,7 +92,14 @@ private:
     // was opened on and frames are encoded in order.
     QThreadPool encoder_;
     bool encoding_ = false;
+    std::function<QImage()> pending_;
     bool keyframeRequested_ = false;
+    QElapsedTimer statsClock_;
+    QString stats_;
+    int captured_ = 0;
+    int encoded_ = 0;
+    int sent_ = 0;
+    qint64 encodeMsTotal_ = 0;
     QImage latestImage_;
     QTimer keyframeTimer_;
     quint64 generation_ = 0;
@@ -99,12 +115,16 @@ private:
 #else
     SystemAudioCapture audioCapture_;
 #endif
+#if defined(Q_OS_WIN)
+    std::unique_ptr<WindowsScreenCapture> windowsCapture_;
+#endif
     std::function<qint64()> backlog_;
     QElapsedTimer clock_;
     qint64 nextDueMs_ = 0;
     // Used only by the encoding thread; replaced on each start().
     std::shared_ptr<H264Encoder> h264_;
     QString encoderName_;
+    int fps_ = 30;
     qint64 frameIntervalMs_ = 1000 / 30;
     QSize maxSize_{1920, 1080};
     quint32 nextFrameId_ = 0;

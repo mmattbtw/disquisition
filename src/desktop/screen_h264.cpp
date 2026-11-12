@@ -34,9 +34,10 @@ AVPixelFormat pixelFormatOf(QImage::Format format) {
 
 // Hardware encoders such as NVENC take the captured RGB frame as is and convert
 // it on the GPU, which saves 10-20 ms of CPU work per 1080p frame. Other
-// encoders get NV12 or YUV 4:2:0, converted on the CPU.
+// encoders get NV12 or YUV 4:2:0, converted on the CPU. Scaled frames go to
+// NV12, which is several times cheaper than scaling RGB.
 AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec,
-                             AVPixelFormat sourceFormat) {
+                             AVPixelFormat sourceFormat, bool scaling) {
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
     const void* configs = nullptr;
     int count = 0;
@@ -58,7 +59,8 @@ AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec
         ++count;
     }
 #endif
-    for (const AVPixelFormat wanted : {sourceFormat, AV_PIX_FMT_NV12, AV_PIX_FMT_YUV420P}) {
+    const AVPixelFormat first = scaling ? AV_PIX_FMT_NV12 : sourceFormat;
+    for (const AVPixelFormat wanted : {first, sourceFormat, AV_PIX_FMT_NV12, AV_PIX_FMT_YUV420P}) {
         for (int i = 0; i < count; ++i) {
             if (formats[i] == wanted) {
                 return wanted;
@@ -66,6 +68,27 @@ AVPixelFormat inputFormatFor(const AVCodecContext* context, const AVCodec* codec
         }
     }
     return AV_PIX_FMT_NONE;
+}
+
+SwsContext* threadedScaler(const QSize& source, AVPixelFormat sourceFormat, const QSize& target,
+                           AVPixelFormat targetFormat) {
+    SwsContext* scaler = sws_alloc_context();
+    if (!scaler) {
+        return nullptr;
+    }
+    av_opt_set_int(scaler, "srcw", source.width(), 0);
+    av_opt_set_int(scaler, "srch", source.height(), 0);
+    av_opt_set_int(scaler, "src_format", sourceFormat, 0);
+    av_opt_set_int(scaler, "dstw", target.width(), 0);
+    av_opt_set_int(scaler, "dsth", target.height(), 0);
+    av_opt_set_int(scaler, "dst_format", targetFormat, 0);
+    av_opt_set_int(scaler, "sws_flags", SWS_BILINEAR, 0);
+    av_opt_set_int(scaler, "threads", 0, 0);
+    if (sws_init_context(scaler, nullptr, nullptr) < 0) {
+        sws_freeContext(scaler);
+        return nullptr;
+    }
+    return scaler;
 }
 
 // Low-latency settings: no lookahead or frame reordering, so each frame comes
@@ -115,9 +138,11 @@ struct H264Encoder::State {
     AVFrame* frame = nullptr;
     AVPacket* packet = nullptr;
     SwsContext* scaler = nullptr;
+    QSize scalerSource;
     QSize size;
     int fps = 0;
     AVPixelFormat sourceFormat = AV_PIX_FMT_NONE;
+    bool scaling = false;
     qint64 lastPts = -1;
     QString name;
 
@@ -128,10 +153,11 @@ struct H264Encoder::State {
         avcodec_free_context(&context);
     }
 
-    bool open(const QSize& target, int framesPerSecond, AVPixelFormat source) {
+    bool open(const QSize& target, int framesPerSecond, AVPixelFormat source, bool scaled) {
         size = target;
         fps = framesPerSecond;
         sourceFormat = source;
+        scaling = scaled;
         // A missing GPU makes the hardware encoders log errors while failing.
         const int logLevel = av_log_get_level();
         av_log_set_level(AV_LOG_QUIET);
@@ -143,7 +169,7 @@ struct H264Encoder::State {
             AVCodecContext* candidate = avcodec_alloc_context3(codec);
             candidate->width = size.width();
             candidate->height = size.height();
-            candidate->pix_fmt = inputFormatFor(candidate, codec, sourceFormat);
+            candidate->pix_fmt = inputFormatFor(candidate, codec, sourceFormat, scaling);
             candidate->time_base = {1, 1000};
             candidate->framerate = {fps, 1};
             // A keyframe every two seconds lets a new viewer start quickly.
@@ -199,11 +225,12 @@ bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qin
         source = source.convertToFormat(QImage::Format_RGB32);
         sourceFormat = AV_PIX_FMT_RGB32;
     }
+    const bool scaling = source.size() != target;
     bool forceKeyframe = requestKeyframe;
     if (!state_ || state_->size != target || state_->fps != fps ||
-        state_->sourceFormat != sourceFormat) {
+        state_->sourceFormat != sourceFormat || state_->scaling != scaling) {
         state_ = std::make_unique<State>();
-        if (!state_->open(target, fps, sourceFormat)) {
+        if (!state_->open(target, fps, sourceFormat, scaling)) {
             state_.reset();
             return false;
         }
@@ -222,15 +249,32 @@ bool H264Encoder::encode(const QImage& image, const QSize& maxSize, int fps, qin
                             static_cast<int>(source.width() * 4), source.height());
     }
     else {
-        state.scaler = sws_getCachedContext(state.scaler, source.width(), source.height(),
-                                            sourceFormat, target.width(), target.height(),
-                                            state.context->pix_fmt, SWS_BILINEAR, nullptr, nullptr,
-                                            nullptr);
+        if (!state.scaler || state.scalerSource != source.size()) {
+            sws_freeContext(state.scaler);
+            state.scaler = threadedScaler(source.size(), sourceFormat, target,
+                                          state.context->pix_fmt);
+            state.scalerSource = source.size();
+        }
         if (!state.scaler) {
             return true;
         }
-        sws_scale(state.scaler, planes, strides, 0, source.height(), state.frame->data,
-                  state.frame->linesize);
+        AVFrame* input = av_frame_alloc();
+        if (!input) {
+            return true;
+        }
+        input->format = sourceFormat;
+        input->width = source.width();
+        input->height = source.height();
+        input->data[0] = const_cast<uint8_t*>(planes[0]);
+        input->linesize[0] = strides[0];
+        // sws_scale_frame() only uses threads when the input has a buffer reference.
+        input->buf[0] = av_buffer_create(input->data[0], static_cast<size_t>(source.sizeInBytes()),
+                                         [](void*, uint8_t*) {}, nullptr, AV_BUFFER_FLAG_READONLY);
+        const int scaled = sws_scale_frame(state.scaler, state.frame, input);
+        av_frame_free(&input);
+        if (scaled < 0) {
+            return true;
+        }
     }
 
     state.lastPts = qMax(ptsMs, state.lastPts + 1);

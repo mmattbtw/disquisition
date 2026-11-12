@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QRect>
 #include <QScreen>
+#include <QSize>
 #include <QString>
 #include <functional>
 
@@ -26,6 +27,24 @@ struct ShareSource {
     quintptr nativeId = 0; // HWND or X11 window, when its title identifies it uniquely
 #endif
 };
+
+// Above 1440p, keyframes can exceed kMaxScreenChunks.
+struct StreamQuality {
+    QString label;
+    QSize maxSize;
+    int fps = 30;
+};
+
+inline const QList<StreamQuality>& streamQualities() {
+    static const QList<StreamQuality> qualities {
+        {"720p 30fps", {1280, 720}, 30},
+        {"1080p 30fps", {1920, 1080}, 30},
+        {"1080p 60fps", {1920, 1080}, 60},
+        {"1440p 60fps", {2560, 1440}, 60},
+    };
+    return qualities;
+}
+constexpr int kDefaultStreamQuality = 1;
 
 // Lists the windows and screens that can be shared, leaving out this app's own
 // windows. `done` runs on the UI thread: straight away, or on macOS, where
