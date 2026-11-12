@@ -3,6 +3,7 @@
 #include <QAbstractItemView>
 #include <QBuffer>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCompleter>
 #include <QComboBox>
 #include <QColorDialog>
@@ -49,6 +50,7 @@
 #include "check.h"
 #include "community/store.h"
 #include "community/wire.h"
+#include "desktop/build_info.h"
 #include "desktop/app_sound.h"
 #include "desktop/community_panel.h"
 #include "desktop/community_tree.h"
@@ -270,12 +272,26 @@ int main(int argc, char** argv) {
         CHECK(dialog->windowTitle() == "User Settings");
         auto* categories = dialog->findChild<QListWidget*>("userSettingsCategories");
         auto* pages = dialog->findChild<QStackedWidget*>("userSettingsPages");
-        CHECK(categories && pages && categories->count() == 5);
+        CHECK(categories && pages && categories->count() == 6);
         CHECK(categories->geometry().right() < pages->geometry().left());
         for (int i = 0; i < categories->count(); ++i) {
             categories->setCurrentRow(i);
             CHECK(pages->currentIndex() == i);
         }
+        // About shows what this binary was built from.
+        CHECK(categories->item(5)->text() == "About");
+        auto* buildNumber = dialog->findChild<QLabel*>("aboutBuildNumber");
+        auto* gitBranch = dialog->findChild<QLabel*>("aboutGitBranch");
+        auto* gitCommit = dialog->findChild<QLabel*>("aboutGitCommit");
+        CHECK(buildNumber && buildNumber->text() == "Unreleased");
+        CHECK(gitBranch && gitBranch->text() == QString::fromUtf8(disquisition::kGitBranch));
+        CHECK(gitCommit && gitCommit->text() == QString::fromUtf8(disquisition::kGitCommit));
+        CHECK(!gitBranch->text().isEmpty() && !gitCommit->text().isEmpty());
+        dialog->findChild<QPushButton*>("aboutCopy")->click();
+        CHECK(QApplication::clipboard()->text().contains("Commit: " + gitCommit->text()));
+        categories->setCurrentRow(5);
+        QApplication::processEvents();
+        CHECK(dialog->grab().save("community-about-settings.png"));
         categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
         CHECK(relay && relay->text().isEmpty());

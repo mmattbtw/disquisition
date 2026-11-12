@@ -68,6 +68,8 @@
 #include <cmath>
 
 #include "community/qr.h"
+#include "desktop/app_identity.h"
+#include "desktop/build_info.h"
 #include "desktop/app_sound.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
@@ -1486,6 +1488,38 @@ void CommunityPanel::settings() {
     auto* historyForm = page("Message History",
                              "Optionally save chat on this device. Missed messages are not "
                              "downloaded. Community metadata is always saved.");
+    auto* aboutForm = page("About", "The build of " + QString::fromUtf8(disquisition::kAppName) +
+                                        " you are running. Include it when reporting a bug.");
+    const QString buildNumber = disquisition::kBuildNumber > 0
+                                    ? QString::number(disquisition::kBuildNumber)
+                                    : QStringLiteral("Unreleased");
+    const QString branch = QString::fromUtf8(disquisition::kGitBranch);
+    const QString commit = QString::fromUtf8(disquisition::kGitCommit);
+    const auto aboutValue = [&](const QString& name, const QString& value) {
+        auto* label = new QLabel(value, &dialog);
+        label->setObjectName(name);
+        label->setProperty("aboutValue", true);
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        label->setWordWrap(true);
+        return label;
+    };
+    aboutForm->addRow("Build", aboutValue("aboutBuildNumber", buildNumber));
+    aboutForm->addRow("Branch", aboutValue("aboutGitBranch", branch));
+    aboutForm->addRow("Commit", aboutValue("aboutGitCommit", commit));
+    auto* copyRow = new QWidget(&dialog);
+    auto* copyLayout = new QHBoxLayout(copyRow);
+    copyLayout->setContentsMargins(0, 0, 0, 0);
+    auto* copyAbout = new QPushButton("Copy build info", copyRow);
+    copyAbout->setObjectName("aboutCopy");
+    setFlag(copyAbout, "compact", true);
+    copyLayout->addWidget(copyAbout);
+    copyLayout->addStretch();
+    aboutForm->addRow(copyRow);
+    connect(copyAbout, &QPushButton::clicked, &dialog, [=] {
+        QApplication::clipboard()->setText(QStringLiteral("Build: %1\nBranch: %2\nCommit: %3")
+                                               .arg(buildNumber, branch, commit));
+        copyAbout->setText("Copied");
+    });
     connect(categories, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
     categories->setCurrentRow(0);
 

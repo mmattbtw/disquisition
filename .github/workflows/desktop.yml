@@ -17,6 +17,9 @@ jobs:
       DISQUISITION_BUILD_CHANNEL: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       # Matches the main-<run number> release tag. 0 disables updates.
       DISQUISITION_BUILD_NUMBER: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_number || 0 }}
+      # Pull requests check out a detached merge commit; show the PR's own branch and head.
+      DISQUISITION_GIT_BRANCH: ${{ github.head_ref || github.ref_name }}
+      DISQUISITION_GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,14 +74,14 @@ jobs:
         if: runner.os != 'Windows'
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
+        run: cmake -S . -B build -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DDISQUISITION_BUILD_CHANNEL=$DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_GIT_BRANCH=$DISQUISITION_GIT_BRANCH" "-DDISQUISITION_GIT_COMMIT=$DISQUISITION_GIT_COMMIT" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$KLIPY_API_KEY"
 
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           KLIPY_API_KEY: ${{ secrets.KLIPY_API_KEY }}
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$env:DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DESKTOP_APP=ON -DBUILD_RELAY=OFF -DBUILD_TESTING=OFF -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_ROOT_DIR="${{ matrix.openssl-root }}" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows "-DDISQUISITION_BUILD_CHANNEL=$env:DISQUISITION_BUILD_CHANNEL" "-DDISQUISITION_BUILD_NUMBER=$env:DISQUISITION_BUILD_NUMBER" "-DDISQUISITION_GIT_BRANCH=$env:DISQUISITION_GIT_BRANCH" "-DDISQUISITION_GIT_COMMIT=$env:DISQUISITION_GIT_COMMIT" "-DDISQUISITION_UPDATE_REPOSITORY=${{ github.repository }}" "-DDISQUISITION_KLIPY_API_KEY=$env:KLIPY_API_KEY"
 
       - name: Build desktop
         run: cmake --build build --config Release --parallel
