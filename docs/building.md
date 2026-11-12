@@ -157,8 +157,24 @@ again with the configured identity.
 
 Without an Apple Development certificate, builds fall back to ad-hoc signing
 and print a warning. Use `-DDISQUISITION_CODESIGN_IDENTITY=-` to request this
-explicitly. CI artifacts are also ad-hoc signed unless the runner has a
-certificate. Their permissions may need to be granted again after updates.
+explicitly.
+
+Release builds from CI are signed with the project's Developer ID Application
+certificate and notarized, so Gatekeeper opens them without a warning and
+permission grants carry over between updates. The desktop workflow reads these
+repository secrets:
+
+| Secret | Contents |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Base64 of a `.p12` holding the Developer ID Application certificate and its private key |
+| `MACOS_CERTIFICATE_PASSWORD` | The `.p12` export password |
+| `APPLE_API_KEY_P8` | Contents of an App Store Connect API key (`AuthKey_<id>.p8`) |
+| `APPLE_API_KEY_ID` | That key's ID |
+| `APPLE_API_ISSUER_ID` | The issuer ID shown above the App Store Connect key list |
+
+Without the certificate, as in pull requests from forks, the DMG is ad-hoc
+signed, and macOS may ask for permissions again after each update. Without the
+API key, the DMG is signed but not notarized.
 
 ## Package a macOS build
 
@@ -170,10 +186,27 @@ The script needs `macdeployqt` and `cpack` on `PATH`, plus Finder to set the
 installer window layout. Pass the bundle for the channel you built, such as
 `build/disquisition staging.app` or `build/disquisition.app`.
 It preserves the app's name, bundles dependencies and signs the finished app
-using the same automatic certificate selection as the build, with ad-hoc
-signing as a fallback. If you configured a specific signing identity, set
+and DMG using the same automatic certificate selection as the build, with
+ad-hoc signing as a fallback. With a certificate, the app uses the hardened
+runtime with the entitlements in `resources/macos/disquisition.entitlements`.
+If you configured a specific signing identity, set
 `DISQUISITION_CODESIGN_IDENTITY` to that identity when running the script.
-The DMG is not notarized.
+
+To notarize a local DMG, sign it with a Developer ID Application identity and
+give the script notarization credentials. Either save them once with
+`xcrun notarytool store-credentials disquisition` and set
+`DISQUISITION_NOTARY_PROFILE=disquisition`, or set `DISQUISITION_NOTARY_KEY`
+to an App Store Connect API key file along with `DISQUISITION_NOTARY_KEY_ID`
+and `DISQUISITION_NOTARY_ISSUER`:
+
+```sh
+DISQUISITION_CODESIGN_IDENTITY="Developer ID Application: teal computing, LLC (P2B3GABB6H)" \
+DISQUISITION_NOTARY_PROFILE=disquisition \
+scripts/package-macos.sh build/disquisition.app build/disquisition.dmg
+```
+
+The script waits for Apple's result, prints the notarization log if it is
+rejected, and staples the ticket to the DMG.
 The app icon source is `resources/icons/disquisition.icon`, an Icon Composer
 document. macOS bundles its compiled `Assets.car` for the layered icon and an
 ICNS fallback for older systems. Windows embeds the ICO in the executable;

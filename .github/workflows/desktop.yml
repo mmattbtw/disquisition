@@ -92,6 +92,54 @@ jobs:
           cp build/_deps/community_zxing-src/LICENSE dist/licenses/ZXing.LICENSE
           tar -czf disquisition-desktop-linux-x64.tar.gz -C dist .
 
+      # Fork pull requests get no secrets and stay ad-hoc signed.
+      - name: Set up macOS signing and notarization
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          if [[ -z $MACOS_CERTIFICATE_P12 ]]; then
+            echo "No signing certificate; the DMG will be ad-hoc signed and not notarized."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          base64 --decode <<< "$MACOS_CERTIFICATE_P12" > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          # The certificate chains to this intermediate, which runners may lack.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | grep -o '"Developer ID Application: [^"]*"' | head -n 1 | tr -d '"')
+          if [[ -z $identity ]]; then
+            echo "MACOS_CERTIFICATE_P12 has no valid Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "DISQUISITION_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "DISQUISITION_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          if [[ -n $APPLE_API_KEY_P8 ]]; then
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary-key.p8"
+            echo "DISQUISITION_NOTARY_KEY=$RUNNER_TEMP/notary-key.p8" >> "$GITHUB_ENV"
+            echo "DISQUISITION_NOTARY_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+            echo "DISQUISITION_NOTARY_ISSUER=$APPLE_API_ISSUER_ID" >> "$GITHUB_ENV"
+          else
+            echo "No notarization key; the DMG will be signed but not notarized."
+          fi
+
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: |
@@ -100,6 +148,12 @@ jobs:
           cp "$(brew --prefix openssl@3)/LICENSE.txt" "$app/Contents/Resources/licenses/OpenSSL.LICENSE"
           cp build/_deps/community_zxing-src/LICENSE "$app/Contents/Resources/licenses/ZXing.LICENSE"
           scripts/package-macos.sh "$app" disquisition-desktop-macos-arm64.dmg
+
+      - name: Remove macOS signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          [[ -z ${DISQUISITION_SIGNING_KEYCHAIN:-} ]] || security delete-keychain "$DISQUISITION_SIGNING_KEYCHAIN"
+          rm -f "$RUNNER_TEMP/notary-key.p8"
 
       - name: Package Windows app
         if: runner.os == 'Windows'
