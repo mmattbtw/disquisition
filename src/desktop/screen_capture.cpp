@@ -23,6 +23,7 @@
 #if defined(Q_OS_WIN)
 #include "desktop/windows_screen_capture.h"
 #include <QtGui/qscreen_platform.h>
+#include <mutex>
 #endif
 
 bool requestScreenRecordingAccess() {
