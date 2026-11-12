@@ -191,7 +191,13 @@ struct WindowsScreenCapture::State {
                 }
             }
             Com<IDirect3D11CaptureFrame> frame;
-            if (FAILED(pool->TryGetNextFrame(frame.put())) || !frame) {
+            const HRESULT next = pool->TryGetNextFrame(frame.put());
+            if (FAILED(next)) {
+                error(QStringLiteral("screen capture failed (0x%1)")
+                          .arg(static_cast<quint32>(next), 8, 16, QLatin1Char('0')));
+                break;
+            }
+            if (!frame) {
                 if (timer) {
                     LARGE_INTEGER due {};
                     due.QuadPart = -10'000; // 1 ms
