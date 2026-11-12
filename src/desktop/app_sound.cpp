@@ -17,7 +17,19 @@ QSoundEffect* bundledSound(const QString& name, QObject* parent) {
     return sound;
 }
 
+bool soundEffectsEnabled() {
+    return QSettings().value("sounds/enabled", false).toBool();
+}
+
+void setSoundEffectsEnabled(bool enabled) {
+    QSettings().setValue("sounds/enabled", enabled);
+}
+
 void playSound(QSoundEffect* sound) {
+    if (soundEffectsEnabled()) playAlert(sound);
+}
+
+void playAlert(QSoundEffect* sound) {
     if (!sound || sound->status() == QSoundEffect::Error) return;
     const QAudioDevice device =
         findAudioDevice(QMediaDevices::audioOutputs(),

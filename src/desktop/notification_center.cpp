@@ -122,7 +122,8 @@ void NotificationCenter::setBadge(const UnreadBadge& badge) {
 }
 
 void NotificationCenter::notify(const QString& key, const QString& title, const QString& text) {
-    const DesktopNotification notification{key, title, notificationText(text), sound_ != nullptr};
+    const DesktopNotification notification{key, title, notificationText(text),
+                                           sound_ && soundEffectsEnabled()};
     if (pacer_.offer(notification, clock_.elapsed())) {
         show(notification);
         playSound(sound_);
