@@ -1,6 +1,8 @@
 #pragma once
 
 namespace disquisition {
+inline constexpr char kBuildChannel[] = "@DISQUISITION_BUILD_CHANNEL@";
+inline constexpr char kBugReportWebhook[] = "@DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL@";
 inline constexpr char kAppName[] = "@DISQUISITION_APP_NAME@";
 inline constexpr char kSettingsName[] = "@DISQUISITION_SETTINGS_NAME@";
 inline constexpr int kBuildNumber = @DISQUISITION_BUILD_NUMBER@;

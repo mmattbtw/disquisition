@@ -75,6 +75,7 @@
 #include "community/qr.h"
 #include "desktop/app_identity.h"
 #include "desktop/build_info.h"
+#include "desktop/bug_report.h"
 #include "desktop/app_sound.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
@@ -1563,8 +1564,26 @@ void CommunityPanel::settings() {
     copyAbout->setObjectName("aboutCopy");
     setFlag(copyAbout, "compact", true);
     copyLayout->addWidget(copyAbout);
+    auto* reportBug = new QPushButton("Report a Bug…", copyRow);
+    reportBug->setObjectName("aboutReportBug");
+    setFlag(reportBug, "compact", true);
+    copyLayout->addWidget(reportBug);
+    connect(reportBug, &QPushButton::clicked, &dialog, [&dialog] {
+        auto* report = new BugReportDialog(&dialog);
+        report->open();
+    });
     copyLayout->addStretch();
     aboutForm->addRow(copyRow);
+    auto* automaticCrashReports = new QCheckBox("Send crash reports automatically", &dialog);
+    automaticCrashReports->setObjectName("aboutAutomaticCrashReports");
+    automaticCrashReports->setChecked(saved.value("reports/automaticCrashes", true).toBool());
+    aboutForm->addRow(automaticCrashReports);
+    auto* crashReportHelp = new QLabel(
+        "Sends crash type and build/OS details to the developers' Slack channel on next launch. "
+        "Changes apply after restarting.", &dialog);
+    crashReportHelp->setObjectName("settingsDescription");
+    crashReportHelp->setWordWrap(true);
+    aboutForm->addRow(crashReportHelp);
     connect(copyAbout, &QPushButton::clicked, &dialog, [=] {
         QApplication::clipboard()->setText(QStringLiteral("Build: %1\nBranch: %2\nCommit: %3")
                                                .arg(buildNumber, branch, commit));
@@ -1863,6 +1882,8 @@ void CommunityPanel::settings() {
             if (outputId != previousOutput)
                 screenAudio_.setOutputDevice(outputId);
             setSoundEffectsEnabled(soundEffects->isChecked());
+            saved.setValue("reports/automaticCrashes", automaticCrashReports->isChecked());
+            emit automaticCrashReportsChanged(automaticCrashReports->isChecked());
             saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());

@@ -257,6 +257,21 @@ int main(int argc, char** argv) {
     }
     reservation.close();
     MainWindow window;
+    auto* autoCrashes = window.findChild<QAction*>("automaticCrashReports");
+    CHECK(autoCrashes && autoCrashes->isCheckable() && autoCrashes->isChecked());
+    autoCrashes->setChecked(false);
+    CHECK(!QSettings().value("reports/automaticCrashes", true).toBool());
+    autoCrashes->setChecked(true);
+    CHECK(QSettings().value("reports/automaticCrashes", false).toBool());
+    auto* reportBug = window.findChild<QAction*>("reportBug");
+    CHECK(reportBug);
+    reportBug->trigger();
+    QApplication::processEvents();
+    auto* bugDialog = window.findChild<QDialog*>();
+    CHECK(bugDialog && bugDialog->isVisible());
+    CHECK(bugDialog->findChild<QPlainTextEdit*>("bugDescription"));
+    bugDialog->reject();
+
     window.resize(1140, 780);
     window.show();
     auto* panel = window.findChild<CommunityPanel*>();
@@ -294,7 +309,20 @@ int main(int argc, char** argv) {
         CHECK(QApplication::clipboard()->text().contains("Commit: " + gitCommit->text()));
         categories->setCurrentRow(5);
         QApplication::processEvents();
+        auto* autoReport = dialog->findChild<QCheckBox*>("aboutAutomaticCrashReports");
+        CHECK(autoReport && autoReport->isVisible() && autoReport->isChecked());
         CHECK(dialog->grab().save("community-about-settings.png"));
+        autoReport->setChecked(false);
+        auto* reportFromSettings = dialog->findChild<QPushButton*>("aboutReportBug");
+        CHECK(reportFromSettings && reportFromSettings->isVisible());
+        reportFromSettings->click();
+        QApplication::processEvents();
+        auto* reportDialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(reportDialog && reportDialog != dialog);
+        CHECK(reportDialog->findChild<QPlainTextEdit*>("bugDescription"));
+        reportDialog->reject();
+        QApplication::processEvents();
+        CHECK(QApplication::activeModalWidget() == dialog);
         categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
         CHECK(relay && relay->text().isEmpty());
@@ -311,6 +339,8 @@ int main(int argc, char** argv) {
     CHECK(until([&] { return manage->isEnabled(); }));
     auto* node = panel->findChild<community::Node*>();
     CHECK(node && node->profile().name == "Alice");
+    CHECK(QSettings().value("reports/automaticCrashes", false).toBool());
+    CHECK(autoCrashes->isChecked()); // Cancel leaves the menu and saved setting alone.
     // Presets save by name; custom HEX colors survive picker cancellation and reopening.
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
@@ -321,14 +351,22 @@ int main(int argc, char** argv) {
             "userChatColor_" + QSettings().value("community/color").toString());
         CHECK(current && current->isChecked());
         CHECK(!hex->isVisible());
+        auto* autoReport = dialog->findChild<QCheckBox*>("aboutAutomaticCrashReports");
+        CHECK(autoReport && autoReport->isChecked());
+        autoReport->setChecked(false);
         dialog->findChild<QPushButton*>("userChatColor_peach")->click();
         dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
     CHECK(QSettings().value("community/color").toString() == "peach");
+    CHECK(!QSettings().value("reports/automaticCrashes", true).toBool());
+    CHECK(!autoCrashes->isChecked());
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         auto* hex = dialog->findChild<QLineEdit*>("userChatColorHex");
+        auto* autoReport = dialog->findChild<QCheckBox*>("aboutAutomaticCrashReports");
+        CHECK(autoReport && !autoReport->isChecked());
+        autoReport->setChecked(true);
         CHECK(dialog->findChild<QPushButton*>("userChatColor_peach")->isChecked());
         dialog->findChild<QPushButton*>("userChatColorCustom")->click();
         CHECK(!dialog->findChild<QPushButton*>("userChatColor_peach")->isChecked());
@@ -358,6 +396,8 @@ int main(int argc, char** argv) {
     });
     panel->findChild<QPushButton*>("communitySettings")->click();
     CHECK(QSettings().value("community/color").toString() == "#a1b2c3");
+    CHECK(QSettings().value("reports/automaticCrashes", false).toBool());
+    CHECK(autoCrashes->isChecked());
     QTimer::singleShot(0, [&] {
         auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
         CHECK(dialog->findChild<QPushButton*>("userChatColorCustom")->isChecked());

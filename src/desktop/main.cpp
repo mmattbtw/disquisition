@@ -1,5 +1,12 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QNetworkAccessManager>
+#include <QSettings>
+#include <QTimer>
+#include <memory>
+
+#include "desktop/bug_report.h"
+#include "desktop/crash_report.h"
 
 #include "desktop/app_identity.h"
 #include "desktop/app_sound.h"
@@ -22,6 +29,14 @@ int main(int argc, char** argv) {
     if (parser.isSet("community-data"))
         app.setProperty("communityDataDirectory", parser.value("community-data"));
 
+    std::unique_ptr<CrashReportSession> crashSession;
+    if (QSettings().value("reports/automaticCrashes", true).toBool()) {
+        crashSession = std::make_unique<CrashReportSession>(crashReportDirectory(), bugReportDiagnostics());
+        auto* crashNetwork = new QNetworkAccessManager(&app);
+        QTimer::singleShot(0, &app, [crashNetwork] {
+            sendPendingCrashReports(crashReportDirectory(), crashNetwork, bugReportWebhook());
+        });
+    }
     MainWindow window;
     window.show();
     playSound(bundledSound("boot_up", &app));

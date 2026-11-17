@@ -31,11 +31,16 @@ jobs:
           - os: ubuntu-latest
             deps: |
               sudo apt-get update
-              sudo apt-get install -y libsqlite3-dev libssl-dev libxcb1-dev pkg-config libavcodec-dev libavutil-dev libpulse-dev libswresample-dev libswscale-dev
+              sudo apt-get install -y ninja-build ccache libsqlite3-dev libssl-dev libxcb1-dev pkg-config libavcodec-dev libavutil-dev libpulse-dev libswresample-dev libswscale-dev
           - os: macos-latest
-            deps: brew install openssl@3 sqlite ffmpeg pkgconf
+            deps: brew install ninja ccache openssl@3 sqlite ffmpeg pkgconf
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 500M
+      CCACHE_COMPILERCHECK: content
     steps:
       - uses: actions/checkout@v7
 
@@ -50,11 +55,28 @@ jobs:
           modules: qtmultimedia
           cache: true
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-tests-${{ runner.os }}-${{ runner.arch }}-qt6.12-v1-${{ github.sha }}
+          restore-keys: |
+            ccache-tests-${{ runner.os }}-${{ runner.arch }}-qt6.12-v1-
 
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache
+
+      # Bare --parallel lets Make spawn unlimited compilers. Keep the Qt-heavy
+      # desktop and UI test builds within the hosted macOS runner's memory.
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 3
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

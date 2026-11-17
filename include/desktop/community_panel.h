@@ -51,6 +51,7 @@ public:
     void releaseStore();
 signals:
     void activated();
+    void automaticCrashReportsChanged(bool enabled);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

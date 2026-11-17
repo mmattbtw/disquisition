@@ -395,3 +395,43 @@ The [latest release page](https://github.com/mmattbtw/disquisition/releases/late
 shows the commit and all downloads. The links become available after the first
 successful release. Failed builds leave the previous release available. An
 older build finishing later does not replace a newer release as latest.
+
+## Report a bug
+
+Choose **disquisition > Report a Bug…**, or **Report a Bug…** in **User Settings > About**,
+to describe a problem and send it to the
+developers' Slack channel. The dialog shows the diagnostics included with the
+report: build number and channel, Git branch and commit, OS and kernel versions,
+CPU architecture, and Qt version. It does not collect chat history, account
+keys, or logs. Failed sends preserve your description so you can retry.
+
+Release maintainers must set the GitHub Actions secret
+`DISQUISITION_BUG_REPORT_WEBHOOK` to a Slack incoming webhook for the desired
+channel. The desktop workflow embeds that URL at configure time. For local
+builds, use the same environment variable before CMake's first configure, or
+set the CMake cache variable with that name. A runtime environment variable
+with the same name overrides the compiled value. The endpoint must use HTTPS.
+Without a configured endpoint the dialog explains that sending is unavailable.
+
+A webhook embedded in a desktop binary can be extracted. Use a dedicated
+bug-report channel and webhook, and rotate it if abused. A server-side relay
+would be needed to keep the webhook out of distributed clients.
+
+### Automatic crash reports
+
+**Send crash reports automatically** is available in **User Settings > About**
+and the **disquisition** menu, and is enabled by default. In User Settings,
+choose **Save** to apply the setting; **Cancel** keeps your previous choice.
+Changes to this option apply after restarting the app. When enabled, the app
+records a crash marker for common fatal signals, including aborts and
+segmentation faults, and Windows unhandled exceptions. On the next launch it
+sends the crash type, a report ID, session start time, and the diagnostics saved
+by the crashed build to the same Slack webhook. Failed sends remain queued for
+a later launch; successful sends remove the saved report.
+
+This is a basic crash notification, without stack traces, memory dumps, logs,
+chat history, or account keys. Force quits, power loss, hangs, and crashes before
+the reporter initializes do not produce reports. Native OS crash reporting
+still handles the failure. Reports stay in the app's local `crash-reports`
+directory until delivered. Turning the option off prevents collection and
+uploading on subsequent launches.
