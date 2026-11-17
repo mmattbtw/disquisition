@@ -310,6 +310,16 @@ int main(int argc, char** argv) {
         categories->setCurrentRow(5);
         QApplication::processEvents();
         CHECK(dialog->grab().save("community-about-settings.png"));
+        auto* reportFromSettings = dialog->findChild<QPushButton*>("aboutReportBug");
+        CHECK(reportFromSettings && reportFromSettings->isVisible());
+        reportFromSettings->click();
+        QApplication::processEvents();
+        auto* reportDialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        CHECK(reportDialog && reportDialog != dialog);
+        CHECK(reportDialog->findChild<QPlainTextEdit*>("bugDescription"));
+        reportDialog->reject();
+        QApplication::processEvents();
+        CHECK(QApplication::activeModalWidget() == dialog);
         categories->setCurrentRow(0);
         auto* relay = dialog->findChild<QLineEdit*>("communityRelayAddress");
         CHECK(relay && relay->text().isEmpty());

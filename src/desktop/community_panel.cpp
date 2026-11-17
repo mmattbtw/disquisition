@@ -75,6 +75,7 @@
 #include "community/qr.h"
 #include "desktop/app_identity.h"
 #include "desktop/build_info.h"
+#include "desktop/bug_report.h"
 #include "desktop/app_sound.h"
 #include "desktop/audio_permission.h"
 #include "desktop/chat_media.h"
@@ -1563,6 +1564,14 @@ void CommunityPanel::settings() {
     copyAbout->setObjectName("aboutCopy");
     setFlag(copyAbout, "compact", true);
     copyLayout->addWidget(copyAbout);
+    auto* reportBug = new QPushButton("Report a Bug…", copyRow);
+    reportBug->setObjectName("aboutReportBug");
+    setFlag(reportBug, "compact", true);
+    copyLayout->addWidget(reportBug);
+    connect(reportBug, &QPushButton::clicked, &dialog, [&dialog] {
+        auto* report = new BugReportDialog(&dialog);
+        report->open();
+    });
     copyLayout->addStretch();
     aboutForm->addRow(copyRow);
     connect(copyAbout, &QPushButton::clicked, &dialog, [=] {

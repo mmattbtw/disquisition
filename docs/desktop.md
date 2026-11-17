@@ -398,7 +398,8 @@ older build finishing later does not replace a newer release as latest.
 
 ## Report a bug
 
-Choose **disquisition > Report a Bug…** to describe a problem and send it to the
+Choose **disquisition > Report a Bug…**, or **Report a Bug…** in **User Settings > About**,
+to describe a problem and send it to the
 developers' Slack channel. The dialog shows the diagnostics included with the
 report: build number and channel, Git branch and commit, OS and kernel versions,
 CPU architecture, and Qt version. It does not collect chat history, account
