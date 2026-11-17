@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
         CHECK(!payload["mrkdwn"].toBool(true));
         CHECK(payload["parse"].toString() == "none");
         CHECK(!payload["unfurl_links"].toBool(true));
+        QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
         if (attempt < 3) {
             if (attempt == 0)
                 socket->write("HTTP/1.1 403 Forbidden\r\nContent-Length: 17\r\nConnection: close\r\n\r\naction_prohibited");
@@ -109,7 +110,6 @@ int main(int argc, char** argv) {
             CHECK(until([&] { return status->text().contains("Report sent"); }));
             CHECK(!send->isEnabled());
         }
-        socket->deleteLater();
     }
     std::puts("bug_report_test: ok");
 }

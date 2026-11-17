@@ -124,8 +124,10 @@ int main(int argc, char** argv) {
             socket->write(attempt == 0 ?
                 "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" :
                 "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+            // Windows completes socket writes asynchronously. Keep the server
+            // socket alive until its response has drained and it disconnects.
+            QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
             socket->disconnectFromHost();
-            socket->deleteLater();
             ++received;
         }
         if (attempt == 0) {
