@@ -16,13 +16,12 @@
 #include "desktop/app_identity.h"
 #include "desktop/build_info.h"
 
-namespace {
-QUrl configuredWebhook() {
+QUrl bugReportWebhook() {
     const QUrl url(qEnvironmentVariable("DISQUISITION_BUG_REPORT_WEBHOOK",
                                        QString::fromUtf8(disquisition::kBugReportWebhook)));
     return url.isValid() && url.scheme() == "https" && !url.host().isEmpty() ? url : QUrl();
 }
-QString diagnostics() {
+QString bugReportDiagnostics() {
     return QString("App: %1\nBuild: %2\nChannel: %3\nBranch: %4\nCommit: %5\n"
                    "OS: %6\nKernel: %7 %8\nArchitecture: %9\nQt: %10")
         .arg(QString::fromUtf8(disquisition::kAppName))
@@ -33,9 +32,33 @@ QString diagnostics() {
              QSysInfo::kernelType(), QSysInfo::kernelVersion(), QSysInfo::currentCpuArchitecture(),
              QString::fromLatin1(qVersion()));
 }
-} // namespace
 
-BugReportDialog::BugReportDialog(QWidget* parent) : BugReportDialog(configuredWebhook(), parent) {}
+QNetworkReply* sendBugReport(QNetworkAccessManager* network, const QUrl& webhook,
+                             const QString& title, const QString& description,
+                             const QString& diagnostics) {
+    QNetworkRequest request(webhook);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(15000);
+    const auto section = [](const QString& text) {
+        return QJsonObject{{"type", "section"},
+                           {"text", QJsonObject{{"type", "plain_text"}, {"text", text}}}};
+    };
+    // Plain text prevents user input from pinging Slack users or channels.
+    const QJsonObject payload{{"text", title},
+                              {"blocks", QJsonArray{section(description), section(diagnostics)}},
+                              {"mrkdwn", false}, {"parse", "none"},
+                              {"unfurl_links", false}, {"unfurl_media", false}};
+    return network->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+}
+
+bool bugReportSucceeded(QNetworkReply* reply) {
+    return reply->error() == QNetworkReply::NoError &&
+           reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200 &&
+           reply->readAll().trimmed() == "ok";
+}
+
+BugReportDialog::BugReportDialog(QWidget* parent) : BugReportDialog(bugReportWebhook(), parent) {}
 
 BugReportDialog::BugReportDialog(const QUrl& webhook, QWidget* parent) : QDialog(parent) {
     setWindowTitle("Report a Bug");
@@ -54,7 +77,7 @@ BugReportDialog::BugReportDialog(const QUrl& webhook, QWidget* parent) : QDialog
                              "Slack channel. Do not include passwords or private conversations.", this);
     notice->setWordWrap(true);
     layout->addWidget(notice);
-    const QString debug = diagnostics();
+    const QString debug = bugReportDiagnostics();
     auto* details = new QPlainTextEdit(debug, this);
     details->setObjectName("bugDiagnostics");
     details->setAccessibleName("Included diagnostics");
@@ -85,26 +108,11 @@ BugReportDialog::BugReportDialog(const QUrl& webhook, QWidget* parent) : QDialog
         send->setEnabled(false);
         description->setReadOnly(true);
         status->setText("Sending…");
-        QNetworkRequest request(webhook);
-        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-        request.setTransferTimeout(15000);
-        const auto section = [](const QString& text) {
-            return QJsonObject{{"type", "section"},
-                               {"text", QJsonObject{{"type", "plain_text"}, {"text", text}}}};
-        };
-        // Plain text prevents user input from pinging Slack users or channels.
-        const QJsonObject payload{{"text", "Bug report"},
-                                  {"blocks", QJsonArray{section(description->toPlainText().trimmed()),
-                                                        section(debug)}},
-                                  {"mrkdwn", false}, {"parse", "none"},
-                                  {"unfurl_links", false}, {"unfurl_media", false}};
-        auto* reply = network->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        auto* reply = sendBugReport(network, webhook, "Bug report",
+                                    description->toPlainText().trimmed(), debug);
         connect(this, &QDialog::finished, reply, &QNetworkReply::abort);
         connect(reply, &QNetworkReply::finished, this, [=] {
-            const bool ok = reply->error() == QNetworkReply::NoError &&
-                            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200 &&
-                            reply->readAll().trimmed() == "ok";
+            const bool ok = bugReportSucceeded(reply);
             reply->deleteLater();
             if (ok) {
                 status->setText("Report sent. Thank you!");

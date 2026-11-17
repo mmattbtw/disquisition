@@ -257,6 +257,12 @@ int main(int argc, char** argv) {
     }
     reservation.close();
     MainWindow window;
+    auto* autoCrashes = window.findChild<QAction*>("automaticCrashReports");
+    CHECK(autoCrashes && autoCrashes->isCheckable() && autoCrashes->isChecked());
+    autoCrashes->setChecked(false);
+    CHECK(!QSettings().value("reports/automaticCrashes", true).toBool());
+    autoCrashes->setChecked(true);
+    CHECK(QSettings().value("reports/automaticCrashes", false).toBool());
     auto* reportBug = window.findChild<QAction*>("reportBug");
     CHECK(reportBug);
     reportBug->trigger();

@@ -9,3 +9,12 @@ public:
     explicit BugReportDialog(QWidget* parent = nullptr);
     BugReportDialog(const QUrl& webhook, QWidget* parent);
 };
+
+class QNetworkAccessManager;
+class QNetworkReply;
+QUrl bugReportWebhook();
+QString bugReportDiagnostics();
+QNetworkReply* sendBugReport(QNetworkAccessManager* network, const QUrl& webhook,
+                             const QString& title, const QString& description,
+                             const QString& diagnostics);
+bool bugReportSucceeded(QNetworkReply* reply);

@@ -330,6 +330,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/push_to_talk.cpp
       src/desktop/main_window.cpp
       src/desktop/bug_report.cpp
+      src/desktop/crash_report.cpp
       src/desktop/mention_completer.cpp
       src/desktop/notification_center.cpp
       src/desktop/relay_audio.cpp
@@ -627,4 +628,14 @@ if(BUILD_TESTING AND TARGET disquisition-desktop)
   add_dependencies(bug_report_test disquisition_build_info)
   add_test(NAME bug_report_test COMMAND bug_report_test)
   set_tests_properties(bug_report_test PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(BUILD_TESTING AND TARGET disquisition-desktop)
+  add_executable(crash_report_test test/crash_report_test.cpp
+    src/desktop/crash_report.cpp src/desktop/bug_report.cpp)
+  target_include_directories(crash_report_test PRIVATE include "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  target_link_libraries(crash_report_test PRIVATE Qt6::Widgets Qt6::Network)
+  add_dependencies(crash_report_test disquisition_build_info)
+  add_test(NAME crash_report_test COMMAND crash_report_test)
+  set_tests_properties(crash_report_test PROPERTIES TIMEOUT 45)
 endif()
