@@ -14,6 +14,7 @@
 
 #include "desktop/app_identity.h"
 #include "desktop/community_panel.h"
+#include "desktop/bug_report.h"
 #include "desktop/notification_center.h"
 #include "desktop/theme.h"
 #include "desktop/updater.h"
@@ -33,6 +34,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     preferences->setMenuRole(QAction::PreferencesRole);
     preferences->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     connect(preferences, &QAction::triggered, communities, &CommunityPanel::showSettings);
+    auto* reportBug = appMenu->addAction("Report a Bug…");
+    reportBug->setObjectName("reportBug");
+    connect(reportBug, &QAction::triggered, this, [this] {
+        auto* dialog = new BugReportDialog(this);
+        dialog->open();
+    });
     auto* notifications = findChild<NotificationCenter*>();
     appMenu->addAction(notifications->muteAction());
     appMenu->addAction(communities->penguinsAction());

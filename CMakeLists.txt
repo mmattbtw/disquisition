@@ -329,6 +329,7 @@ if(BUILD_DESKTOP_APP)
       src/desktop/main.cpp
       src/desktop/push_to_talk.cpp
       src/desktop/main_window.cpp
+      src/desktop/bug_report.cpp
       src/desktop/mention_completer.cpp
       src/desktop/notification_center.cpp
       src/desktop/relay_audio.cpp
@@ -346,6 +347,12 @@ if(BUILD_DESKTOP_APP)
       include/desktop/community_panel.h src/desktop/community_panel.cpp
       include/desktop/community_tree.h src/desktop/community_tree.cpp)
     target_link_libraries(disquisition-desktop PRIVATE chat_communities community_qr)
+    set(DISQUISITION_BUG_REPORT_WEBHOOK "$ENV{DISQUISITION_BUG_REPORT_WEBHOOK}" CACHE STRING
+      "Slack incoming webhook for bug reports, embedded in distributed binaries")
+    # Escape the generated C++ string without printing the webhook.
+    set(DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL "${DISQUISITION_BUG_REPORT_WEBHOOK}")
+    string(REPLACE "\\" "\\\\" DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL "${DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL}")
+    string(REPLACE "\"" "\\\"" DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL "${DISQUISITION_BUG_REPORT_WEBHOOK_LITERAL}")
     configure_file(cmake/app_identity.h.in generated/desktop/app_identity.h @ONLY)
     set(DISQUISITION_BUILD_INFO "${CMAKE_CURRENT_BINARY_DIR}/generated/desktop/build_info.h")
     add_custom_target(disquisition_build_info
@@ -611,4 +618,13 @@ if(BUILD_TESTING AND APPLE AND TARGET disquisition-desktop)
       "-DAPP_BINARY=$<TARGET_FILE:disquisition-desktop>"
       "-DAPP_PLIST=$<TARGET_BUNDLE_DIR:disquisition-desktop>/Contents/Info.plist"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/test/macos_permission_plugins_test.cmake")
+endif()
+
+if(BUILD_TESTING AND TARGET disquisition-desktop)
+  add_executable(bug_report_test test/bug_report_test.cpp src/desktop/bug_report.cpp)
+  target_include_directories(bug_report_test PRIVATE include "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  target_link_libraries(bug_report_test PRIVATE Qt6::Widgets Qt6::Network)
+  add_dependencies(bug_report_test disquisition_build_info)
+  add_test(NAME bug_report_test COMMAND bug_report_test)
+  set_tests_properties(bug_report_test PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

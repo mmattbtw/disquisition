@@ -257,6 +257,15 @@ int main(int argc, char** argv) {
     }
     reservation.close();
     MainWindow window;
+    auto* reportBug = window.findChild<QAction*>("reportBug");
+    CHECK(reportBug);
+    reportBug->trigger();
+    QApplication::processEvents();
+    auto* bugDialog = window.findChild<QDialog*>();
+    CHECK(bugDialog && bugDialog->isVisible());
+    CHECK(bugDialog->findChild<QPlainTextEdit*>("bugDescription"));
+    bugDialog->reject();
+
     window.resize(1140, 780);
     window.show();
     auto* panel = window.findChild<CommunityPanel*>();

@@ -395,3 +395,23 @@ The [latest release page](https://github.com/mmattbtw/disquisition/releases/late
 shows the commit and all downloads. The links become available after the first
 successful release. Failed builds leave the previous release available. An
 older build finishing later does not replace a newer release as latest.
+
+## Report a bug
+
+Choose **disquisition > Report a Bug…** to describe a problem and send it to the
+developers' Slack channel. The dialog shows the diagnostics included with the
+report: build number and channel, Git branch and commit, OS and kernel versions,
+CPU architecture, and Qt version. It does not collect chat history, account
+keys, or logs. Failed sends preserve your description so you can retry.
+
+Release maintainers must set the GitHub Actions secret
+`DISQUISITION_BUG_REPORT_WEBHOOK` to a Slack incoming webhook for the desired
+channel. The desktop workflow embeds that URL at configure time. For local
+builds, use the same environment variable before CMake's first configure, or
+set the CMake cache variable with that name. A runtime environment variable
+with the same name overrides the compiled value. The endpoint must use HTTPS.
+Without a configured endpoint the dialog explains that sending is unavailable.
+
+A webhook embedded in a desktop binary can be extracted. Use a dedicated
+bug-report channel and webhook, and rotate it if abused. A server-side relay
+would be needed to keep the webhook out of distributed clients.
