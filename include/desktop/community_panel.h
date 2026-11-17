@@ -22,6 +22,8 @@ class PenguinOverlay;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QLineEdit;
+class QMimeData;
+class QHBoxLayout;
 class QPushButton;
 class QFrame;
 class QLabel;
@@ -88,6 +90,9 @@ private:
     void loadHistory(const QString& cid, const QString& channel);
     void prepareUpload(std::function<PreparedImage()> prepare);
     void sendImage(const PreparedImage& image, const QString& cid, const QString& channel);
+    bool pasteImages(const QMimeData* mime);
+    void attach(const QImage& preview, const QString& name,
+                std::function<PreparedImage()> prepare);
     void joinVoice();
     void leaveVoice();
     // leaveVoice without the sound: switching channels or shutting down.
@@ -246,5 +251,14 @@ private:
         QString color;
     };
     QList<Upload> uploads_;
+    int preparing_ = 0; // images in imagePool_, not yet in uploads_
+    // Pasted images wait here until the message is sent.
+    struct Attachment {
+        QWidget* tile;
+        std::function<PreparedImage()> prepare;
+    };
+    QList<Attachment> attachments_;
+    QWidget* attachmentTray_ = nullptr;
+    QHBoxLayout* attachmentRow_ = nullptr;
     QThreadPool imagePool_; // waits for preparation before other members are destroyed
 };
