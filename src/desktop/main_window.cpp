@@ -43,6 +43,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(automaticCrashReports, &QAction::toggled, this, [](bool enabled) {
         QSettings().setValue("reports/automaticCrashes", enabled);
     });
+    connect(communities, &CommunityPanel::automaticCrashReportsChanged,
+            automaticCrashReports, &QAction::setChecked);
     auto* reportBug = appMenu->addAction("Report a Bug…");
     reportBug->setObjectName("reportBug");
     connect(reportBug, &QAction::triggered, this, [this] {

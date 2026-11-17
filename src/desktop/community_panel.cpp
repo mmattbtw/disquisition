@@ -1574,6 +1574,16 @@ void CommunityPanel::settings() {
     });
     copyLayout->addStretch();
     aboutForm->addRow(copyRow);
+    auto* automaticCrashReports = new QCheckBox("Send crash reports automatically", &dialog);
+    automaticCrashReports->setObjectName("aboutAutomaticCrashReports");
+    automaticCrashReports->setChecked(saved.value("reports/automaticCrashes", true).toBool());
+    aboutForm->addRow(automaticCrashReports);
+    auto* crashReportHelp = new QLabel(
+        "Sends crash type and build/OS details to the developers' Slack channel on next launch. "
+        "Changes apply after restarting.", &dialog);
+    crashReportHelp->setObjectName("settingsDescription");
+    crashReportHelp->setWordWrap(true);
+    aboutForm->addRow(crashReportHelp);
     connect(copyAbout, &QPushButton::clicked, &dialog, [=] {
         QApplication::clipboard()->setText(QStringLiteral("Build: %1\nBranch: %2\nCommit: %3")
                                                .arg(buildNumber, branch, commit));
@@ -1872,6 +1882,8 @@ void CommunityPanel::settings() {
             if (outputId != previousOutput)
                 screenAudio_.setOutputDevice(outputId);
             setSoundEffectsEnabled(soundEffects->isChecked());
+            saved.setValue("reports/automaticCrashes", automaticCrashReports->isChecked());
+            emit automaticCrashReportsChanged(automaticCrashReports->isChecked());
             saved.setValue("gifs/showLinkedMedia", linkedMedia->isChecked());
             saved.setValue("messages/enabled", saving->isChecked());
             saved.setValue("messages/file", path->text().trimmed());

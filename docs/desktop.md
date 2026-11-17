@@ -419,7 +419,9 @@ would be needed to keep the webhook out of distributed clients.
 
 ### Automatic crash reports
 
-**disquisition > Send crash reports automatically** is enabled by default.
+**Send crash reports automatically** is available in **User Settings > About**
+and the **disquisition** menu, and is enabled by default. In User Settings,
+choose **Save** to apply the setting; **Cancel** keeps your previous choice.
 Changes to this option apply after restarting the app. When enabled, the app
 records a crash marker for common fatal signals, including aborts and
 segmentation faults, and Windows unhandled exceptions. On the next launch it
