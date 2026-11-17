@@ -847,6 +847,17 @@ int main(int argc, char** argv) {
     CHECK(mentionedTable->cellAt(0, 0).format().background().color() == QColor("#453d2c"));
     CHECK(mentionedTable->cellAt(0, 1).format().background().color() == QColor("#453d2c"));
     CHECK(window.grab().save("community-mentions.png"));
+    // Named mentions open the mentioned member's profile card.
+    CHECK(mentioned.charFormat().isAnchor());
+    CHECK(mentioned.charFormat().anchorHref() == "profile://" + cid + '/' + node->peerId());
+    transcript->anchorClicked(QUrl(mentioned.charFormat().anchorHref()));
+    {
+        auto* card = panel->findChild<QDialog*>("userProfileCard");
+        CHECK(card && card->isVisible());
+        CHECK(card->findChild<QLabel*>("profileDisplayName")->text() == "Alice");
+        card->close();
+        QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
     CHECK(remote.sendPacket(cid, textChannel, "chat", {{"body", "Legacy color"}}) == 1);
     CHECK(until([&] { return transcript->toPlainText().contains("Legacy color"); }));
     CHECK(transcript->document()->find("Legacy color").charFormat().foreground().color() == QColor("#d7dbde"));
