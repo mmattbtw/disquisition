@@ -147,6 +147,7 @@ signals:
     void clicked(const QPoint& globalPosition);
 
 protected:
+    bool event(QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
 
@@ -154,6 +155,8 @@ private:
     StageParticipant person_;
     bool speaking_ = false;
     QImage video_;
+    // Where the last paint put each status mark, for its tooltip.
+    QList<QPair<QRectF, QString>> marks_;
 };
 
 // The call, laid out like a video call. Screen shares and people share one

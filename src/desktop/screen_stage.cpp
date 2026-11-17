@@ -14,11 +14,15 @@
 #include <QStackedWidget>
 #include <QStyle>
 #include <QTimer>
+#include <QToolTip>
+#include <QHelpEvent>
 #include <QVBoxLayout>
 #include <QWindowStateChangeEvent>
 
 #include <cmath>
+#include <utility>
 
+#include "desktop/symbols.h"
 #include "desktop/volume_menu.h"
 
 namespace {
@@ -122,6 +126,8 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     showAllButton_ = new QPushButton("Show All", header_);
     fullscreenButton_ = new QPushButton("Fullscreen", header_);
     stopButton_ = new QPushButton("Stop Watching", header_);
+    stopButton_->setIcon(symbols::icon("tv_off", QColor("#e6eae9")));
+    stopButton_->setIconSize(QSize(15, 15));
     auto* headerRow = new QHBoxLayout(header_);
     headerRow->setContentsMargins(12, 8, 8, 8);
     headerRow->setSpacing(7);
@@ -142,6 +148,8 @@ StreamTile::StreamTile(const QString& name, bool own, QWidget* parent, const QSt
     invitationText_->setWordWrap(true);
     auto* watchButton = new QPushButton("Watch Stream", invitation_);
     watchButton->setObjectName("primary");
+    watchButton->setIcon(symbols::icon("tv", QColor("#12171a")));
+    watchButton->setIconSize(QSize(18, 18));
     auto* invitationLayout = new QVBoxLayout(invitation_);
     invitationLayout->setSpacing(10);
     invitationLayout->addStretch();
@@ -384,7 +392,23 @@ void ParticipantTile::mouseReleaseEvent(QMouseEvent* event) {
         emit clicked(event->globalPosition().toPoint());
 }
 
+bool ParticipantTile::event(QEvent* event) {
+    if (event->type() != QEvent::ToolTip)
+        return QWidget::event(event);
+    const auto* help = static_cast<QHelpEvent*>(event);
+    for (const auto& [area, label] : std::as_const(marks_)) {
+        if (area.contains(help->pos())) {
+            QToolTip::showText(help->globalPos(), label, this, area.toAlignedRect());
+            return true;
+        }
+    }
+    QToolTip::hideText();
+    event->ignore();
+    return true;
+}
+
 void ParticipantTile::paintEvent(QPaintEvent*) {
+    marks_.clear();
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -444,39 +468,20 @@ void ParticipantTile::paintEvent(QPaintEvent*) {
     painter.setFont(font);
     const QFontMetricsF metrics(font);
     const qreal pad = tile.height() < 110 ? 6 : 10;
-    QList<QPixmap> marks;
+    QList<QPair<QPixmap, QString>> marks;
     const auto mark = [this](const QString& kind) {
-        const qreal scale = devicePixelRatioF();
-        QPixmap image(QSize(14, 14) * scale);
-        image.setDevicePixelRatio(scale);
-        image.fill(Qt::transparent);
-        QPainter icon(&image);
-        icon.setRenderHint(QPainter::Antialiasing);
-        icon.setPen(QPen(kind == "sharing" ? QColor("#9dccca") : QColor("#ff8a8a"), 1.3,
-                         Qt::SolidLine, Qt::RoundCap));
-        if (kind == "sharing") {
-            icon.drawRoundedRect(QRectF(1.5, 2, 11, 7.5), 1.5, 1.5);
-            icon.drawLine(QPointF(7, 9.5), QPointF(7, 12));
-            icon.drawLine(QPointF(4.5, 12.5), QPointF(9.5, 12.5));
-        } else if (kind == "muted") {
-            icon.drawRoundedRect(QRectF(5, 1.5, 4, 7), 2, 2);
-            icon.drawArc(QRectF(3, 4, 8, 6.5), 200 * 16, 140 * 16);
-            icon.drawLine(QPointF(7, 10.5), QPointF(7, 12.5));
-            icon.drawLine(QPointF(2, 1.5), QPointF(12, 12.5));
-        } else {
-            icon.drawArc(QRectF(2.5, 2, 9, 10), 0, 180 * 16);
-            icon.drawRoundedRect(QRectF(1.5, 7, 2.5, 5), 1, 1);
-            icon.drawRoundedRect(QRectF(10, 7, 2.5, 5), 1, 1);
-            icon.drawLine(QPointF(2, 1.5), QPointF(12, 12.5));
-        }
-        return image;
+        return symbols::pixmap(kind == "sharing" ? "screen_share"
+                               : kind == "muted" ? "mic_off"
+                                                 : "headset_off",
+                               kind == "sharing" ? QColor("#9dccca") : QColor("#ff8a8a"), 14,
+                               devicePixelRatioF());
     };
     if (person_.sharing)
-        marks.append(mark("sharing"));
+        marks.append({mark("sharing"), "Sharing screen"});
     if (person_.muted)
-        marks.append(mark("muted"));
+        marks.append({mark("muted"), "Muted"});
     if (person_.deafened)
-        marks.append(mark("deafened"));
+        marks.append({mark("deafened"), "Deafened"});
     const qreal icons = marks.size() * 17;
     const auto name = metrics.elidedText(person_.name, Qt::ElideRight,
                                          tile.width() - pad * 2 - icons - 16);
@@ -486,8 +491,10 @@ void ParticipantTile::paintEvent(QPaintEvent*) {
     painter.setBrush(QColor(18, 20, 24, 190));
     painter.drawRoundedRect(label, 6, 6);
     qreal x = label.left() + 7;
-    for (const auto& image : marks) {
-        painter.drawPixmap(QPointF(x, label.center().y() - 7), image);
+    for (const auto& [image, kind] : std::as_const(marks)) {
+        const QPointF at(x, label.center().y() - 7);
+        painter.drawPixmap(at, image);
+        marks_.append({QRectF(at, QSizeF(14, 14)).adjusted(-1.5, -3, 1.5, 3), kind});
         x += 17;
     }
     painter.setPen(QColor("#edf0ef"));

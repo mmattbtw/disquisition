@@ -38,6 +38,4 @@ QPixmap brandMark(int size, qreal scale);
 QIcon gearIcon(qreal scale);
 // Audio level bars marking voice channels.
 QIcon voiceIcon(qreal scale);
-// A microphone, crossed out when `muted`.
-QPixmap micIcon(bool muted, qreal scale);
 } // namespace theme

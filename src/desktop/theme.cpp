@@ -74,6 +74,7 @@ QPushButton[danger="true"]:hover { background: #3d2a2e; border-color: #e05252; }
 QPushButton[quiet="true"] { background: transparent; border-color: transparent; color: #8b959e; padding: 4px; }
 QPushButton[quiet="true"]:hover { background: #33373f; color: #e6eae9; }
 QPushButton[compact="true"] { padding: 3px 10px; font-size: 12px; }
+QPushButton[iconOnly="true"] { padding: 3px 6px; }
 
 QCheckBox { spacing: 9px; background: transparent; }
 QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #515967; background: #1f2228; }
@@ -379,21 +380,6 @@ QIcon voiceIcon(qreal scale) {
     for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
         icon.addPixmap(image, mode);
     return icon;
-}
-
-QPixmap micIcon(bool muted, qreal scale) {
-    QPixmap image(QSize(16, 16) * scale);
-    image.setDevicePixelRatio(scale);
-    image.fill(Qt::transparent);
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor(muted ? "#ff8a8a" : kDim), 1.4, Qt::SolidLine, Qt::RoundCap));
-    painter.drawRoundedRect(QRectF(5.75, 1.5, 4.5, 8), 2.25, 2.25);
-    painter.drawArc(QRectF(3.5, 4.5, 9, 7.5), 200 * 16, 140 * 16);
-    painter.drawLine(QPointF(8, 12), QPointF(8, 14.5));
-    if (muted)
-        painter.drawLine(QPointF(2.5, 2), QPointF(13.5, 14));
-    return image;
 }
 
 } // namespace theme
