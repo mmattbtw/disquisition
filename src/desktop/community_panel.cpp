@@ -3286,6 +3286,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
         qsizetype start;
         qsizetype length;
         bool url;
+        QString member;
     };
     QList<Span> spans;
     static const QRegularExpression webLink(
@@ -3315,7 +3316,7 @@ void CommunityPanel::showEntry(const Entry& entry) {
             return mention.start < span.start + span.length &&
                    mention.start + mention.length > span.start;
         });
-        if (!overlapsLink) spans.append({mention.start, mention.length, false});
+        if (!overlapsLink) spans.append({mention.start, mention.length, false, mention.member});
     }
     std::stable_sort(spans.begin(), spans.end(), [](const Span& left, const Span& right) {
         return left.start < right.start;
@@ -3328,8 +3329,21 @@ void CommunityPanel::showEntry(const Entry& entry) {
         html += body.mid(written, span.start - written).toHtmlEscaped();
         if (span.url)
             html += "<a href=\"" + content + "\" style='color:#9dccca'>" + content + "</a>";
-        else
-            html += "<span style='background-color:#3e4372;color:#c9cdfb'>" + content + "</span>";
+        else {
+            // Named mentions open the member's profile, like the sender's name.
+            QString mentioned;
+            for (auto it = model.members.cbegin();
+                 !span.member.isEmpty() && it != model.members.cend(); ++it)
+                if (it->name == span.member) {
+                    mentioned = it.key();
+                    break;
+                }
+            const QString style = "background-color:#3e4372;color:#c9cdfb";
+            html += mentioned.isEmpty()
+                        ? "<span style='" + style + "'>" + content + "</span>"
+                        : "<a href='" + ("profile://" + cid + '/' + mentioned).toHtmlEscaped() +
+                              "' style='" + style + ";text-decoration:none'>" + content + "</a>";
+        }
         written = span.start + span.length;
     }
     html += body.mid(written).toHtmlEscaped();
