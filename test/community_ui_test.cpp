@@ -539,10 +539,13 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 4; ++i)
             paste();
         CHECK(tiles() == 4);
+        // Copy before sending and paste without running the event loop, so
+        // none of the four uploads can finish before the next send.
+        QApplication::clipboard()->setImage(pixels);
         panel->findChild<QPushButton*>("communitySend")->click();
         CHECK(tiles() == 0);
-        QApplication::clipboard()->setImage(pixels);
-        paste();
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(composer, &press);
         panel->findChild<QPushButton*>("communitySend")->click();
         CHECK(tiles() == 1 && status->text().contains("Wait"));
         CHECK(until([&] { return images() == before + 5; }));
