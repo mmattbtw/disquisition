@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include <QDir>
 #include <QEventLoop>
 #include <QThread>
 #include <QTimer>
@@ -13,12 +14,14 @@ namespace {
 const QString kLink = "disquisition://join/cSVWchK9g9zZA2NhL7J8uj";
 
 void testInstanceName() {
-    const QString name = instanceName("Disquisition", "/tmp/a");
+    // Real absolute paths: on Windows, "/tmp/a" has no drive letter.
+    const QString base = QDir::tempPath();
+    const QString name = instanceName("Disquisition", base + "/a");
     CHECK(name.startsWith("disquisition-"));
-    CHECK(name == instanceName("Disquisition", "/tmp/a/"));
-    CHECK(name == instanceName("Disquisition", "/tmp/b/../a"));
-    CHECK(name != instanceName("Disquisition staging", "/tmp/a"));
-    CHECK(name != instanceName("Disquisition", "/tmp/b"));
+    CHECK(name == instanceName("Disquisition", base + "/a/"));
+    CHECK(name == instanceName("Disquisition", base + "/b/../a"));
+    CHECK(name != instanceName("Disquisition staging", base + "/a"));
+    CHECK(name != instanceName("Disquisition", base + "/b"));
 }
 
 void testInviteArgument() {
