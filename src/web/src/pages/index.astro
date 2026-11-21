@@ -37,10 +37,10 @@ const downloads = [
 		os: 'windows',
 		name: 'Windows',
 		arch: 'x64',
-		file: 'disquisition-desktop-windows-x64.zip',
-		cta: 'Download .zip',
+		file: 'disquisition-desktop-windows-x64-setup.exe',
+		cta: 'Download installer',
 		req: 'Windows 10 or later',
-		url: `${latestRelease}/download/disquisition-desktop-windows-x64.zip`,
+		url: `${latestRelease}/download/disquisition-desktop-windows-x64-setup.exe`,
 	},
 	{
 		os: 'linux',
@@ -52,6 +52,9 @@ const downloads = [
 		url: `${latestRelease}/download/disquisition-desktop-linux-x64.tar.gz`,
 	},
 ];
+
+const softwareEngineeringInvite =
+	'disquisition://join/cSVWchK9g9zZA2NhL7J8ujJhyr4VxER6vNdzcdLzemMSGcbTSWpWvcLBdgSdAqj8mXvLDRNUSZJhqy3h3JM3qM3Uniu6a4Fsfo9P65nruokzN1tjXTJhgSVzwSPx6w8iAurGxM2Zd7URXETabwwytm8TGSUnLH1ZzSPaiYsvgHnkUv8GDnvFfz3N2fBaf6rgZLRMHGpX3CTStHYvC4DzjURbkYhV3d5xs7QgbqLDGRURXZ17mTRAwqv7NF3twU4uufKVLJjca32szfdATYYCF2JzfT8Gq4qYJt2DmFhzrrn6VWKcFggxS8s41Rvf2NK4QcUec8tjR4xfN3kVayfhvz29rp9NhsBBSeXAaDNfAHxF9';
 
 const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff', '#ff66c4', '#a5dfdc'];
 ---
@@ -83,7 +86,7 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 						href={`${latestRelease}/download/disquisition-desktop-macos-arm64.dmg`}
 						data-download-primary
 						data-mac={`${latestRelease}/download/disquisition-desktop-macos-arm64.dmg`}
-						data-windows={`${latestRelease}/download/disquisition-desktop-windows-x64.zip`}
+						data-windows={`${latestRelease}/download/disquisition-desktop-windows-x64-setup.exe`}
 						data-linux={`${latestRelease}/download/disquisition-desktop-linux-x64.tar.gz`}
 					>
 						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
@@ -102,6 +105,13 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 							<path d="M12 .8a11.3 11.3 0 00-3.57 22c.57.1.78-.25.78-.55v-2.1c-3.16.68-3.83-1.34-3.83-1.34-.52-1.31-1.27-1.66-1.27-1.66-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.53-2.52-.29-5.18-1.26-5.18-5.62 0-1.24.45-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.9 10.9 0 015.68 0c2.17-1.46 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.66 5.33-5.2 5.61.41.36.78 1.05.78 2.13v3.16c0 .3.2.66.79.55A11.3 11.3 0 0012 .8z"></path>
 						</svg>
 						View on GitHub
+					</a>
+				</div>
+
+				<div class="hero-join">
+					<a class="btn btn-ghost btn-join" href={softwareEngineeringInvite}>
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13m0 0l-5-5m5 5l-5 5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+						Join the software engineering server
 					</a>
 				</div>
 
@@ -449,6 +459,26 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 					))}
 				</div>
 
+				<div class="join-card reveal" style="--reveal-delay:120ms">
+					<div class="join-copy">
+						<h3>Join the software engineering server.</h3>
+						<p>
+							Already have the app? Hop into a community of people building software — no
+							sign-up, just the invite.
+						</p>
+					</div>
+					<div class="join-actions">
+						<a class="btn btn-primary" href={softwareEngineeringInvite}>
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13m0 0l-5-5m5 5l-5 5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+							Join the server
+						</a>
+						<button class="btn btn-ghost" type="button" data-copy-invite={softwareEngineeringInvite}>
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"></rect><path d="M16 8V6.5A2.5 2.5 0 0013.5 4h-7A2.5 2.5 0 004 6.5v7A2.5 2.5 0 006.5 16H8" stroke-linecap="round"></path></svg>
+							<span data-copy-label>Copy invite link</span>
+						</button>
+					</div>
+				</div>
+
 				<div class="download-foot">
 					<span>
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .8a11.3 11.3 0 00-3.57 22c.57.1.78-.25.78-.55v-2.1c-3.16.68-3.83-1.34-3.83-1.34-.52-1.31-1.27-1.66-1.27-1.66-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.53-2.52-.29-5.18-1.26-5.18-5.62 0-1.24.45-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.9 10.9 0 015.68 0c2.17-1.46 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.66 5.33-5.2 5.61.41.36.78 1.05.78 2.13v3.16c0 .3.2.66.79.55A11.3 11.3 0 0012 .8z"></path></svg>
@@ -515,4 +545,21 @@ const petals = ['#ff3131', '#ff751f', '#ffde59', '#7ed957', '#0cc0df', '#8c52ff'
 			</div>
 		</div>
 	</footer>
+
+	<script>
+		const copy = document.querySelector<HTMLButtonElement>('[data-copy-invite]');
+		const copyLabel = copy?.querySelector<HTMLElement>('[data-copy-label]');
+		let reset: number | undefined;
+		copy?.addEventListener('click', async () => {
+			if (!copyLabel) return;
+			try {
+				await navigator.clipboard.writeText(copy.dataset.copyInvite ?? '');
+				copyLabel.textContent = 'Copied';
+			} catch {
+				copyLabel.textContent = 'Copy failed';
+			}
+			clearTimeout(reset);
+			reset = window.setTimeout(() => (copyLabel.textContent = 'Copy invite link'), 1800);
+		});
+	</script>
 </Base>

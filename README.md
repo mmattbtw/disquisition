@@ -13,7 +13,7 @@ Community connections use authenticated TLS and signed metadata.
 Get the desktop app from the [latest release](https://github.com/mmattbtw/disquisition/releases/latest):
 
 - [macOS, Apple silicon](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-macos-arm64.dmg)
-- [Windows, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip)
+- [Windows, x64 installer](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64-setup.exe) (or the [ZIP](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-windows-x64.zip))
 - [Linux, x64](https://github.com/mmattbtw/disquisition/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
 Open the desktop app, enter a name and select Connect, then create a

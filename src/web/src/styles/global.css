@@ -361,6 +361,20 @@ ul {
 	flex-wrap: wrap;
 }
 
+.hero-join {
+	margin-top: 10px;
+	display: flex;
+	justify-content: center;
+}
+.btn-join {
+	border-color: rgba(157, 204, 202, 0.34);
+	color: var(--teal-bright);
+}
+.btn-join:hover {
+	border-color: rgba(157, 204, 202, 0.6);
+	background: rgba(157, 204, 202, 0.07);
+}
+
 .hero-note {
 	margin-top: 16px;
 	display: flex;
@@ -1427,6 +1441,43 @@ ul {
 	color: #6f7a84;
 	text-align: center;
 }
+.join-card {
+	margin-top: 14px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	padding: 24px 26px;
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	background:
+		radial-gradient(90% 140% at 0% 0%, rgba(157, 204, 202, 0.07), transparent 60%),
+		linear-gradient(180deg, #161a20, #12161b);
+}
+.join-card h3 {
+	font-family: var(--font-display);
+	font-size: 21px;
+	font-weight: 400;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+	color: #eef2f0;
+}
+.join-card p {
+	margin-top: 6px;
+	max-width: 520px;
+	font-size: 13.5px;
+	line-height: 1.55;
+	color: var(--muted);
+}
+.join-actions {
+	display: flex;
+	gap: 10px;
+	flex: 0 0 auto;
+}
+.join-actions .btn {
+	height: 42px;
+	font-size: 13.5px;
+}
 .download-foot {
 	margin-top: 26px;
 	display: flex;
@@ -1585,6 +1636,18 @@ ul {
 		max-width: 520px;
 		margin-inline: auto;
 	}
+	.join-card {
+		flex-direction: column;
+		align-items: stretch;
+		max-width: 520px;
+		margin-inline: auto;
+	}
+	.join-actions {
+		flex-direction: column;
+	}
+	.join-actions .btn {
+		width: 100%;
+	}
 	.footer-grid {
 		grid-template-columns: 1.2fr 1fr 1fr;
 	}
@@ -1612,7 +1675,8 @@ ul {
 	.hero-sub {
 		margin-top: 20px;
 	}
-	.hero-actions .btn {
+	.hero-actions .btn,
+	.hero-join .btn {
 		height: 44px;
 	}
 	.stage-shell {

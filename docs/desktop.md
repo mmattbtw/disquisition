@@ -8,9 +8,26 @@ For a local build, see [building and packaging](building.md#desktop-app).
 
 ## Install
 
-The macOS DMG and Windows archive include Qt. The Linux archive requires a
+The macOS DMG and Windows downloads include Qt. The Linux archive requires a
 compatible Qt 6.12 runtime. On macOS, open the DMG, drag disquisition into
 Applications, and eject the disk image.
+
+On Windows, run `disquisition-desktop-windows-x64-setup.exe`. It installs for
+your user account without administrator rights, adds a Start menu shortcut, and
+can be removed from **Installed apps**. The `.zip` is the same app without an
+installer; extract it anywhere you can write to, so the app can update itself.
+
+## Invite links
+
+Opening a `disquisition://join/...` link, for example from a website, opens the
+app and starts joining that community. If the app is already open, the link goes
+to the open window instead of starting a second copy.
+
+On macOS the app bundle declares the link type. On Windows and Linux the app
+registers itself each time it starts: in the current user's registry on
+Windows, and with a `~/.local/share/applications` entry and `xdg-mime` on
+Linux. Whichever copy of the app was opened last receives links, so open the
+app once after moving it to a new folder.
 
 ## Connect and join a community
 

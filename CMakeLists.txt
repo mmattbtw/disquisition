@@ -243,6 +243,14 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(desktop_update PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(desktop_update PUBLIC Qt6::Network)
 
+    add_library(desktop_launch STATIC include/desktop/app_launch.h src/desktop/app_launch.cpp)
+    set_target_properties(desktop_launch PROPERTIES AUTOMOC ON)
+    target_include_directories(desktop_launch PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(desktop_launch PUBLIC Qt6::Network)
+    if(WIN32)
+      target_link_libraries(desktop_launch PRIVATE user32)
+    endif()
+
     # Filled Material Symbols (fonts.google.com/icons), tinted when drawn.
     add_library(desktop_symbols STATIC include/desktop/symbols.h src/desktop/symbols.cpp)
     target_include_directories(desktop_symbols PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -370,7 +378,7 @@ if(BUILD_DESKTOP_APP)
     target_include_directories(disquisition-desktop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(disquisition-desktop PRIVATE
       chat_recent_messages desktop_audio desktop_media desktop_penguins desktop_notifications
-      desktop_screen desktop_update
+      desktop_launch desktop_screen desktop_update
       Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::FFMPEG)
     # Bundled so the app looks the same on every platform; both are OFL licensed.
     qt_add_resources(disquisition-desktop "fonts"
@@ -582,6 +590,12 @@ if(BUILD_TESTING AND TARGET desktop_update)
   add_executable(desktop_update_test test/desktop_update_test.cpp)
   target_link_libraries(desktop_update_test PRIVATE desktop_update)
   add_test(NAME desktop_update_test COMMAND desktop_update_test)
+endif()
+
+if(BUILD_TESTING AND TARGET desktop_launch)
+  add_executable(app_launch_test test/app_launch_test.cpp)
+  target_link_libraries(app_launch_test PRIVATE desktop_launch)
+  add_test(NAME app_launch_test COMMAND app_launch_test)
 endif()
 
 if(BUILD_TESTING AND TARGET desktop_screen)

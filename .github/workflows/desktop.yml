@@ -177,11 +177,29 @@ jobs:
           Copy-Item "$env:FFMPEG_ROOT/LICENSE.txt" dist/licenses/FFmpeg.LICENSE
           Compress-Archive -Path dist/* -DestinationPath disquisition-desktop-windows-x64.zip
 
+      # Inno Setup ships on the hosted Windows images; install it if it is gone.
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          $appName = if ($env:DISQUISITION_BUILD_CHANNEL -eq 'production') { 'disquisition' } else { "disquisition $env:DISQUISITION_BUILD_CHANNEL" }
+          & $iscc /Qp "/DSourceDir=$PWD\dist" "/DAppName=$appName" "/DAppVersion=$env:DISQUISITION_BUILD_NUMBER" `
+            /DOutputName=disquisition-desktop-windows-x64-setup scripts/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload desktop build
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.*
+          path: |
+            ${{ matrix.artifact }}.*
+            ${{ matrix.artifact }}-setup.exe
           if-no-files-found: error
 
   release:

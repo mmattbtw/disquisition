@@ -5,6 +5,7 @@ tag="main-${GITHUB_RUN_NUMBER}"
 base_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
 assets=(
   release-assets/disquisition-desktop-macos-arm64.dmg
+  release-assets/disquisition-desktop-windows-x64-setup.exe
   release-assets/disquisition-desktop-windows-x64.zip
   release-assets/disquisition-desktop-linux-x64.tar.gz
 )
@@ -33,7 +34,7 @@ Desktop builds from [commit ${GITHUB_SHA:0:7}](${base_url}/commit/${GITHUB_SHA})
 | Platform | Download |
 | --- | --- |
 | macOS, Apple silicon | [Download DMG](${base_url}/releases/download/${tag}/disquisition-desktop-macos-arm64.dmg) |
-| Windows, x64 | [Download ZIP](${base_url}/releases/download/${tag}/disquisition-desktop-windows-x64.zip) |
+| Windows, x64 | [Download installer](${base_url}/releases/download/${tag}/disquisition-desktop-windows-x64-setup.exe) or [ZIP](${base_url}/releases/download/${tag}/disquisition-desktop-windows-x64.zip) |
 | Linux, x64 | [Download tar.gz](${base_url}/releases/download/${tag}/disquisition-desktop-linux-x64.tar.gz) |
 
 macOS and Windows bundle Qt. Linux requires a compatible Qt 6.12 runtime.
@@ -41,7 +42,8 @@ macOS and Windows bundle Qt. Linux requires a compatible Qt 6.12 runtime.
 Persistent links to the newest successful \`main\` build:
 
 - [macOS, Apple silicon](${base_url}/releases/latest/download/disquisition-desktop-macos-arm64.dmg)
-- [Windows, x64](${base_url}/releases/latest/download/disquisition-desktop-windows-x64.zip)
+- [Windows, x64 installer](${base_url}/releases/latest/download/disquisition-desktop-windows-x64-setup.exe)
+- [Windows, x64 ZIP](${base_url}/releases/latest/download/disquisition-desktop-windows-x64.zip)
 - [Linux, x64](${base_url}/releases/latest/download/disquisition-desktop-linux-x64.tar.gz)
 
 [Build workflow](${base_url}/actions/runs/${GITHUB_RUN_ID})
