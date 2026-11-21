@@ -207,6 +207,21 @@ scripts/package-macos.sh build/disquisition.app build/disquisition.dmg
 
 The script waits for Apple's result, prints the notarization log if it is
 rejected, and staples the ticket to the DMG.
+
+## Package a Windows installer
+
+The desktop workflow builds `disquisition-desktop-windows-x64-setup.exe` with
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) from the same folder it zips.
+To build one locally, gather the app into a folder the way the workflow's
+"Package Windows app" step does, then run:
+
+```powershell
+iscc "/DSourceDir=$PWD\dist" "/DAppName=disquisition development" scripts\windows-installer.iss
+```
+
+The installer is written to the repository root. It installs per user into
+`%LOCALAPPDATA%\Programs\<app name>`, so the app can still update itself in
+place, and registers `disquisition://` links. Each channel installs separately.
 The app icon source is `resources/icons/disquisition.icon`, an Icon Composer
 document. macOS bundles its compiled `Assets.car` for the layered icon and an
 ICNS fallback for older systems. Windows embeds the ICO in the executable;
