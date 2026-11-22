@@ -4,12 +4,12 @@ Communities live on member devices. The creator owns the community; any member
 can host its metadata and admit peers with an existing valid invite. The
 discovery `server` process is not involved in community connections.
 
-Communities are a feature of the desktop client, the Nintendo 3DS app, and
-the existing `relay`. The relay only accepts community registrations and
-encrypted peer tunnels. The desktop app and relay are the project's CMake
-application targets; the 3DS app builds with devkitPro
-(see [its README](../src/3ds/README.md)). Consoles always connect through a
-relay and cannot create communities.
+Communities are a feature of the desktop client, the Nintendo 3DS and Wii U
+apps, and the existing `relay`. The relay only accepts community registrations
+and encrypted peer tunnels. The desktop app and relay are the project's CMake
+application targets; the console apps build with devkitPro (see the
+[3DS](../src/3ds/README.md) and [Wii U](../src/wiiu/README.md) READMEs).
+Consoles always connect through a relay and cannot create communities.
 
 ## Start on a LAN
 

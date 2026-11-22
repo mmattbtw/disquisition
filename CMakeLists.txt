@@ -135,6 +135,20 @@ if(BUILD_TESTING)
     target_link_libraries(console_client_test PRIVATE console_core chat_communities chat_community_router)
     add_test(NAME console_client_test COMMAND console_client_test)
     set_tests_properties(console_client_test PROPERTIES TIMEOUT 120)
+    # The Wii U app's portable UI, settings and SD storage. Its OS, display
+    # and audio glue builds only with wut.
+    add_library(wiiu_ui STATIC
+      src/wiiu/source/lifecycle.cpp src/wiiu/source/microphone_frames.cpp
+      src/wiiu/source/render.cpp src/wiiu/source/settings.cpp src/wiiu/source/storage.cpp
+      src/wiiu/source/ui.cpp)
+    target_include_directories(wiiu_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/wiiu/include")
+    target_link_libraries(wiiu_ui PUBLIC console_core)
+    add_executable(wiiu_client_test test/wiiu_client_test.cpp)
+    target_link_libraries(wiiu_client_test PRIVATE wiiu_ui)
+    add_test(NAME wiiu_client_test COMMAND wiiu_client_test)
+    add_executable(wiiu_render_test test/wiiu_render_test.cpp)
+    target_link_libraries(wiiu_render_test PRIVATE wiiu_ui)
+    add_test(NAME wiiu_render_test COMMAND wiiu_render_test)
   endif()
   add_executable(community_network_test test/community_network_test.cpp)
   target_link_libraries(community_network_test PRIVATE chat_communities chat_community_router)
