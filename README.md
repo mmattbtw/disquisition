@@ -22,6 +22,11 @@ for direct connections, relay setup, hosting, and permissions.
 Linux downloads need a compatible Qt 6.12 runtime.
 See the [desktop guide](docs/desktop.md) for setup, voice and screen sharing.
 
+A [Nintendo 3DS homebrew client](src/3ds/README.md) joins communities through
+a relay, with live chat and experimental voice. The
+[3DS workflow](.github/workflows/3ds.yml) builds its Homebrew Launcher `.3dsx`.
+It still needs testing on hardware.
+
 ## Build
 
 Install a C++20 compiler, CMake 3.16+, Qt 6.10+, OpenSSL 3+, SQLite 3.24+,
@@ -55,6 +60,7 @@ desktop client. The relay needs no discovery server or database.
 - [Communities, channels, invites and hosting](docs/communities.md)
 - [Peers, encrypted connections, and relay routing](docs/networking.md)
 - [Desktop and relay command-line reference](docs/command-line.md)
+- [Nintendo 3DS client](src/3ds/README.md)
 - [Git crash course](docs/git_crash_course.md)
 
 ## Contributors

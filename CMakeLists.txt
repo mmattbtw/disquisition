@@ -105,6 +105,37 @@ if(BUILD_TESTING)
   target_link_libraries(community_model_test PRIVATE chat_communities)
   add_test(NAME community_model_test COMMAND community_model_test)
   set_tests_properties(community_model_test PROPERTIES TIMEOUT 120)
+  # The 3DS and Wii U clients use this Qt-free community client with
+  # devkitPro's mbedTLS 2.28. Host tests build the same mbedTLS release and
+  # check interoperability with the desktop Node and relay. It uses POSIX
+  # sockets, like the consoles, so Windows builds skip it.
+  if(NOT WIN32)
+    enable_language(C)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    set(INSTALL_MBEDTLS_HEADERS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(console_mbedtls
+      URL https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v2.28.8.tar.gz
+      URL_HASH SHA256=4fef7de0d8d542510d726d643350acb3cdb9dc76ad45611b59c9aa08372b4213
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+      EXCLUDE_FROM_ALL)
+    # mbedTLS 2.28 declares an old CMake minimum that CMake 4 otherwise rejects.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    FetchContent_MakeAvailable(console_mbedtls)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+    add_library(console_core STATIC
+      src/console/client.cpp src/console/crypto.cpp src/console/json.cpp src/console/model.cpp
+      src/console/net.cpp src/console/session.cpp
+      src/console/third_party/monocypher/monocypher.c
+      src/console/third_party/monocypher/monocypher-ed25519.c)
+    target_include_directories(console_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(console_core PUBLIC mbedtls mbedx509 mbedcrypto)
+    add_executable(console_client_test test/console_client_test.cpp)
+    target_link_libraries(console_client_test PRIVATE console_core chat_communities chat_community_router)
+    add_test(NAME console_client_test COMMAND console_client_test)
+    set_tests_properties(console_client_test PROPERTIES TIMEOUT 120)
+  endif()
   add_executable(community_network_test test/community_network_test.cpp)
   target_link_libraries(community_network_test PRIVATE chat_communities chat_community_router)
   set(COMMUNITY_RELAY_TEST_ARGS)
@@ -130,6 +161,11 @@ if(BUILD_TESTING)
       ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
     set_tests_properties(community_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
       ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
+    if(TARGET console_client_test)
+      add_test(NAME console_client_native_tls_test COMMAND console_client_test)
+      set_tests_properties(console_client_native_tls_test PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+        ENVIRONMENT "DISQUISITION_TEST_TLS_BACKEND=${COMMUNITY_NATIVE_TLS_BACKEND}")
+    endif()
   endif()
 endif()
 
