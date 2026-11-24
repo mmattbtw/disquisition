@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>Disquisition</name>
+  <coder>Disquisition contributors</coder>
+  <version>1.0</version>
+  <short_description>Community chat and GamePad voice</short_description>
+  <long_description>Join Disquisition communities with an invite link, chat in text channels, and talk in voice channels with the GamePad microphone. Connects through a Disquisition relay. Use the GamePad touchscreen or D-pad and buttons.</long_description>
+</app>

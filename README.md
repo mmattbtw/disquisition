@@ -27,6 +27,11 @@ a relay, with live chat and experimental voice. The
 [3DS workflow](.github/workflows/3ds.yml) builds its Homebrew Launcher `.3dsx`.
 It still needs testing on hardware.
 
+A native [Wii U app](src/wiiu/README.md) joins communities through a relay,
+with text channels on the TV and GamePad and GamePad voice. The
+[Wii U workflow](.github/workflows/wiiu.yml) builds Aroma `.wuhb` and Homebrew
+Launcher `.rpx` packages. It still needs testing on a console.
+
 ## Build
 
 Install a C++20 compiler, CMake 3.16+, Qt 6.10+, OpenSSL 3+, SQLite 3.24+,
