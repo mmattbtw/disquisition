@@ -27,6 +27,13 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://disquisitio
 		<script is:inline>document.documentElement.classList.add('js');</script>
 		<meta name="color-scheme" content="dark" />
 
+		<!-- Privacy-friendly analytics by Plausible -->
+		<script is:inline async src="https://plausible.mmatt.net/js/pa-Nvk12eDlQgI476tk7wRaa.js"></script>
+		<script is:inline>
+			window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+			plausible.init()
+		</script>
+
 		<link rel="icon" href="/favicon.ico" sizes="any" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
